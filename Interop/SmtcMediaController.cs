@@ -82,6 +82,8 @@ public sealed class SmtcMediaController
             return "System Media";
 
         string raw = sourceAppUserModelId.Trim();
+        if (raw.Contains("Jellyfin", StringComparison.OrdinalIgnoreCase)) return "Jellyfin";
+        if (raw.Contains("Plex", StringComparison.OrdinalIgnoreCase)) return "Plex";
         if (raw.Contains("Brave", StringComparison.OrdinalIgnoreCase)) return "Brave";
         if (raw.Contains("Spotify", StringComparison.OrdinalIgnoreCase)) return "Spotify";
         if (raw.Contains("Feishin", StringComparison.OrdinalIgnoreCase)) return "Feishin";
@@ -232,14 +234,14 @@ public sealed class SmtcMediaController
             bool isPlaying = playback?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
 
             double positionSecs = 0.0;
-            double durationSecs = 1.0;
+            double durationSecs = 0.0;
             try
             {
                 var timeline = session.GetTimelineProperties();
-                if (timeline is not null)
+                if (timeline is not null && timeline.EndTime.TotalSeconds > 1.5)
                 {
                     positionSecs = Math.Max(0.0, timeline.Position.TotalSeconds);
-                    durationSecs = Math.Max(1.0, timeline.EndTime.TotalSeconds);
+                    durationSecs = timeline.EndTime.TotalSeconds;
                 }
             }
             catch

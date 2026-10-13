@@ -32,8 +32,8 @@ export interface CanopySettings {
   // Dashboard, Media & Navigation Customization
   enableBrightnessSlider: boolean; // default false (ideal for desktop PCs)
   showAppsTab: boolean; // toggles [ Apps ] tab between Performance and Wallpaper
+  mascotMode: 'bongo' | 'gif' | 'none'; // 'bongo', 'gif', or 'none' (No GIF option)
   customMascotGifUrl: string; // optional custom GIF URL or data URL replacing Bongo Cat
-
   // Window & System Mechanics
   launchOnStartup: boolean;
   topHoverTrigger: boolean;
@@ -65,9 +65,8 @@ export const DEFAULT_SETTINGS: CanopySettings = {
   glassOpacity: 0.86,
   enableBrightnessSlider: false,
   showAppsTab: true,
+  mascotMode: 'bongo',
   customMascotGifUrl: '',
-  launchOnStartup: false,
-  topHoverTrigger: true,
   globalHotkey: 'Win+`',
   defaultTab: 'dashboard',
 };

@@ -15,6 +15,7 @@ import {
   SkipForward,
 } from 'lucide-react';
 import { BongoCat } from '../components/BongoCat';
+import { useSettings } from '../context/SettingsContext';
 import {
   MediaInfo,
   MediaSessionItem,
@@ -285,34 +286,34 @@ export const MediaView: React.FC<MediaViewProps> = ({
   onSeek,
   onSelectSession,
 }) => {
+  const { settings } = useSettings();
   const isPlaying = Boolean(media.is_playing);
 
   // Local interactive scrub state synced with media.position_secs
   const [localPosition, setLocalPosition] = useState<number>(media.position_secs || 0);
   const [isDraggingScrubber, setIsDraggingScrubber] = useState<boolean>(false);
 
-  // Radial spoke visualizer phase (animates strictly when media.is_playing is true)
+  // Continuous rhythmic harmonic tick (dances whenever music is playing)
+  const [visualizerTick, setVisualizerTick] = useState<number>(0);
   // Live 40-band WASAPI Loopback FFT spectrum amplitudes in [0.0, 1.0]
   const [spectrumBands, setSpectrumBands] = useState<number[]>(() => new Array(40).fill(0));
   // Interactive Lyrics Toggle & Synced Lyrics state
   const [showLyrics, setShowLyrics] = useState<boolean>(false);
   const [lyricsLines, setLyricsLines] = useState<LyricLine[]>([]);
   const [lyricsSourceLabel, setLyricsSourceLabel] = useState<string>('Synced Lyrics');
-  const lyricsCacheRef = useRef<Record<string, { lines: LyricLine[]; label: string }>>({});
+  const [inferredDuration, setInferredDuration] = useState<number>(0);
+  const lyricsCacheRef = useRef<Record<string, { lines: LyricLine[]; label: string; duration?: number }>>({});
   const lyricsScrollRef = useRef<HTMLDivElement | null>(null);
   const activeLyricItemRef = useRef<HTMLButtonElement | null>(null);
+
+  const lastTrackKeyRef = useRef<string>('');
+  const localProgressSecsRef = useRef<number>(media.position_secs || 0);
 
   // Active SMTC session switcher popover state
   const [sessionMenuOpen, setSessionMenuOpen] = useState<boolean>(false);
   const [fetchedSessions, setFetchedSessions] = useState<MediaSessionItem[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const sessionPopoverRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!isDraggingScrubber) {
-      setLocalPosition(media.position_secs || 0);
-    }
-  }, [media.position_secs, isDraggingScrubber]);
 
   // Animate radial 40-spoke visualizer strictly when music is actively playing
   // Poll real 40-band WASAPI Loopback FFT spectrum strictly when audio is playing
@@ -338,6 +339,18 @@ export const MediaView: React.FC<MediaViewProps> = ({
       active = false;
       window.clearInterval(timer);
     };
+  }, [isPlaying]);
+
+  // Continuous harmonic wave ticker for smooth dancing spoke visualizer
+  useEffect(() => {
+    if (!isPlaying) {
+      setVisualizerTick(0);
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setVisualizerTick((prev) => (prev + 1) % 360);
+    }, 50);
+    return () => window.clearInterval(timer);
   }, [isPlaying]);
   // Load available SMTC sessions when popover opens or media updates
   useEffect(() => {
@@ -399,8 +412,13 @@ export const MediaView: React.FC<MediaViewProps> = ({
     }
     return sessions[0] || DEFAULT_FALLBACK_SESSIONS[0];
   }, [sessions, media.source_app]);
-
-  const effectiveDuration = Math.max(1, media.duration_secs || 219);
+  const smtcDuration = Number(media.duration_secs) || 0;
+  const effectiveDuration =
+    smtcDuration > 2.0
+      ? smtcDuration
+      : inferredDuration > 2.0
+      ? inferredDuration
+      : 219;
   const clampedPosition = Math.min(effectiveDuration, Math.max(0, localPosition));
   const progressPercent = Math.min(100, Math.max(0, (clampedPosition / effectiveDuration) * 100));
 
@@ -408,6 +426,46 @@ export const MediaView: React.FC<MediaViewProps> = ({
   const trackArtist = media.artist?.trim() || 'Windows SMTC Audio';
   const trackAlbum = media.album?.trim() || '';
 
+  // Reset or sync local progression when track changes
+  useEffect(() => {
+    const key = `${trackTitle}__${trackArtist}`;
+    if (lastTrackKeyRef.current !== key) {
+      lastTrackKeyRef.current = key;
+      localProgressSecsRef.current = media.position_secs > 1.5 ? media.position_secs : 0;
+      setLocalPosition(localProgressSecsRef.current);
+    }
+  }, [trackTitle, trackArtist]);
+
+  // Sync from SMTC if player provides valid progressing position (> 1.5s)
+  useEffect(() => {
+    if (!isDraggingScrubber && media.position_secs > 1.5) {
+      localProgressSecsRef.current = media.position_secs;
+      setLocalPosition(media.position_secs);
+    }
+  }, [media.position_secs, isDraggingScrubber]);
+
+  // Live monotonic progression when music is playing (crucial for Jellyfin / web players)
+  useEffect(() => {
+    if (!isPlaying) return;
+    const timer = window.setInterval(() => {
+      if (isDraggingScrubber) return;
+      if ((media.position_secs || 0) <= 1.5) {
+        localProgressSecsRef.current = Math.min(
+          effectiveDuration,
+          localProgressSecsRef.current + 1
+        );
+        setLocalPosition(localProgressSecsRef.current);
+      }
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [isPlaying, media.position_secs, isDraggingScrubber, effectiveDuration]);
+
+  const handleUserSeek = (targetSec: number) => {
+    const clamped = Math.max(0, Math.min(effectiveDuration, targetSec));
+    localProgressSecsRef.current = clamped;
+    setLocalPosition(clamped);
+    onSeek?.(clamped);
+  };
   // Automatically populate built-in time-synced lyrics and fetch live lyrics from LRCLIB
   useEffect(() => {
     const rawTitle = media.title?.trim() || '';
@@ -442,11 +500,12 @@ export const MediaView: React.FC<MediaViewProps> = ({
     interface LrclibTrackResponse {
       syncedLyrics?: string | null;
       plainLyrics?: string | null;
+      duration?: number;
     }
 
     const extractValidLyrics = (
       item: LrclibTrackResponse | null | undefined
-    ): { lines: LyricLine[]; label: string } | null => {
+    ): { lines: LyricLine[]; label: string; duration?: number } | null => {
       if (!item) return null;
       const parsed = parseLrcLyrics(
         item.syncedLyrics,
@@ -454,9 +513,15 @@ export const MediaView: React.FC<MediaViewProps> = ({
         effectiveDuration
       );
       if (parsed.length > 0) {
+        const dur =
+          typeof item.duration === 'number' && item.duration > 10
+            ? item.duration
+            : parsed[parsed.length - 1].time + 14;
+        setInferredDuration(dur);
         return {
           lines: parsed,
           label: item.syncedLyrics ? 'LRCLIB Synced' : 'LRCLIB Lyrics',
+          duration: dur,
         };
       }
       return null;
@@ -597,7 +662,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
   }, [activeLyricIndex, showLyrics]);
 
   // Precompute 40 radial spoke bars around cx=95, cy=95
-  // Precompute 40 radial spoke bars driven by live 40-band FFT audio spectrum
+  // Precompute 40 radial spoke bars driven by live FFT spectrum + rhythmic dance wave
   const spokes = useMemo(() => {
     const count = 40;
     const cx = 95;
@@ -613,7 +678,15 @@ export const MediaView: React.FC<MediaViewProps> = ({
           Array.isArray(spectrumBands) && typeof spectrumBands[idx] === 'number'
             ? spectrumBands[idx]
             : 0;
-        length = Math.max(5.5, Math.min(26, 5.5 + rawAmp * 21.5));
+
+        // Rhythmic harmonic visualizer wave dancing smoothly around the rotating vinyl
+        const waveA = Math.sin(visualizerTick * 0.42 + idx * 0.55);
+        const waveB = Math.cos(visualizerTick * 0.26 - idx * 0.35);
+        const harmonicDance = ((waveA + waveB + 2) / 4) * 0.65;
+
+        // When live WASAPI audio frequencies spike, amplify vigorously
+        const totalEnergy = Math.max(rawAmp * 1.6, rawAmp * 0.5 + harmonicDance);
+        length = Math.max(6.0, Math.min(27.0, 6.0 + totalEnergy * 21.0));
       }
 
       const outerRadius = innerRadius + length;
@@ -624,7 +697,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
 
       return { idx, x1, y1, x2, y2, length };
     });
-  }, [isPlaying, spectrumBands]);
+  }, [isPlaying, visualizerTick, spectrumBands]);
   return (
     <div
       data-tauri-drag-region="false"
@@ -882,9 +955,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
                 onTouchStart={() => setIsDraggingScrubber(true)}
                 onTouchEnd={() => setIsDraggingScrubber(false)}
                 onChange={(e) => {
-                  const nextSeconds = Number(e.target.value);
-                  setLocalPosition(nextSeconds);
-                  onSeek?.(nextSeconds);
+                  handleUserSeek(Number(e.target.value));
                 }}
                 className="caelestia-slider flex-1 h-1.5 rounded-full pointer-events-auto cursor-pointer"
                 style={{
@@ -1058,8 +1129,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
                       type="button"
                       data-tauri-drag-region="false"
                       onClick={() => {
-                        setLocalPosition(line.time);
-                        onSeek?.(line.time);
+                        handleUserSeek(line.time);
                       }}
                       className={`w-full text-left px-2.5 py-1.5 rounded-lg transition-all duration-200 flex items-center justify-between gap-2 pointer-events-auto cursor-pointer ${
                         isActive
@@ -1115,13 +1185,15 @@ export const MediaView: React.FC<MediaViewProps> = ({
 
       {/* ========================================================================= */}
       {/* COLUMN 3 (Right w-[205px]): Natural Music-Reactive Mascot / Custom GIF    */}
-      {/* ========================================================================= */}
-      <div className="w-[205px] shrink-0 h-full flex items-center justify-center relative overflow-hidden">
-        <BongoCat
-          isPlaying={isPlaying}
-          className="w-[185px] h-[140px] transition-transform duration-200"
-        />
-      </div>
+      {/* COLUMN 3 (Right w-[205px]): Natural Music-Reactive Mascot / Custom GIF (toggleable) */}
+      {settings.mascotMode !== 'none' && (
+        <div className="w-[205px] shrink-0 h-full flex items-center justify-center relative overflow-hidden">
+          <BongoCat
+            isPlaying={isPlaying}
+            className="w-[185px] h-[140px] transition-transform duration-200"
+          />
+        </div>
+      )}
     </div>
   );
 };

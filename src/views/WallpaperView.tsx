@@ -389,25 +389,22 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
                         setSwatches(extractImageSwatches(e.currentTarget));
                       }
                     }}
-                    className={`w-full h-full object-cover transition-all duration-500 ease-out ${
-                      isApplying
-                        ? 'scale-105 blur-[2px] brightness-110'
-                        : 'scale-100 blur-0 brightness-100'
+                    className={`w-full h-full object-cover transition-all duration-300 ease-out ${
+                      isApplying ? 'canopy-iris-wipe brightness-110' : 'brightness-100'
                     }`}
                   />
                 )}
 
-                {/* Smooth luminous crossfade pulse when selected */}
-                <div
-                  className={`absolute inset-0 pointer-events-none transition-opacity duration-500 ${
-                    isApplying ? 'opacity-35' : 'opacity-0'
-                  }`}
-                  style={{
-                    background:
-                      'radial-gradient(circle at center, var(--theme-accent, #A29BFE) 0%, transparent 75%)',
-                  }}
-                />
-
+                {/* Centered Circular Expand (Iris Wipe) ripple effect */}
+                {isApplying && (
+                  <div
+                    className="absolute inset-0 pointer-events-none canopy-iris-wipe z-10"
+                    style={{
+                      background:
+                        'radial-gradient(circle at center, var(--theme-accent, #A29BFE) 0%, rgba(255, 255, 255, 0.28) 45%, transparent 70%)',
+                    }}
+                  />
+                )}
                 {/* Subtle bottom scrim & friendly wallpaper name (only shown on hover or when active) */}
                 <div
                   className={`absolute inset-x-0 bottom-0 px-3 py-2 bg-gradient-to-t from-black/75 via-black/35 to-transparent flex items-end justify-between transition-opacity duration-200 pointer-events-none ${

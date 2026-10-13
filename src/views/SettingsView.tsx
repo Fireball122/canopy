@@ -715,7 +715,47 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </span>
               )}
             </div>
+            {/* 3 Mascot Mode Segmented Pills */}
+            <div
+              className="grid grid-cols-3 p-0.5 rounded-xl border mb-1.5"
+              style={{
+                background: 'var(--theme-track, rgba(0, 0, 0, 0.22))',
+                borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
+              }}
+            >
+              {(
+                [
+                  { id: 'bongo', label: 'Bongo Cat' },
+                  { id: 'gif', label: 'Custom GIF' },
+                  { id: 'none', label: 'No Mascot' },
+                ] as const
+              ).map((mode) => {
+                const active = (settings.mascotMode || 'bongo') === mode.id;
+                return (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    data-tauri-drag-region="false"
+                    onClick={() => updateSettings({ mascotMode: mode.id })}
+                    className="py-1 px-1.5 rounded-lg text-[10px] font-semibold transition-all pointer-events-auto cursor-pointer"
+                    style={
+                      active
+                        ? {
+                            background: 'var(--theme-accent, #cba6f7)',
+                            color: '#11111b',
+                          }
+                        : {
+                            color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))',
+                          }
+                    }
+                  >
+                    {mode.label}
+                  </button>
+                );
+              })}
+            </div>
 
+            {settings.mascotMode !== 'none' && (
             <div className="flex items-center gap-1.5">
               <input
                 type="text"
@@ -787,6 +827,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </button>
               )}
             </div>
+            )}
           </div>
         </div>
 

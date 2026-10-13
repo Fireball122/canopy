@@ -671,9 +671,9 @@ const CanopyShellContent: React.FC = () => {
   const trackTitle = hasLiveTrack ? media.title : 'Bad Apple!!';
   const trackArtist = hasLiveTrack ? media.artist || 'Alstroemeria Records' : 'Nomico • Touhou';
 
-  const effectiveDuration = media.duration_secs > 0 ? media.duration_secs : 219;
+  const effectiveDuration = media.duration_secs > 2 ? media.duration_secs : 219;
   const effectivePosition =
-    media.position_secs > 0 ? Math.min(media.position_secs, effectiveDuration) : Math.min(scrubPosition, effectiveDuration);
+    media.position_secs > 1.5 ? Math.min(media.position_secs, effectiveDuration) : Math.min(scrubPosition, effectiveDuration);
   const progressFraction = Math.max(0, Math.min(1, effectivePosition / effectiveDuration));
 
   const vinylSize = 86;
@@ -1081,13 +1081,15 @@ const CanopyShellContent: React.FC = () => {
                   </button>
                 </div>
 
-                {/* Music-Reactive Mascot Widget at Bottom (animates strictly when music is playing) */}
-                <div
-                  className="pt-1 flex items-center justify-center h-[62px]"
-                  style={{ borderTop: '1px solid var(--theme-border)' }}
-                >
-                  <BongoCat isPlaying={isMusicPlaying} className="h-full" />
-                </div>
+                {/* Music-Reactive Mascot Widget at Bottom (hidden when mascotMode is none) */}
+                {settings.mascotMode !== 'none' && (
+                  <div
+                    className="pt-1 flex items-center justify-center h-[62px]"
+                    style={{ borderTop: '1px solid var(--theme-border)' }}
+                  >
+                    <BongoCat isPlaying={isMusicPlaying} className="h-full" />
+                  </div>
+                )}
               </div>
             </div>
           )}

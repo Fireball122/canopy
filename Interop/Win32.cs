@@ -200,6 +200,41 @@ public static class Win32
 
     [DllImport("user32.dll")]
     public static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
+    public delegate bool MonitorEnumProc(IntPtr hMonitor, IntPtr hdcMonitor, ref RECT lprcMonitor, IntPtr dwData);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr lprcClip, MonitorEnumProc lpfnEnum, IntPtr dwData);
+
+    public static List<RECT> GetAllMonitors()
+    {
+        var list = new List<RECT>();
+        try
+        {
+            EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr hMon, IntPtr hdc, ref RECT rc, IntPtr data) =>
+            {
+                var mi = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+                if (GetMonitorInfo(hMon, ref mi))
+                {
+                    list.Add(mi.rcMonitor);
+                }
+                else
+                {
+                    list.Add(rc);
+                }
+                return true;
+            }, IntPtr.Zero);
+        }
+        catch
+        {
+        }
+
+        if (list.Count == 0)
+        {
+            list.Add(GetPrimaryMonitorBounds());
+        }
+        return list;
+    }
 
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -372,8 +407,8 @@ public static class Win32
         int backdropNone = DWMSBT_NONE;
         _ = DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref backdropNone, sizeof(int));
 
-        int cornerRound = DWMWCP_ROUND;
-        _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref cornerRound, sizeof(int));
+        int cornerNone = DWMWCP_DONOTROUND;
+        _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref cornerNone, sizeof(int));
     }
 
     /// <summary>

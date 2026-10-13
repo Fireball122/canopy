@@ -381,10 +381,9 @@ public sealed class WallpaperService : IDisposable
             return false;
 
         string previousPath = Win32.GetCurrentDesktopWallpaper();
-        Window? transitionOverlay = null;
+        var overlays = new List<Window>();
 
-        // Create a click-through HWND_BOTTOM overlay showing the previous wallpaper so the new wallpaper
-        // can be applied underneath and smoothly crossfaded on the actual desktop.
+        // Reveal the new wallpaper via an independent centered circular expand (iris wipe) per monitor
         if (!string.IsNullOrWhiteSpace(previousPath) &&
             File.Exists(previousPath) &&
             !string.Equals(Path.GetFullPath(previousPath), Path.GetFullPath(fullPath), StringComparison.OrdinalIgnoreCase) &&
@@ -394,13 +393,26 @@ public sealed class WallpaperService : IDisposable
             {
                 await Application.Current.Dispatcher.InvokeAsync(() =>
                 {
-                    transitionOverlay = CreateDesktopCrossfadeWindow(previousPath);
+                    var monitors = Win32.GetAllMonitors();
+                    foreach (var mon in monitors)
+                    {
+                        var win = CreateDesktopIrisWipeWindow(previousPath, fullPath, mon);
+                        if (win is not null)
+                        {
+                            overlays.Add(win);
+                        }
+                    }
                 });
             }
             catch
             {
-                transitionOverlay = null;
             }
+        }
+
+        // Wait 260ms for the circular expansion animation to complete across each monitor
+        if (overlays.Count > 0)
+        {
+            await Task.Delay(260).ConfigureAwait(false);
         }
 
         bool applied = await Task.Run(() =>
@@ -414,27 +426,22 @@ public sealed class WallpaperService : IDisposable
             return result != 0;
         }).ConfigureAwait(false);
 
-        if (transitionOverlay is not null && Application.Current is not null)
+        if (overlays.Count > 0 && Application.Current is not null)
         {
             try
             {
                 await Application.Current.Dispatcher.InvokeAsync(() =>
                 {
-                    var fadeOut = new DoubleAnimation(1.0, 0.0, TimeSpan.FromMilliseconds(550))
-                    {
-                        EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut }
-                    };
-                    fadeOut.Completed += (_, _) =>
+                    foreach (var w in overlays)
                     {
                         try
                         {
-                            transitionOverlay.Close();
+                            w.Close();
                         }
                         catch
                         {
                         }
-                    };
-                    transitionOverlay.BeginAnimation(UIElement.OpacityProperty, fadeOut);
+                    }
                 });
             }
             catch
@@ -445,24 +452,58 @@ public sealed class WallpaperService : IDisposable
         return applied;
     }
 
-    private static Window? CreateDesktopCrossfadeWindow(string previousWallpaperPath)
+    private static Window? CreateDesktopIrisWipeWindow(
+        string previousWallpaperPath,
+        string newWallpaperPath,
+        Win32.RECT mon)
     {
         try
         {
-            using var stream = new FileStream(
-                previousWallpaperPath,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.ReadWrite | FileShare.Delete);
+            BitmapImage LoadBmp(string path)
+            {
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                var bmp = new BitmapImage();
+                bmp.BeginInit();
+                bmp.CacheOption = BitmapCacheOption.OnLoad;
+                bmp.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;
+                bmp.DecodePixelWidth = Math.Max(1920, mon.Width);
+                bmp.StreamSource = stream;
+                bmp.EndInit();
+                bmp.Freeze();
+                return bmp;
+            }
 
-            var bmp = new BitmapImage();
-            bmp.BeginInit();
-            bmp.CacheOption = BitmapCacheOption.OnLoad;
-            bmp.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;
-            bmp.DecodePixelWidth = 1920;
-            bmp.StreamSource = stream;
-            bmp.EndInit();
-            bmp.Freeze();
+            var bmpOld = LoadBmp(previousWallpaperPath);
+            var bmpNew = LoadBmp(newWallpaperPath);
+
+            double monW = Math.Max(100, mon.Width);
+            double monH = Math.Max(100, mon.Height);
+            double centerX = monW / 2.0;
+            double centerY = monH / 2.0;
+            double maxRadius = Math.Sqrt(centerX * centerX + centerY * centerY) + 120.0;
+
+            var grid = new Grid();
+            var oldImage = new Image
+            {
+                Source = bmpOld,
+                Stretch = Stretch.UniformToFill,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch
+            };
+            var newImage = new Image
+            {
+                Source = bmpNew,
+                Stretch = Stretch.UniformToFill,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch
+            };
+
+            // Centered circular expand (iris wipe) clip anchored at THIS monitor's center
+            var irisClip = new EllipseGeometry(new Point(centerX, centerY), 0.0, 0.0);
+            newImage.Clip = irisClip;
+
+            grid.Children.Add(oldImage);
+            grid.Children.Add(newImage);
 
             var overlay = new Window
             {
@@ -474,20 +515,13 @@ public sealed class WallpaperService : IDisposable
                 ShowActivated = false,
                 Focusable = false,
                 Topmost = false,
-                Left = SystemParameters.VirtualScreenLeft,
-                Top = SystemParameters.VirtualScreenTop,
-                Width = SystemParameters.VirtualScreenWidth,
-                Height = SystemParameters.VirtualScreenHeight,
+                Left = mon.Left,
+                Top = mon.Top,
+                Width = monW,
+                Height = monH,
                 Opacity = 1.0,
                 IsHitTestVisible = false,
-                Content = new Image
-                {
-                    Source = bmp,
-                    Stretch = Stretch.UniformToFill,
-                    HorizontalAlignment = HorizontalAlignment.Stretch,
-                    VerticalAlignment = VerticalAlignment.Stretch,
-                    IsHitTestVisible = false
-                }
+                Content = grid
             };
 
             overlay.SourceInitialized += (_, _) =>
@@ -498,15 +532,19 @@ public sealed class WallpaperService : IDisposable
                 exStyle &= ~Win32.WS_EX_APPWINDOW;
                 _ = Win32.SetWindowLongPtr(hwnd, Win32.GWL_EXSTYLE, new IntPtr(exStyle));
 
-                // Place at HWND_BOTTOM so it sits directly above the desktop wallpaper and behind all windows
                 _ = Win32.SetWindowPos(
                     hwnd,
                     Win32.HWND_BOTTOM,
-                    0,
-                    0,
-                    0,
-                    0,
+                    0, 0, 0, 0,
                     Win32.SWP_NOMOVE | Win32.SWP_NOSIZE | Win32.SWP_NOACTIVATE | Win32.SWP_SHOWWINDOW);
+
+                // Rapid 260ms circular expand animation with smooth CubicEase.EaseOut
+                var anim = new DoubleAnimation(0.0, maxRadius, TimeSpan.FromMilliseconds(260))
+                {
+                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+                };
+                irisClip.BeginAnimation(EllipseGeometry.RadiusXProperty, anim);
+                irisClip.BeginAnimation(EllipseGeometry.RadiusYProperty, anim);
             };
 
             overlay.Show();
@@ -517,6 +555,7 @@ public sealed class WallpaperService : IDisposable
             return null;
         }
     }
+
 
     private static string GetImageResolution(string fullPath)
     {
