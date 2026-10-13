@@ -26,6 +26,10 @@ public static class Win32
     public const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
     public const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
     public const int DWMWA_SYSTEMBACKDROP_TYPE = 38;
+    public const int DWMWA_NCRENDERING_POLICY = 2;
+    public const int DWMNCRP_DISABLED = 1;
+    public const int DWMWA_BORDER_COLOR = 34;
+    public const int DWMWA_COLOR_NONE = unchecked((int)0xFFFFFFFE);
 
     // DWM Backdrop Types
     public const int DWMSBT_AUTO = 0;
@@ -62,6 +66,27 @@ public static class Win32
     public const uint MONITOR_DEFAULTTOPRIMARY = 0x00000001;
     public const uint MONITOR_DEFAULTTONEAREST = 0x00000002;
 
+    // Shell Icon & Window Pos Constants
+    public const uint SHGFI_ICON = 0x000000100;
+    public const uint SHGFI_LARGEICON = 0x000000000;
+    public const uint SHGFI_USEFILEATTRIBUTES = 0x000000010;
+    public static readonly IntPtr HWND_BOTTOM = new(1);
+    public const uint SWP_NOSIZE = 0x0001;
+    public const uint SWP_NOMOVE = 0x0002;
+    public const uint SWP_NOACTIVATE = 0x0010;
+    public const uint SWP_SHOWWINDOW = 0x0040;
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct SHFILEINFOW
+    {
+        public IntPtr hIcon;
+        public int iIcon;
+        public uint dwAttributes;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+        public string szDisplayName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)]
+        public string szTypeName;
+    }
     [StructLayout(LayoutKind.Sequential)]
     public struct POINT
     {
@@ -199,8 +224,117 @@ public static class Win32
     [DllImport("user32.dll")]
     public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    public static extern IntPtr SHGetFileInfoW(
+        string pszPath,
+        uint dwFileAttributes,
+        ref SHFILEINFOW psfi,
+        uint cbFileInfo,
+        uint uFlags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool DestroyIcon(IntPtr hIcon);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SetWindowPos(
+        IntPtr hWnd,
+        IntPtr hWndInsertAfter,
+        int X,
+        int Y,
+        int cx,
+        int cy,
+        uint uFlags);
+    private const uint INPUT_KEYBOARD = 1;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct INPUT
+    {
+        public uint type;
+        public InputUnion U;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    private struct InputUnion
+    {
+        [FieldOffset(0)]
+        public KEYBDINPUT ki;
+        [FieldOffset(0)]
+        public MOUSEINPUT mi;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MOUSEINPUT
+    {
+        public int dx;
+        public int dy;
+        public uint mouseData;
+        public uint dwFlags;
+        public uint time;
+        public UIntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KEYBDINPUT
+    {
+        public ushort wVk;
+        public ushort wScan;
+        public uint dwFlags;
+        public uint time;
+        public UIntPtr dwExtraInfo;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
     public static void SendMediaKey(byte vk)
     {
+        try
+        {
+            INPUT[] inputs =
+            [
+                new INPUT
+                {
+                    type = INPUT_KEYBOARD,
+                    U = new InputUnion
+                    {
+                        ki = new KEYBDINPUT
+                        {
+                            wVk = vk,
+                            wScan = 0,
+                            dwFlags = KEYEVENTF_EXTENDEDKEY,
+                            time = 0,
+                            dwExtraInfo = UIntPtr.Zero
+                        }
+                    }
+                },
+                new INPUT
+                {
+                    type = INPUT_KEYBOARD,
+                    U = new InputUnion
+                    {
+                        ki = new KEYBDINPUT
+                        {
+                            wVk = vk,
+                            wScan = 0,
+                            dwFlags = KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP,
+                            time = 0,
+                            dwExtraInfo = UIntPtr.Zero
+                        }
+                    }
+                }
+            ];
+
+            uint sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+            if (sent == inputs.Length)
+                return;
+        }
+        catch
+        {
+        }
+
         keybd_event(vk, 0, KEYEVENTF_EXTENDEDKEY, UIntPtr.Zero);
         keybd_event(vk, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, UIntPtr.Zero);
     }
@@ -224,10 +358,33 @@ public static class Win32
     /// <summary>
     /// Configures the window as a non-activating tool window and toggles click-through (WS_EX_TRANSPARENT).
     /// </summary>
+    public static void DisableNativeWindowFrameAndShadow(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero)
+            return;
+
+        int ncPolicy = DWMNCRP_DISABLED;
+        _ = DwmSetWindowAttribute(hwnd, DWMWA_NCRENDERING_POLICY, ref ncPolicy, sizeof(int));
+
+        int borderNone = DWMWA_COLOR_NONE;
+        _ = DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, ref borderNone, sizeof(int));
+
+        int backdropNone = DWMSBT_NONE;
+        _ = DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref backdropNone, sizeof(int));
+
+        int cornerRound = DWMWCP_ROUND;
+        _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref cornerRound, sizeof(int));
+    }
+
+    /// <summary>
+    /// Configures the window as a non-activating tool window, disables OS rectangular shadow, and toggles click-through.
+    /// </summary>
     public static void SetClickThrough(IntPtr hwnd, bool clickThrough)
     {
         if (hwnd == IntPtr.Zero)
             return;
+
+        DisableNativeWindowFrameAndShadow(hwnd);
 
         long exStyle = GetWindowLongPtr(hwnd, GWL_EXSTYLE).ToInt64();
         exStyle |= WS_EX_TOOLWINDOW;

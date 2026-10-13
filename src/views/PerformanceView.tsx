@@ -350,44 +350,32 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
           </div>
         </div>
 
-        {/* Center: Combined Live Download & Upload Speed Pill */}
-        <div
-          className="px-3.5 py-1 rounded-full border text-xs font-mono font-semibold tabular-nums tracking-tight whitespace-pre shrink-0"
-          style={{
-            background: 'var(--theme-track, rgba(255, 255, 255, 0.06))',
-            borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.1))',
-            color: 'var(--theme-text-primary, #cdd6f4)',
-          }}
-        >
-          {`↓ ${downFormatted}    ↑ ${upFormatted}`}
-        </div>
-
-        {/* Right: Dual Download / Upload Channel Readouts with Activity Bars */}
-        <div className="flex items-center gap-2.5 shrink-0">
+        {/* Middle/Right: Single Non-Redundant Download (↓) and Upload (↑) Live Throughput Indicator with Proportional Activity Bars */}
+        <div className="flex items-center gap-3 flex-1 max-w-[360px] justify-end">
           <div
-            className="px-2.5 py-1 rounded-xl border flex flex-col gap-1 min-w-[118px]"
+            className="flex-1 px-3 py-1.5 rounded-xl border flex flex-col gap-1 min-w-[132px]"
             style={{
               background: 'var(--theme-track, rgba(255, 255, 255, 0.04))',
               borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.07))',
             }}
           >
-            <div className="flex items-center justify-between gap-2 text-[10px] font-mono tabular-nums">
+            <div className="flex items-center justify-between gap-2 text-[11px] font-mono tabular-nums">
               <span
-                className="flex items-center gap-0.5 font-medium"
+                className="flex items-center gap-1 font-medium"
                 style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))' }}
               >
                 <ArrowDown className="w-3 h-3 text-[#89dceb]" strokeWidth={2.2} />
-                Down
+                <span>Down</span>
               </span>
               <span
                 className="font-semibold"
                 style={{ color: 'var(--theme-text-primary, #cdd6f4)' }}
               >
-                ↓ {downFormatted}
+                {downFormatted}
               </span>
             </div>
             <div
-              className="w-full h-1 rounded-full overflow-hidden"
+              className="w-full h-1.5 rounded-full overflow-hidden"
               style={{ background: 'var(--theme-track, rgba(255, 255, 255, 0.08))' }}
             >
               <div
@@ -401,29 +389,29 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
           </div>
 
           <div
-            className="px-2.5 py-1 rounded-xl border flex flex-col gap-1 min-w-[118px]"
+            className="flex-1 px-3 py-1.5 rounded-xl border flex flex-col gap-1 min-w-[132px]"
             style={{
               background: 'var(--theme-track, rgba(255, 255, 255, 0.04))',
               borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.07))',
             }}
           >
-            <div className="flex items-center justify-between gap-2 text-[10px] font-mono tabular-nums">
+            <div className="flex items-center justify-between gap-2 text-[11px] font-mono tabular-nums">
               <span
-                className="flex items-center gap-0.5 font-medium"
+                className="flex items-center gap-1 font-medium"
                 style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))' }}
               >
                 <ArrowUp className="w-3 h-3 text-[#a6e3a1]" strokeWidth={2.2} />
-                Up
+                <span>Up</span>
               </span>
               <span
                 className="font-semibold"
                 style={{ color: 'var(--theme-text-primary, #cdd6f4)' }}
               >
-                ↑ {upFormatted}
+                {upFormatted}
               </span>
             </div>
             <div
-              className="w-full h-1 rounded-full overflow-hidden"
+              className="w-full h-1.5 rounded-full overflow-hidden"
               style={{ background: 'var(--theme-track, rgba(255, 255, 255, 0.08))' }}
             >
               <div

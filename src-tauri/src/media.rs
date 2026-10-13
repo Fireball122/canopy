@@ -413,12 +413,72 @@ fn send_media_key(
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
+fn is_chromium_session(raw_id: &str) -> bool {
+    let lower = raw_id.to_ascii_lowercase();
+    lower.contains("brave")
+        || lower.contains("chrome")
+        || lower.contains("msedge")
+        || lower.contains("vivaldi")
+        || lower.contains("opera")
+        || lower.contains("arc")
+        || lower.contains("zen")
+}
+
 #[tauri::command]
 pub async fn media_play_pause() -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
+        use windows::Media::Control::{
+            GlobalSystemMediaTransportControlsSessionManager,
+            GlobalSystemMediaTransportControlsSessionPlaybackStatus,
+        };
         use windows::Win32::UI::Input::KeyboardAndMouse::VK_MEDIA_PLAY_PAUSE;
-        send_media_key(VK_MEDIA_PLAY_PAUSE)?;
+
+        let handled = tokio::task::spawn_blocking(|| -> bool {
+            if let Ok(req) = GlobalSystemMediaTransportControlsSessionManager::RequestAsync() {
+                if let Ok(manager) = req.get() {
+                    if let Ok(session) = manager.GetCurrentSession() {
+                        let app_id = session
+                            .SourceAppUserModelId()
+                            .ok()
+                            .map(|s| s.to_string_lossy())
+                            .unwrap_or_default();
+                        let before = session.GetPlaybackInfo().ok().and_then(|p| p.PlaybackStatus().ok());
+                        let was_playing = before
+                            == Some(GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing);
+
+                        let ok = if was_playing {
+                            session.TryPauseAsync().ok().and_then(|op| op.get().ok()).unwrap_or(false)
+                        } else {
+                            session.TryPlayAsync().ok().and_then(|op| op.get().ok()).unwrap_or(false)
+                        } || session
+                            .TryTogglePlayPauseAsync()
+                            .ok()
+                            .and_then(|op| op.get().ok())
+                            .unwrap_or(false);
+
+                        if ok && !is_chromium_session(&app_id) {
+                            return true;
+                        }
+                        if ok && is_chromium_session(&app_id) {
+                            std::thread::sleep(std::time::Duration::from_millis(140));
+                            let after = session.GetPlaybackInfo().ok().and_then(|p| p.PlaybackStatus().ok());
+                            if after != before {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            false
+        })
+        .await
+        .unwrap_or(false);
+
+        if !handled {
+            send_media_key(VK_MEDIA_PLAY_PAUSE)?;
+        }
     }
     Ok(())
 }
@@ -427,8 +487,37 @@ pub async fn media_play_pause() -> Result<(), String> {
 pub async fn media_next() -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
+        use windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager;
         use windows::Win32::UI::Input::KeyboardAndMouse::VK_MEDIA_NEXT_TRACK;
-        send_media_key(VK_MEDIA_NEXT_TRACK)?;
+
+        let handled = tokio::task::spawn_blocking(|| -> bool {
+            if let Ok(req) = GlobalSystemMediaTransportControlsSessionManager::RequestAsync() {
+                if let Ok(manager) = req.get() {
+                    if let Ok(session) = manager.GetCurrentSession() {
+                        let app_id = session
+                            .SourceAppUserModelId()
+                            .ok()
+                            .map(|s| s.to_string_lossy())
+                            .unwrap_or_default();
+                        let ok = session
+                            .TrySkipNextAsync()
+                            .ok()
+                            .and_then(|op| op.get().ok())
+                            .unwrap_or(false);
+                        if ok && !is_chromium_session(&app_id) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            false
+        })
+        .await
+        .unwrap_or(false);
+
+        if !handled {
+            send_media_key(VK_MEDIA_NEXT_TRACK)?;
+        }
     }
     Ok(())
 }
@@ -437,8 +526,37 @@ pub async fn media_next() -> Result<(), String> {
 pub async fn media_prev() -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
+        use windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager;
         use windows::Win32::UI::Input::KeyboardAndMouse::VK_MEDIA_PREV_TRACK;
-        send_media_key(VK_MEDIA_PREV_TRACK)?;
+
+        let handled = tokio::task::spawn_blocking(|| -> bool {
+            if let Ok(req) = GlobalSystemMediaTransportControlsSessionManager::RequestAsync() {
+                if let Ok(manager) = req.get() {
+                    if let Ok(session) = manager.GetCurrentSession() {
+                        let app_id = session
+                            .SourceAppUserModelId()
+                            .ok()
+                            .map(|s| s.to_string_lossy())
+                            .unwrap_or_default();
+                        let ok = session
+                            .TrySkipPreviousAsync()
+                            .ok()
+                            .and_then(|op| op.get().ok())
+                            .unwrap_or(false);
+                        if ok && !is_chromium_session(&app_id) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            false
+        })
+        .await
+        .unwrap_or(false);
+
+        if !handled {
+            send_media_key(VK_MEDIA_PREV_TRACK)?;
+        }
     }
     Ok(())
 }

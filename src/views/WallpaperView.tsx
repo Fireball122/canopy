@@ -1,17 +1,5 @@
-import React, { useRef, useState } from 'react';
-import {
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  FolderOpen,
-  Image as ImageIcon,
-  Moon,
-  Palette,
-  RefreshCw,
-  Settings,
-  Sparkles,
-  Sun,
-} from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { FolderOpen, RefreshCw } from 'lucide-react';
 import { useSettings } from '../context/SettingsContext';
 import {
   applyThemeFromImageSrc,
@@ -43,42 +31,144 @@ const FALLBACK_GRADIENTS: string[] = [
   'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #89b4fa 100%)',
 ];
 
+interface ExtractedSwatches {
+  dominant: string;
+  accent: string;
+  surface: string;
+}
+
+function formatFriendlyName(rawName: string): string {
+  const withoutExt = rawName.replace(/\.[a-zA-Z0-9]+$/, '');
+  return withoutExt.replace(/[-_]+/g, ' ').trim() || 'Wallpaper';
+}
+
+function extractImageSwatches(imgEl: HTMLImageElement | null): ExtractedSwatches {
+  const fallback: ExtractedSwatches = {
+    dominant: 'var(--theme-accent, #A29BFE)',
+    accent: 'var(--theme-text-primary, #F1F2F6)',
+    surface: 'var(--theme-bg, #181824)',
+  };
+
+  if (!imgEl || !imgEl.complete || imgEl.naturalWidth <= 0) {
+    return fallback;
+  }
+
+  try {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = 32;
+    canvas.height = 32;
+    if (!ctx) return fallback;
+
+    ctx.drawImage(imgEl, 0, 0, 32, 32);
+    const data = ctx.getImageData(0, 0, 32, 32).data;
+
+    let rSum = 0;
+    let gSum = 0;
+    let bSum = 0;
+    let count = 0;
+
+    let vibR = 162;
+    let vibG = 155;
+    let vibB = 254;
+    let maxSat = -1;
+
+    let secR = 137;
+    let secG = 220;
+    let secB = 235;
+    let secSat = -1;
+
+    for (let i = 0; i < data.length; i += 16) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      rSum += r;
+      gSum += g;
+      bSum += b;
+      count++;
+
+      const maxC = Math.max(r, g, b);
+      const minC = Math.min(r, g, b);
+      const sat = maxC - minC;
+      if (sat > maxSat && maxC > 40 && minC < 235) {
+        secR = vibR;
+        secG = vibG;
+        secB = vibB;
+        secSat = maxSat;
+        maxSat = sat;
+        vibR = r;
+        vibG = g;
+        vibB = b;
+      } else if (sat > secSat && maxC > 40 && minC < 235) {
+        secSat = sat;
+        secR = r;
+        secG = g;
+        secB = b;
+      }
+    }
+
+    if (count === 0) return fallback;
+
+    const avgR = Math.round(rSum / count);
+    const avgG = Math.round(gSum / count);
+    const avgB = Math.round(bSum / count);
+
+    return {
+      dominant: `rgb(${vibR}, ${vibG}, ${vibB})`,
+      accent: `rgb(${secR}, ${secG}, ${secB})`,
+      surface: `rgb(${avgR}, ${avgG}, ${avgB})`,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
 export const WallpaperView: React.FC<WallpaperViewProps> = ({
   wallpapers,
   onApplyWallpaper,
   onRefreshWallpapers,
-  onNavigateToSettings,
   onDirectoryChanged,
-  statusText,
 }) => {
   const { settings, updateSettings } = useSettings();
   const imgRefs = useRef<Record<string, HTMLImageElement | null>>({});
-  const heroImgRef = useRef<HTMLImageElement | null>(null);
-  const carouselRef = useRef<HTMLDivElement | null>(null);
+  const transitionTimerRef = useRef<number | null>(null);
 
-  const [applyingPath, setApplyingPath] = useState<string | null>(null);
-  const [heroTransitioning, setHeroTransitioning] = useState<boolean>(false);
+  const activeWallpaper = wallpapers.find((w) => w.active) || wallpapers[0] || null;
+  const [transitioningPath, setTransitioningPath] = useState<string | null>(null);
   const [rescanning, setRescanning] = useState<boolean>(false);
   const [browsingFolder, setBrowsingFolder] = useState<boolean>(false);
-  const [folderFeedback, setFolderFeedback] = useState<string | null>(null);
+  const [swatches, setSwatches] = useState<ExtractedSwatches>({
+    dominant: 'var(--theme-accent, #A29BFE)',
+    accent: '#89DCEB',
+    surface: 'var(--theme-bg, #181824)',
+  });
 
-  const activeWallpaper = wallpapers.find((w) => w.active) || wallpapers[0];
-  const activeIndex = activeWallpaper
-    ? Math.max(
-        0,
-        wallpapers.findIndex((w) => w.path === activeWallpaper.path)
-      )
-    : 0;
-  const activeFallbackBg =
-    FALLBACK_GRADIENTS[activeIndex % FALLBACK_GRADIENTS.length];
+  useEffect(() => {
+    if (!activeWallpaper) return;
+    const imgEl = imgRefs.current[activeWallpaper.path] ?? null;
+    if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
+      setSwatches(extractImageSwatches(imgEl));
+    }
+  }, [activeWallpaper?.path, activeWallpaper?.data_url]);
+
+  useEffect(() => {
+    return () => {
+      if (transitionTimerRef.current) {
+        window.clearTimeout(transitionTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleSelectWallpaper = async (entry: WallpaperEntry) => {
-    setApplyingPath(entry.path);
-    setHeroTransitioning(true);
-    const imgEl = imgRefs.current[entry.path] ?? null;
+    if (transitionTimerRef.current) {
+      window.clearTimeout(transitionTimerRef.current);
+    }
+    setTransitioningPath(entry.path);
 
+    const imgEl = imgRefs.current[entry.path] ?? null;
     if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
       applyThemePalette(imgEl, settings.themeMode);
+      setSwatches(extractImageSwatches(imgEl));
     } else if (entry.data_url) {
       await applyThemeFromImageSrc(entry.data_url, settings.themeMode);
     } else {
@@ -92,40 +182,19 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
     try {
       await setDesktopWallpaper(entry.path);
     } catch {
-      // Handled gracefully in fallback mode
+      // Handled gracefully
     }
 
     onApplyWallpaper(entry, imgEl);
-    window.setTimeout(() => {
-      setApplyingPath(null);
-      setHeroTransitioning(false);
-    }, 360);
+    transitionTimerRef.current = window.setTimeout(() => {
+      setTransitioningPath(null);
+    }, 450);
   };
 
-  const handleBrowseFolder = async () => {
-    setBrowsingFolder(true);
-    try {
-      const chosen = await pickWallpaperFolder(settings.wallpaperDirectory);
-      if (chosen) {
-        updateSettings({ wallpaperDirectory: chosen });
-        const entries = await setWallpaperDirectory(chosen);
-        onDirectoryChanged?.(chosen, entries);
-        setFolderFeedback(`Loaded ${entries.length} wallpapers`);
-        window.setTimeout(() => setFolderFeedback(null), 2800);
-      }
-    } catch {
-      setFolderFeedback('Could not open folder picker');
-      window.setTimeout(() => setFolderFeedback(null), 2800);
-    } finally {
-      setBrowsingFolder(false);
-    }
-  };
-
-  const handleThemeModeChange = async (mode: 'auto' | 'dark' | 'light') => {
+  const handlePalettePillClick = async (mode: 'auto' | 'dark' | 'light') => {
     updateSettings({ themeMode: mode });
     if (activeWallpaper) {
-      const imgEl =
-        heroImgRef.current ?? imgRefs.current[activeWallpaper.path] ?? null;
+      const imgEl = imgRefs.current[activeWallpaper.path] ?? null;
       if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
         applyThemePalette(imgEl, mode);
         return;
@@ -142,499 +211,219 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
     );
   };
 
+  const handleBrowseFolder = async () => {
+    setBrowsingFolder(true);
+    try {
+      const chosen = await pickWallpaperFolder(settings.wallpaperDirectory);
+      if (chosen) {
+        updateSettings({ wallpaperDirectory: chosen });
+        const entries = await setWallpaperDirectory(chosen);
+        onDirectoryChanged?.(chosen, entries);
+      }
+    } catch {
+      // Ignore cancel
+    } finally {
+      setBrowsingFolder(false);
+    }
+  };
+
   const handleRescan = () => {
     setRescanning(true);
     onRefreshWallpapers();
-    window.setTimeout(() => setRescanning(false), 500);
+    window.setTimeout(() => setRescanning(false), 450);
   };
 
-  const handleScrollCarousel = (direction: 'left' | 'right') => {
-    const container = carouselRef.current;
-    if (!container) return;
-    const scrollAmount = direction === 'left' ? -390 : 390;
-    container.scrollBy({ left: scrollAmount, behavior: 'smooth' });
-  };
-
-  const badgeStatusText = statusText || folderFeedback;
+  const palettePills: {
+    id: 'auto' | 'dark' | 'light';
+    label: string;
+    swatchColor: string;
+  }[] = [
+    {
+      id: 'auto',
+      label: 'Adaptive',
+      swatchColor: swatches.dominant,
+    },
+    {
+      id: 'dark',
+      label: 'Obsidian',
+      swatchColor: swatches.surface,
+    },
+    {
+      id: 'light',
+      label: 'Alabaster',
+      swatchColor: swatches.accent,
+    },
+  ];
 
   return (
     <div
       data-tauri-drag-region="false"
-      className="w-full h-full flex flex-col gap-2.5 pointer-events-auto select-none overflow-hidden"
+      className="w-full h-full flex flex-col gap-3 pointer-events-auto select-none overflow-hidden"
     >
-      {/* ===================================================================== */}
-      {/* TOP SECTION: FEATURED ACTIVE WALLPAPER SHOWCASE CARD                  */}
-      {/* ===================================================================== */}
-      <div
-        className="bento-card p-3 flex items-center justify-between gap-3.5 shrink-0"
-        style={{
-          background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
-          borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
-        }}
-      >
-        {/* Left: Featured Active Wallpaper Preview (w-[220px] h-[118px]) */}
-        <div
-          className="relative w-[220px] h-[118px] rounded-xl overflow-hidden shrink-0 border"
-          style={{
-            background: activeWallpaper?.data_url ? undefined : activeFallbackBg,
-            borderColor: 'var(--theme-accent, #cba6f7)',
-            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.32)',
-          }}
-        >
-          {activeWallpaper?.data_url && (
-            <img
-              ref={heroImgRef}
-              src={activeWallpaper.data_url}
-              alt={activeWallpaper.name}
-              crossOrigin="anonymous"
-              className={`w-full h-full object-cover transition-all duration-300 ${
-                heroTransitioning
-                  ? 'scale-105 opacity-80'
-                  : 'scale-100 opacity-100'
-              }`}
-              onLoad={(e) => {
-                applyThemePalette(e.currentTarget, settings.themeMode);
-              }}
-            />
-          )}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent pointer-events-none" />
-
-          <div
-            className="absolute top-2 left-2 px-2 py-0.5 rounded-full text-[9px] font-mono font-bold uppercase tracking-wider flex items-center gap-1 shadow-md"
-            style={{
-              background: 'var(--theme-accent, #cba6f7)',
-              color: '#11111b',
-            }}
-          >
-            <Sparkles className="w-2.5 h-2.5" strokeWidth={2.5} />
-            <span>Active Showcase</span>
-          </div>
-
-          <div className="absolute bottom-2 left-2.5 right-2.5 flex items-center justify-between text-[10px] font-mono text-white/90">
-            <span className="truncate font-semibold">
-              {activeWallpaper ? activeWallpaper.name : 'Default Theme'}
-            </span>
-            {wallpapers.length > 0 && (
-              <span className="px-1.5 py-0.2 rounded bg-black/55 text-[9px] tabular-nums shrink-0">
-                {activeIndex + 1}/{wallpapers.length}
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Center: Active Wallpaper Title, Directory Path Badge & Adaptive Swatches */}
-        <div className="flex-1 min-w-0 h-[118px] flex flex-col justify-between py-0.5">
-          <div>
-            <div className="flex items-center gap-2">
-              <span
-                className="text-[10px] font-mono uppercase tracking-widest font-semibold"
-                style={{ color: 'var(--theme-accent, #cba6f7)' }}
-              >
-                Featured Wallpaper
-              </span>
-              {badgeStatusText && (
-                <span
-                  className="px-2 py-0.5 rounded-full text-[9px] font-mono border truncate"
-                  style={{
-                    background: 'rgba(166, 227, 161, 0.14)',
-                    borderColor: 'rgba(166, 227, 161, 0.35)',
-                    color: '#a6e3a1',
-                  }}
-                >
-                  {badgeStatusText}
-                </span>
-              )}
-            </div>
-
-            <div
-              className="text-base font-bold truncate mt-0.5"
-              style={{ color: 'var(--theme-text-primary, #cdd6f4)' }}
-              title={activeWallpaper?.name || 'No Active Wallpaper'}
-            >
-              {activeWallpaper?.name || 'No Active Wallpaper'}
-            </div>
-          </div>
-
-          {/* Directory Path Badge */}
-          <div
-            className="px-2.5 py-1.5 rounded-lg border flex items-center justify-between gap-2"
-            style={{
-              background: 'var(--theme-track, rgba(255, 255, 255, 0.06))',
-              borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
-            }}
-          >
-            <div className="flex items-center gap-1.5 min-w-0">
-              <FolderOpen
-                className="w-3.5 h-3.5 shrink-0"
-                style={{ color: 'var(--theme-accent, #cba6f7)' }}
-                strokeWidth={2}
-              />
-              <span
-                className="text-[11px] font-mono truncate"
-                style={{ color: 'var(--theme-text-primary, #cdd6f4)' }}
-                title={settings.wallpaperDirectory || 'Pictures/Wallpapers'}
-              >
-                {settings.wallpaperDirectory || 'Pictures/Wallpapers'}
-              </span>
-            </div>
-            <span
-              className="px-1.5 py-0.5 rounded text-[9px] font-mono tabular-nums shrink-0"
-              style={{
-                background: 'var(--theme-card, rgba(0, 0, 0, 0.25))',
-                color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.75))',
-              }}
-            >
-              {wallpapers.length} items
-            </span>
-          </div>
-
-          {/* Extracted Adaptive Theme Swatches */}
-          <div className="flex items-center gap-2">
-            <span
-              className="text-[10px] font-mono uppercase tracking-wider flex items-center gap-1 shrink-0"
-              style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))' }}
-            >
-              <Palette
-                className="w-3 h-3"
-                style={{ color: 'var(--theme-accent, #cba6f7)' }}
-                strokeWidth={2}
-              />
-              <span>Palette:</span>
-            </span>
-
-            <div className="flex items-center gap-1.5">
-              {(
-                [
-                  { label: 'Surface', cssVar: 'var(--theme-bg, #121218)' },
-                  { label: 'Accent', cssVar: 'var(--theme-accent, #cba6f7)' },
-                  { label: 'Primary', cssVar: 'var(--theme-text-primary, #f8fafc)' },
-                ] as const
-              ).map((swatch) => (
-                <div
-                  key={swatch.label}
-                  className="px-2 py-0.5 rounded-md border flex items-center gap-1.5 text-[9px] font-mono"
-                  style={{
-                    background: 'var(--theme-track, rgba(255, 255, 255, 0.05))',
-                    borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
-                    color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.78))',
-                  }}
-                >
-                  <span
-                    className="w-2.5 h-2.5 rounded-full border border-white/25 shrink-0"
-                    style={{ background: swatch.cssVar }}
-                  />
-                  <span>{swatch.label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Right: Quick Action Controls ([ Browse Folder ] + [ Rescan ] & Theme Mode [ Auto | Dark | Light ]) */}
-        <div className="h-[118px] flex flex-col justify-between items-end shrink-0">
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              data-tauri-drag-region="false"
-              onClick={handleBrowseFolder}
-              disabled={browsingFolder}
-              className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 border transition-all active:scale-95 pointer-events-auto cursor-pointer"
-              style={{
-                background: 'var(--theme-accent, #cba6f7)',
-                borderColor: 'var(--theme-accent, #cba6f7)',
-                color: '#11111b',
-              }}
-              title="Browse for wallpaper directory"
-            >
-              <FolderOpen className="w-3.5 h-3.5" strokeWidth={2} />
-              <span>{browsingFolder ? 'Opening…' : 'Browse Folder'}</span>
-            </button>
-
-            <button
-              type="button"
-              data-tauri-drag-region="false"
-              onClick={handleRescan}
-              className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium flex items-center gap-1.5 border transition-all active:scale-95 pointer-events-auto cursor-pointer"
-              style={{
-                background: 'var(--theme-track, rgba(255, 255, 255, 0.06))',
-                borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.1))',
-                color: 'var(--theme-text-primary, #cdd6f4)',
-              }}
-              title="Rescan active wallpaper directory"
-            >
-              <RefreshCw
-                className={`w-3.5 h-3.5 ${rescanning ? 'animate-spin' : ''}`}
-                style={{ color: 'var(--theme-accent, #cba6f7)' }}
-                strokeWidth={2}
-              />
-              <span>Rescan</span>
-            </button>
-
-            {onNavigateToSettings && (
+      {/* Minimal Top Bar: 3 Dynamic Palette Pills + Minimal Folder / Refresh Controls */}
+      <div className="flex items-center justify-between px-1 shrink-0">
+        {/* 3 Dynamic Palette Pills */}
+        <div className="flex items-center gap-2">
+          {palettePills.map((pill) => {
+            const isSelected = settings.themeMode === pill.id;
+            return (
               <button
+                key={pill.id}
                 type="button"
                 data-tauri-drag-region="false"
-                onClick={onNavigateToSettings}
-                className="p-1.5 rounded-lg border transition-all active:scale-95 pointer-events-auto cursor-pointer"
+                onClick={() => handlePalettePillClick(pill.id)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-medium transition-all duration-200 pointer-events-auto cursor-pointer active:scale-95"
                 style={{
-                  background: 'var(--theme-track, rgba(255, 255, 255, 0.06))',
-                  borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.1))',
-                  color: 'var(--theme-text-primary, #cdd6f4)',
+                  background: isSelected
+                    ? 'var(--theme-track, rgba(255, 255, 255, 0.12))'
+                    : 'var(--theme-card, rgba(255, 255, 255, 0.04))',
+                  border: isSelected
+                    ? '1.5px solid var(--theme-accent, #A29BFE)'
+                    : '1px solid var(--theme-border, rgba(255, 255, 255, 0.07))',
+                  color: isSelected
+                    ? 'var(--theme-text-primary, #F1F2F6)'
+                    : 'var(--theme-text-secondary, #9E9EA7)',
+                  boxShadow: isSelected
+                    ? '0 0 12px -2px var(--theme-accent, rgba(162, 155, 254, 0.35))'
+                    : 'none',
                 }}
-                title="Open Appearance Settings"
               >
-                <Settings
-                  className="w-3.5 h-3.5"
-                  style={{ color: 'var(--theme-accent, #cba6f7)' }}
-                  strokeWidth={2}
+                <span
+                  className="w-2.5 h-2.5 rounded-full shrink-0 transition-colors duration-300"
+                  style={{
+                    background: pill.swatchColor,
+                    boxShadow: '0 0 0 1px rgba(255, 255, 255, 0.22)',
+                  }}
                 />
+                <span>{pill.label}</span>
               </button>
-            )}
-          </div>
+            );
+          })}
+        </div>
 
-          {/* Theme Mode Segmented Pill: [ Auto | Dark | Light ] */}
-          <div className="flex flex-col items-end gap-1">
-            <span
-              className="text-[9px] font-mono uppercase tracking-wider"
-              style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.68))' }}
-            >
-              Theme Mode
-            </span>
-            <div
-              className="flex items-center p-0.5 rounded-xl border"
-              style={{
-                background: 'var(--theme-track, rgba(0, 0, 0, 0.24))',
-                borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
-              }}
-            >
-              {(
-                [
-                  {
-                    id: 'auto',
-                    label: 'Auto',
-                    icon: <Sparkles className="w-3 h-3" strokeWidth={2} />,
-                  },
-                  {
-                    id: 'dark',
-                    label: 'Dark',
-                    icon: <Moon className="w-3 h-3" strokeWidth={2} />,
-                  },
-                  {
-                    id: 'light',
-                    label: 'Light',
-                    icon: <Sun className="w-3 h-3" strokeWidth={2} />,
-                  },
-                ] as const
-              ).map((option) => {
-                const isSelected = settings.themeMode === option.id;
-                return (
-                  <button
-                    key={option.id}
-                    type="button"
-                    data-tauri-drag-region="false"
-                    onClick={() => handleThemeModeChange(option.id)}
-                    className="px-2.5 py-1 rounded-lg text-[10px] font-semibold flex items-center gap-1 transition-all pointer-events-auto cursor-pointer"
-                    style={
-                      isSelected
-                        ? {
-                            background: 'var(--theme-accent, #cba6f7)',
-                            color: '#11111b',
-                            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.22)',
-                          }
-                        : {
-                            color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))',
-                          }
-                    }
-                  >
-                    {option.icon}
-                    <span>{option.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+        {/* Minimal Folder & Rescan Controls */}
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            data-tauri-drag-region="false"
+            onClick={handleBrowseFolder}
+            disabled={browsingFolder}
+            title="Change wallpaper folder"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-medium transition-all duration-200 hover:opacity-100 opacity-85 active:scale-95 pointer-events-auto cursor-pointer"
+            style={{
+              background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
+              border: '1px solid var(--theme-border, rgba(255, 255, 255, 0.07))',
+              color: 'var(--theme-text-secondary, #9E9EA7)',
+            }}
+          >
+            <FolderOpen className="w-3.5 h-3.5" strokeWidth={1.9} />
+            <span>Folder</span>
+          </button>
+
+          <button
+            type="button"
+            data-tauri-drag-region="false"
+            onClick={handleRescan}
+            title="Refresh wallpapers"
+            className="p-1.5 rounded-full transition-all duration-200 hover:opacity-100 opacity-80 active:scale-95 pointer-events-auto cursor-pointer"
+            style={{
+              background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
+              border: '1px solid var(--theme-border, rgba(255, 255, 255, 0.07))',
+              color: 'var(--theme-text-secondary, #9E9EA7)',
+            }}
+          >
+            <RefreshCw
+              className={`w-3.5 h-3.5 ${rescanning ? 'animate-spin' : ''}`}
+              strokeWidth={1.9}
+            />
+          </button>
         </div>
       </div>
 
-      {/* ===================================================================== */}
-      {/* BOTTOM SECTION: SMOOTH HORIZONTAL PREVIEW GALLERY CAROUSEL            */}
-      {/* ===================================================================== */}
+      {/* Sleek Borderless 16:9 Thumbnail Grid */}
       <div
-        className="bento-card flex-1 min-h-0 px-3.5 py-2.5 flex flex-col justify-between gap-2 overflow-hidden"
-        style={{
-          background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
-          borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
-        }}
+        data-tauri-drag-region="false"
+        className="flex-1 overflow-y-auto overflow-x-hidden px-1 py-1 pointer-events-auto"
       >
-        {/* Carousel Header & Navigation Controls */}
-        <div className="flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2">
-            <span
-              className="text-[10px] font-mono uppercase tracking-widest font-semibold flex items-center gap-1.5"
-              style={{ color: 'var(--theme-accent, #cba6f7)' }}
-            >
-              <ImageIcon className="w-3.5 h-3.5" strokeWidth={2} />
-              <span>Preview Gallery</span>
-            </span>
-            <span
-              className="text-[10px] font-mono"
-              style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.65))' }}
-            >
-              Click any 16:9 card to apply desktop wallpaper &amp; adaptive theme
-            </span>
-          </div>
+        <div className="grid grid-cols-3 gap-3">
+          {wallpapers.map((entry, idx) => {
+            const isActive = Boolean(entry.active);
+            const isApplying = transitioningPath === entry.path;
+            const friendlyTitle = formatFriendlyName(entry.name);
+            const fallbackBg = FALLBACK_GRADIENTS[idx % FALLBACK_GRADIENTS.length];
 
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              data-tauri-drag-region="false"
-              onClick={() => handleScrollCarousel('left')}
-              className="w-6 h-6 rounded-lg border flex items-center justify-center transition-all active:scale-90 pointer-events-auto cursor-pointer"
-              style={{
-                background: 'var(--theme-track, rgba(255, 255, 255, 0.06))',
-                borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.1))',
-                color: 'var(--theme-text-primary, #cdd6f4)',
-              }}
-              title="Scroll Gallery Left"
-            >
-              <ChevronLeft className="w-3.5 h-3.5" strokeWidth={2.2} />
-            </button>
-            <button
-              type="button"
-              data-tauri-drag-region="false"
-              onClick={() => handleScrollCarousel('right')}
-              className="w-6 h-6 rounded-lg border flex items-center justify-center transition-all active:scale-90 pointer-events-auto cursor-pointer"
-              style={{
-                background: 'var(--theme-track, rgba(255, 255, 255, 0.06))',
-                borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.1))',
-                color: 'var(--theme-text-primary, #cdd6f4)',
-              }}
-              title="Scroll Gallery Right"
-            >
-              <ChevronRight className="w-3.5 h-3.5" strokeWidth={2.2} />
-            </button>
-          </div>
-        </div>
+            return (
+              <button
+                key={entry.path}
+                type="button"
+                data-tauri-drag-region="false"
+                onClick={() => handleSelectWallpaper(entry)}
+                className="group relative w-full aspect-video rounded-[13px] overflow-hidden focus:outline-none pointer-events-auto cursor-pointer"
+                style={{
+                  background: entry.data_url ? undefined : fallbackBg,
+                  transform: 'scale(1)',
+                  transition:
+                    'transform 200ms ease, box-shadow 250ms ease, opacity 300ms ease',
+                  boxShadow: isActive
+                    ? '0 0 0 2px var(--theme-accent, #A29BFE), 0 0 18px -2px var(--theme-accent, rgba(162, 155, 254, 0.55))'
+                    : '0 4px 12px rgba(0, 0, 0, 0.22)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'scale(1.03)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'scale(1)';
+                }}
+              >
+                {entry.data_url && (
+                  <img
+                    ref={(el) => {
+                      imgRefs.current[entry.path] = el;
+                    }}
+                    src={entry.data_url}
+                    alt={friendlyTitle}
+                    crossOrigin="anonymous"
+                    loading="lazy"
+                    onLoad={(e) => {
+                      if (isActive) {
+                        setSwatches(extractImageSwatches(e.currentTarget));
+                      }
+                    }}
+                    className={`w-full h-full object-cover transition-all duration-500 ease-out ${
+                      isApplying
+                        ? 'scale-105 blur-[2px] brightness-110'
+                        : 'scale-100 blur-0 brightness-100'
+                    }`}
+                  />
+                )}
 
-        {/* Horizontal Carousel Track */}
-        {wallpapers.length === 0 ? (
-          <div className="w-full flex-1 flex flex-col items-center justify-center text-center gap-2">
-            <ImageIcon
-              className="w-6 h-6 opacity-50"
-              style={{ color: 'var(--theme-accent, #cba6f7)' }}
-            />
-            <div
-              className="text-xs font-semibold"
-              style={{ color: 'var(--theme-text-primary, #cdd6f4)' }}
-            >
-              No wallpapers found in this directory
-            </div>
-            <button
-              type="button"
-              data-tauri-drag-region="false"
-              onClick={handleBrowseFolder}
-              className="px-3 py-1 rounded-lg text-xs font-semibold transition-all pointer-events-auto cursor-pointer"
-              style={{
-                background: 'var(--theme-accent, #cba6f7)',
-                color: '#11111b',
-              }}
-            >
-              Browse Wallpaper Folder
-            </button>
-          </div>
-        ) : (
-          <div
-            ref={carouselRef}
-            data-tauri-drag-region="false"
-            onWheel={(e) => {
-              if (carouselRef.current && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-                carouselRef.current.scrollLeft += e.deltaY;
-              }
-            }}
-            className="flex items-center gap-3 overflow-x-auto overflow-y-hidden scroll-smooth flex-1 min-h-0 py-1 px-0.5 pointer-events-auto"
-          >
-            {wallpapers.map((wp, idx) => {
-              const isActive = wp.active;
-              const isApplying = applyingPath === wp.path;
-              const fallbackBg =
-                FALLBACK_GRADIENTS[idx % FALLBACK_GRADIENTS.length];
-
-              return (
-                <button
-                  key={wp.path}
-                  type="button"
-                  data-tauri-drag-region="false"
-                  onClick={() => handleSelectWallpaper(wp)}
-                  className={`group relative w-[205px] h-[115px] aspect-video shrink-0 rounded-xl overflow-hidden text-left transition-all duration-300 flex flex-col justify-end p-2.5 pointer-events-auto cursor-pointer ${
-                    isApplying
-                      ? 'scale-[0.97] opacity-85'
-                      : 'hover:scale-[1.02] active:scale-[0.98]'
+                {/* Smooth luminous crossfade pulse when selected */}
+                <div
+                  className={`absolute inset-0 pointer-events-none transition-opacity duration-500 ${
+                    isApplying ? 'opacity-35' : 'opacity-0'
                   }`}
                   style={{
-                    background: wp.data_url ? undefined : fallbackBg,
-                    border: isActive
-                      ? '2px solid var(--theme-accent, #cba6f7)'
-                      : '1px solid var(--theme-border, rgba(255, 255, 255, 0.12))',
-                    boxShadow: isActive
-                      ? '0 0 18px rgba(203, 166, 247, 0.32)'
-                      : '0 4px 14px rgba(0, 0, 0, 0.25)',
+                    background:
+                      'radial-gradient(circle at center, var(--theme-accent, #A29BFE) 0%, transparent 75%)',
                   }}
+                />
+
+                {/* Subtle bottom scrim & friendly wallpaper name (only shown on hover or when active) */}
+                <div
+                  className={`absolute inset-x-0 bottom-0 px-3 py-2 bg-gradient-to-t from-black/75 via-black/35 to-transparent flex items-end justify-between transition-opacity duration-200 pointer-events-none ${
+                    isActive
+                      ? 'opacity-100'
+                      : 'opacity-0 group-hover:opacity-100'
+                  }`}
                 >
-                  {wp.data_url && (
-                    <img
-                      ref={(el) => {
-                        imgRefs.current[wp.path] = el;
-                      }}
-                      src={wp.data_url}
-                      alt={wp.name}
-                      crossOrigin="anonymous"
-                      className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                      onLoad={(e) => {
-                        if (isActive) {
-                          applyThemePalette(e.currentTarget, settings.themeMode);
-                        }
-                      }}
-                    />
-                  )}
-
-                  {/* Scrim overlay for text legibility */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent pointer-events-none" />
-
-                  {/* Active Checkmark Badge in Top-Right Corner */}
-                  {isActive && (
-                    <div
-                      className="absolute top-2 right-2 px-2 py-0.5 rounded-full text-[9px] font-mono font-bold flex items-center gap-1 shadow-md z-10"
-                      style={{
-                        background: 'var(--theme-accent, #cba6f7)',
-                        color: '#11111b',
-                      }}
-                    >
-                      <Check className="w-3 h-3" strokeWidth={2.75} />
-                      <span>ACTIVE</span>
-                    </div>
-                  )}
-
-                  {/* Bottom Metadata */}
-                  <div className="relative z-10 w-full">
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="text-xs font-semibold text-white truncate">
-                        {wp.name}
-                      </span>
-                      {isApplying && (
-                        <span className="text-[9px] font-mono text-[#a6e3a1] shrink-0">
-                          Applying…
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-[9px] font-mono text-zinc-300/80 truncate mt-0.5">
-                      {wp.path}
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
+                  <span className="text-[11px] font-medium text-white/95 truncate tracking-tight">
+                    {friendlyTitle}
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

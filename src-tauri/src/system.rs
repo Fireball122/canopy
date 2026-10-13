@@ -18,6 +18,7 @@ pub struct InstalledAppItem {
     pub category: String,
     pub path: String,
     pub description: String,
+    pub icon_data_url: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -722,52 +723,123 @@ pub async fn set_dropdown_open(open: bool, window: tauri::WebviewWindow) -> Resu
     Ok(())
 }
 
+fn is_browser_identifier(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("brave")
+        || lower.contains("brave.exe")
+        || lower.contains("bravehtml")
+        || lower.contains("zen")
+        || lower.contains("arc")
+        || lower.contains("vivaldi")
+        || lower.contains("opera")
+        || lower.contains("chrome")
+        || lower.contains("firefox")
+        || lower.contains("msedge")
+}
+
+fn read_default_browser_prog_id() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::enums::HKEY_CURRENT_USER;
+        use winreg::RegKey;
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        if let Ok(subkey) = hkcu.open_subkey(r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice") {
+            if let Ok(prog_id) = subkey.get_value::<String, _>("ProgId") {
+                return prog_id;
+            }
+        }
+    }
+    String::new()
+}
+
 #[tauri::command]
 pub fn get_installed_apps() -> Result<Vec<InstalledAppItem>, String> {
-    let apps = vec![
-        InstalledAppItem {
-            id: "wt".to_string(),
-            name: "Windows Terminal".to_string(),
-            category: "Developer".to_string(),
-            path: "wt.exe".to_string(),
-            description: "Modern command line & shells".to_string(),
-        },
-        InstalledAppItem {
-            id: "explorer".to_string(),
-            name: "File Explorer".to_string(),
-            category: "System".to_string(),
-            path: "explorer.exe".to_string(),
-            description: "Browse folders & drives".to_string(),
-        },
-        InstalledAppItem {
-            id: "taskmgr".to_string(),
-            name: "Task Manager".to_string(),
-            category: "System".to_string(),
-            path: "taskmgr.exe".to_string(),
-            description: "Performance & active processes".to_string(),
-        },
-        InstalledAppItem {
-            id: "settings".to_string(),
-            name: "Windows Settings".to_string(),
-            category: "System".to_string(),
-            path: "ms-settings:".to_string(),
-            description: "System configuration".to_string(),
-        },
-        InstalledAppItem {
-            id: "notepad".to_string(),
-            name: "Notepad".to_string(),
-            category: "Productivity".to_string(),
-            path: "notepad.exe".to_string(),
-            description: "Text & quick notes".to_string(),
-        },
-        InstalledAppItem {
-            id: "calc".to_string(),
-            name: "Calculator".to_string(),
-            category: "Utilities".to_string(),
-            path: "calc.exe".to_string(),
-            description: "Standard & scientific calculator".to_string(),
-        },
+    let default_prog_id = read_default_browser_prog_id();
+    let mut apps: Vec<InstalledAppItem> = Vec::new();
+
+    let mut brave_candidates = vec![
+        PathBuf::from(r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"),
+        PathBuf::from(r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe"),
     ];
+    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+        brave_candidates.insert(
+            0,
+            PathBuf::from(local_app_data).join(r"BraveSoftware\Brave-Browser\Application\brave.exe"),
+        );
+    }
+
+    if let Some(brave_path) = brave_candidates.into_iter().find(|p| p.exists()) {
+        let is_default = default_prog_id.to_ascii_lowercase().contains("brave");
+        apps.push(InstalledAppItem {
+            id: "brave".to_string(),
+            name: "Brave".to_string(),
+            category: "Browser".to_string(),
+            path: brave_path.to_string_lossy().to_string(),
+            description: if is_default {
+                "Default Web Browser (BraveHTML)".to_string()
+            } else {
+                "Privacy web browser".to_string()
+            },
+            icon_data_url: None,
+        });
+    }
+
+    let mut roots = vec![PathBuf::from(r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs")];
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        roots.push(PathBuf::from(appdata).join(r"Microsoft\Windows\Start Menu\Programs"));
+    }
+
+    for root in roots {
+        if let Ok(entries) = std::fs::read_dir(&root) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()).map(|s| s.eq_ignore_ascii_case("lnk")).unwrap_or(false) {
+                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                        let name = stem.to_string();
+                        let path_str = path.to_string_lossy().to_string();
+                        let combined = format!("{} {}", name, path_str);
+                        let category = if is_browser_identifier(&combined) {
+                            "Browser"
+                        } else {
+                            "Application"
+                        };
+                        if !apps.iter().any(|a| a.name.eq_ignore_ascii_case(&name)) {
+                            apps.push(InstalledAppItem {
+                                id: name.to_lowercase().replace(' ', "-"),
+                                name,
+                                category: category.to_string(),
+                                path: path_str,
+                                description: format!("{} shortcut", category),
+                                icon_data_url: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let builtins = [
+        ("wt", "Windows Terminal", "Developer", "wt.exe", "Modern command line & shells"),
+        ("explorer", "File Explorer", "System", "explorer.exe", "Browse folders & drives"),
+        ("taskmgr", "Task Manager", "System", "taskmgr.exe", "Performance & active processes"),
+        ("settings", "Windows Settings", "System", "ms-settings:", "System configuration"),
+        ("notepad", "Notepad", "Productivity", "notepad.exe", "Text & quick notes"),
+        ("calc", "Calculator", "Utilities", "calc.exe", "Standard & scientific calculator"),
+    ];
+    for (id, name, cat, path, desc) in builtins {
+        if !apps.iter().any(|a| a.name.eq_ignore_ascii_case(name)) {
+            apps.push(InstalledAppItem {
+                id: id.to_string(),
+                name: name.to_string(),
+                category: cat.to_string(),
+                path: path.to_string(),
+                description: desc.to_string(),
+                icon_data_url: None,
+            });
+        }
+    }
+
     Ok(apps)
 }
 

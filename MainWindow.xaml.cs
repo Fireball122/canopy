@@ -109,7 +109,8 @@ public partial class MainWindow : Window
                 "Canopy",
                 "WebView2Data");
 
-            CoreWebView2Environment env = await CoreWebView2Environment.CreateAsync(null, userDataFolder);
+            var envOptions = new CoreWebView2EnvironmentOptions("--disable-features=HardwareMediaKeyHandling,MediaSessionService");
+            CoreWebView2Environment env = await CoreWebView2Environment.CreateAsync(null, userDataFolder, envOptions);
             await ShellWebView.EnsureCoreWebView2Async(env);
 
             CoreWebView2 core = ShellWebView.CoreWebView2;
@@ -273,17 +274,31 @@ public partial class MainWindow : Window
             }
 
             case "media_play_pause":
+            case "media:togglePlayPause":
                 await _mediaController.PlayPauseAsync();
                 return null;
 
             case "media_next":
+            case "media:next":
                 await _mediaController.NextAsync();
                 return null;
 
             case "media_prev":
+            case "media:prev":
                 await _mediaController.PreviousAsync();
                 return null;
 
+            case "media_seek":
+            case "media:seek":
+            {
+                if (args.ValueKind == JsonValueKind.Object &&
+                    args.TryGetProperty("seconds", out JsonElement secEl) &&
+                    secEl.TryGetDouble(out double secs))
+                {
+                    await _mediaController.SeekAsync(secs);
+                }
+                return null;
+            }
             case "get_master_volume":
                 return (float)Math.Round(_audioController.GetMasterVolumePercent(), 1);
 
@@ -327,6 +342,9 @@ public partial class MainWindow : Window
                 }
                 return null;
             }
+
+            case "get_audio_spectrum":
+                return _audioController.GetAudioSpectrum();
 
             case "get_audio_state":
                 return new
@@ -693,10 +711,10 @@ public partial class MainWindow : Window
         if (_hwnd == IntPtr.Zero || !Win32.GetWindowRect(_hwnd, out Win32.RECT rect))
             return false;
 
-        return screenCursor.X >= (rect.Left - 16) &&
-               screenCursor.X <= (rect.Right + 16) &&
-               screenCursor.Y >= (rect.Top - 8) &&
-               screenCursor.Y <= (rect.Bottom + 16);
+        return screenCursor.X >= (rect.Left - 2) &&
+               screenCursor.X <= (rect.Right + 2) &&
+               screenCursor.Y >= (rect.Top - 2) &&
+               screenCursor.Y <= (rect.Bottom + 2);
     }
 
     private void OnHideDebounceTimerTick(object? sender, EventArgs e)

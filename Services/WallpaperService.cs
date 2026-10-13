@@ -2,6 +2,9 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Controls;
+using System.Windows.Interop;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using CaelestiaWin.Interop;
 using CaelestiaWin.Models;
@@ -14,7 +17,7 @@ namespace CaelestiaWin.Services;
 /// </summary>
 public sealed class WallpaperService : IDisposable
 {
-    public const int ThumbnailDecodeWidth = 160;
+    public const int ThumbnailDecodeWidth = 360;
 
     private static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -372,12 +375,35 @@ public sealed class WallpaperService : IDisposable
     /// Instantly applies the selected image as the Windows desktop wallpaper via Win32 SystemParametersInfo.
     /// Runs the P/Invoke call asynchronously to prevent any UI frame drops while WM_SETTINGCHANGE broadcasts.
     /// </summary>
-    public Task<bool> ApplyWallpaperAsync(string fullPath)
+    public async Task<bool> ApplyWallpaperAsync(string fullPath)
     {
         if (string.IsNullOrWhiteSpace(fullPath) || !File.Exists(fullPath))
-            return Task.FromResult(false);
+            return false;
 
-        return Task.Run(() =>
+        string previousPath = Win32.GetCurrentDesktopWallpaper();
+        Window? transitionOverlay = null;
+
+        // Create a click-through HWND_BOTTOM overlay showing the previous wallpaper so the new wallpaper
+        // can be applied underneath and smoothly crossfaded on the actual desktop.
+        if (!string.IsNullOrWhiteSpace(previousPath) &&
+            File.Exists(previousPath) &&
+            !string.Equals(Path.GetFullPath(previousPath), Path.GetFullPath(fullPath), StringComparison.OrdinalIgnoreCase) &&
+            Application.Current is not null)
+        {
+            try
+            {
+                await Application.Current.Dispatcher.InvokeAsync(() =>
+                {
+                    transitionOverlay = CreateDesktopCrossfadeWindow(previousPath);
+                });
+            }
+            catch
+            {
+                transitionOverlay = null;
+            }
+        }
+
+        bool applied = await Task.Run(() =>
         {
             int result = Win32.SystemParametersInfo(
                 Win32.SPI_SETDESKWALLPAPER,
@@ -386,7 +412,139 @@ public sealed class WallpaperService : IDisposable
                 Win32.SPIF_UPDATEINIFILE | Win32.SPIF_SENDCHANGE);
 
             return result != 0;
-        });
+        }).ConfigureAwait(false);
+
+        if (transitionOverlay is not null && Application.Current is not null)
+        {
+            try
+            {
+                await Application.Current.Dispatcher.InvokeAsync(() =>
+                {
+                    var fadeOut = new DoubleAnimation(1.0, 0.0, TimeSpan.FromMilliseconds(550))
+                    {
+                        EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut }
+                    };
+                    fadeOut.Completed += (_, _) =>
+                    {
+                        try
+                        {
+                            transitionOverlay.Close();
+                        }
+                        catch
+                        {
+                        }
+                    };
+                    transitionOverlay.BeginAnimation(UIElement.OpacityProperty, fadeOut);
+                });
+            }
+            catch
+            {
+            }
+        }
+
+        return applied;
+    }
+
+    private static Window? CreateDesktopCrossfadeWindow(string previousWallpaperPath)
+    {
+        try
+        {
+            using var stream = new FileStream(
+                previousWallpaperPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+
+            var bmp = new BitmapImage();
+            bmp.BeginInit();
+            bmp.CacheOption = BitmapCacheOption.OnLoad;
+            bmp.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;
+            bmp.DecodePixelWidth = 1920;
+            bmp.StreamSource = stream;
+            bmp.EndInit();
+            bmp.Freeze();
+
+            var overlay = new Window
+            {
+                WindowStyle = WindowStyle.None,
+                AllowsTransparency = true,
+                Background = Brushes.Transparent,
+                ResizeMode = ResizeMode.NoResize,
+                ShowInTaskbar = false,
+                ShowActivated = false,
+                Focusable = false,
+                Topmost = false,
+                Left = SystemParameters.VirtualScreenLeft,
+                Top = SystemParameters.VirtualScreenTop,
+                Width = SystemParameters.VirtualScreenWidth,
+                Height = SystemParameters.VirtualScreenHeight,
+                Opacity = 1.0,
+                IsHitTestVisible = false,
+                Content = new Image
+                {
+                    Source = bmp,
+                    Stretch = Stretch.UniformToFill,
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    VerticalAlignment = VerticalAlignment.Stretch,
+                    IsHitTestVisible = false
+                }
+            };
+
+            overlay.SourceInitialized += (_, _) =>
+            {
+                IntPtr hwnd = new WindowInteropHelper(overlay).Handle;
+                long exStyle = Win32.GetWindowLongPtr(hwnd, Win32.GWL_EXSTYLE).ToInt64();
+                exStyle |= Win32.WS_EX_LAYERED | Win32.WS_EX_TRANSPARENT | Win32.WS_EX_TOOLWINDOW | Win32.WS_EX_NOACTIVATE;
+                exStyle &= ~Win32.WS_EX_APPWINDOW;
+                _ = Win32.SetWindowLongPtr(hwnd, Win32.GWL_EXSTYLE, new IntPtr(exStyle));
+
+                // Place at HWND_BOTTOM so it sits directly above the desktop wallpaper and behind all windows
+                _ = Win32.SetWindowPos(
+                    hwnd,
+                    Win32.HWND_BOTTOM,
+                    0,
+                    0,
+                    0,
+                    0,
+                    Win32.SWP_NOMOVE | Win32.SWP_NOSIZE | Win32.SWP_NOACTIVATE | Win32.SWP_SHOWWINDOW);
+            };
+
+            overlay.Show();
+            return overlay;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string GetImageResolution(string fullPath)
+    {
+        try
+        {
+            using var stream = new FileStream(
+                fullPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            var decoder = BitmapDecoder.Create(
+                stream,
+                BitmapCreateOptions.DelayCreation,
+                BitmapCacheOption.None);
+            if (decoder.Frames.Count > 0)
+            {
+                var frame = decoder.Frames[0];
+                if (frame.PixelWidth > 0 && frame.PixelHeight > 0)
+                {
+                    return $"{frame.PixelWidth} × {frame.PixelHeight}";
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return "1920 × 1080";
     }
 
     public Task<List<object>> GetWallpaperBridgeEntriesAsync()
@@ -420,11 +578,13 @@ public sealed class WallpaperService : IDisposable
                         dataUrl = $"data:image/jpeg;base64,{Convert.ToBase64String(ms.ToArray())}";
                     }
 
+                    string resolution = GetImageResolution(file);
                     list.Add(new
                     {
                         name = Path.GetFileNameWithoutExtension(file),
                         path = file,
                         data_url = dataUrl,
+                        resolution,
                         active
                     });
                 }

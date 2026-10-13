@@ -2,7 +2,12 @@ using System.Diagnostics;
 using System.IO;
 using System.Management;
 using System.Net.NetworkInformation;
+using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Interop;
+using System.Windows.Media.Imaging;
 using CaelestiaWin.Interop;
+using Microsoft.Win32;
 
 namespace CaelestiaWin.Services;
 
@@ -17,7 +22,8 @@ public sealed record InstalledAppSnapshot(
     string name,
     string category,
     string path,
-    string description);
+    string description,
+    string? icon_data_url = null);
 
 public readonly record struct SystemTelemetrySnapshot(
     double CpuUsagePercent,
@@ -335,6 +341,106 @@ public sealed class SystemMonitorService : IDisposable
         _cachedGpuUsage = Math.Round(3.0 + (Math.Abs(Math.Sin(Environment.TickCount64 / 2000.0)) * 5.0), 1);
     }
 
+    private static string GetDefaultBrowserProgId()
+    {
+        try
+        {
+            using RegistryKey? key = Registry.CurrentUser.OpenSubKey(
+                @"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice");
+            return key?.GetValue("ProgId")?.ToString() ?? string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static bool IsBrowserIdentifier(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        string lower = text.ToLowerInvariant();
+        return lower.Contains("brave") ||
+               lower.Contains("brave.exe") ||
+               lower.Contains("bravehtml") ||
+               lower.Contains("zen") ||
+               lower.Contains("arc") ||
+               lower.Contains("vivaldi") ||
+               lower.Contains("opera") ||
+               lower.Contains("chrome") ||
+               lower.Contains("firefox") ||
+               lower.Contains("msedge") ||
+               lower.Contains("waterfox") ||
+               lower.Contains("librewolf");
+    }
+
+    private static bool MatchesDefaultBrowserProgId(string appNameOrPath, string progId)
+    {
+        if (string.IsNullOrWhiteSpace(progId) || string.IsNullOrWhiteSpace(appNameOrPath))
+            return false;
+
+        string p = progId.ToLowerInvariant();
+        string a = appNameOrPath.ToLowerInvariant();
+
+        if (p.Contains("brave") && a.Contains("brave")) return true;
+        if (p.Contains("chrome") && a.Contains("chrome")) return true;
+        if (p.Contains("msedge") && (a.Contains("edge") || a.Contains("msedge"))) return true;
+        if (p.Contains("firefox") && a.Contains("firefox")) return true;
+        if (p.Contains("vivaldi") && a.Contains("vivaldi")) return true;
+        if (p.Contains("opera") && a.Contains("opera")) return true;
+        if (p.Contains("arc") && a.Contains("arc")) return true;
+        if (p.Contains("zen") && a.Contains("zen")) return true;
+        return false;
+    }
+
+    private static string ClassifyAppCategory(string name, string path, string parentFolder)
+    {
+        string combined = $"{name} {path} {parentFolder}".ToLowerInvariant();
+        if (IsBrowserIdentifier(combined))
+            return "Browser";
+
+        if (combined.Contains("code") || combined.Contains("visual studio") || combined.Contains("git") ||
+            combined.Contains("wsl") || combined.Contains("terminal") || combined.Contains("powershell") ||
+            combined.Contains("docker") || combined.Contains("python") || combined.Contains("node"))
+        {
+            return "Developer";
+        }
+
+        if (combined.Contains("cura") || combined.Contains("prusa") || combined.Contains("dwg") ||
+            combined.Contains("paint") || combined.Contains("blender") || combined.Contains("obs") ||
+            combined.Contains("photoshop") || combined.Contains("gimp") || combined.Contains("vlc") ||
+            combined.Contains("media player"))
+        {
+            return "Creative";
+        }
+
+        if (combined.Contains("word") || combined.Contains("excel") || combined.Contains("powerpoint") ||
+            combined.Contains("outlook") || combined.Contains("onenote") || combined.Contains("access") ||
+            combined.Contains("publisher") || combined.Contains("sticky notes") || combined.Contains("notepad") ||
+            combined.Contains("notion") || combined.Contains("obsidian"))
+        {
+            return "Productivity";
+        }
+
+        if (combined.Contains("angry ip") || combined.Contains("tailscale") || combined.Contains("localsend") ||
+            combined.Contains("nextcloud") || combined.Contains("google drive") || combined.Contains("spacedesk") ||
+            combined.Contains("calc") || combined.Contains("snipping") || combined.Contains("7-zip") ||
+            combined.Contains("powertoys"))
+        {
+            return "Utilities";
+        }
+
+        if (string.IsNullOrWhiteSpace(parentFolder) ||
+            string.Equals(parentFolder, "Programs", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(parentFolder, "Start Menu", StringComparison.OrdinalIgnoreCase))
+        {
+            return "System";
+        }
+
+        return parentFolder;
+    }
+
     public Task<IReadOnlyList<InstalledAppSnapshot>> GetInstalledAppsAsync()
     {
         if (_cachedInstalledApps is { Count: > 0 })
@@ -342,21 +448,42 @@ public sealed class SystemMonitorService : IDisposable
 
         return Task.Run<IReadOnlyList<InstalledAppSnapshot>>(() =>
         {
-            var apps = new List<InstalledAppSnapshot>
-            {
-                new("wt", "Windows Terminal", "Developer", "wt.exe", "Modern command line & shells"),
-                new("explorer", "File Explorer", "System", "explorer.exe", "Browse folders & drives"),
-                new("taskmgr", "Task Manager", "System", "taskmgr.exe", "Performance & active processes"),
-                new("settings", "Windows Settings", "System", "ms-settings:", "System configuration"),
-                new("notepad", "Notepad", "Productivity", "notepad.exe", "Text & quick notes"),
-                new("calc", "Calculator", "Utilities", "calc.exe", "Standard & scientific calculator"),
-                new("mspaint", "Paint", "Creative", "mspaint.exe", "Image canvas & editor"),
-                new("snippingtool", "Snipping Tool", "Utilities", "SnippingTool.exe", "Screen capture utility"),
-                new("powershell", "PowerShell", "Developer", "powershell.exe", "Windows automation shell"),
-                new("control", "Control Panel", "System", "control.exe", "Classic system applets")
-            };
+            string defaultProgId = GetDefaultBrowserProgId();
+            string sysDir = Environment.SystemDirectory;
+            string winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string progFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            string progFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+            string localWinApps = Path.Combine(localAppData, "Microsoft", "WindowsApps");
 
-            var seenNames = new HashSet<string>(apps.Select(a => a.name), StringComparer.OrdinalIgnoreCase);
+            var apps = new List<InstalledAppSnapshot>();
+            var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // 1. Check explicit Brave Browser installations (%LocalAppData%, %ProgramFiles%, %ProgramFiles(x86)%)
+            string[] braveCandidates =
+            [
+                Path.Combine(localAppData, @"BraveSoftware\Brave-Browser\Application\brave.exe"),
+                Path.Combine(progFiles, @"BraveSoftware\Brave-Browser\Application\brave.exe"),
+                Path.Combine(progFilesX86, @"BraveSoftware\Brave-Browser\Application\brave.exe")
+            ];
+
+            string? braveExe = braveCandidates.FirstOrDefault(File.Exists);
+            if (!string.IsNullOrWhiteSpace(braveExe))
+            {
+                bool isDefaultBrave = MatchesDefaultBrowserProgId("Brave", defaultProgId);
+                string? braveIcon = TryExtractIconDataUrl(braveExe);
+                apps.Add(new InstalledAppSnapshot(
+                    id: "brave",
+                    name: "Brave",
+                    category: "Browser",
+                    path: braveExe,
+                    description: isDefaultBrave ? "Default Web Browser (BraveHTML)" : "Privacy web browser",
+                    icon_data_url: braveIcon));
+                seenNames.Add("Brave");
+                seenNames.Add("Brave Browser");
+            }
+
+            // 2. Scan both Start Menu trees (%ProgramData% & %AppData%)
             string[] startMenuRoots =
             [
                 Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms),
@@ -383,18 +510,25 @@ public sealed class SystemMonitorService : IDisposable
                         }
 
                         string parentFolder = Path.GetFileName(Path.GetDirectoryName(lnk) ?? string.Empty);
-                        string category = string.IsNullOrWhiteSpace(parentFolder) || string.Equals(parentFolder, "Programs", StringComparison.OrdinalIgnoreCase)
-                            ? "Application"
-                            : parentFolder;
+                        string category = ClassifyAppCategory(name, lnk, parentFolder);
+                        bool isDefaultBrowser = category == "Browser" && MatchesDefaultBrowserProgId($"{name} {lnk}", defaultProgId);
+                        string desc = isDefaultBrowser
+                            ? $"Default Web Browser ({defaultProgId})"
+                            : category == "Browser"
+                                ? "Web browser"
+                                : $"{category} application";
+
+                        string? iconDataUrl = TryExtractIconDataUrl(lnk);
 
                         apps.Add(new InstalledAppSnapshot(
                             id: name.ToLowerInvariant().Replace(' ', '-'),
                             name: name,
                             category: category,
                             path: lnk,
-                            description: $"{category} shortcut"));
+                            description: desc,
+                            icon_data_url: iconDataUrl));
 
-                        if (apps.Count >= 36)
+                        if (apps.Count >= 42)
                             break;
                     }
                 }
@@ -403,9 +537,90 @@ public sealed class SystemMonitorService : IDisposable
                 }
             }
 
+            // 3. Ensure core Windows tools are present
+            var builtInSpecs = new (string Id, string Name, string Category, string LaunchTarget, string IconCandidate, string Desc)[]
+            {
+                ("wt", "Windows Terminal", "Developer", "wt.exe", Path.Combine(localWinApps, "wt.exe"), "Modern command line & shells"),
+                ("explorer", "File Explorer", "System", "explorer.exe", Path.Combine(winDir, "explorer.exe"), "Browse folders & drives"),
+                ("taskmgr", "Task Manager", "System", "taskmgr.exe", Path.Combine(sysDir, "Taskmgr.exe"), "Performance & active processes"),
+                ("notepad", "Notepad", "Productivity", "notepad.exe", Path.Combine(sysDir, "notepad.exe"), "Text & quick notes"),
+                ("calc", "Calculator", "Utilities", "calc.exe", Path.Combine(sysDir, "calc.exe"), "Standard & scientific calculator"),
+                ("mspaint", "Paint", "Creative", "mspaint.exe", Path.Combine(sysDir, "mspaint.exe"), "Image canvas & editor"),
+                ("snippingtool", "Snipping Tool", "Utilities", "SnippingTool.exe", Path.Combine(sysDir, "SnippingTool.exe"), "Screen capture utility"),
+                ("powershell", "PowerShell", "Developer", "powershell.exe", Path.Combine(sysDir, "WindowsPowerShell", "v1.0", "powershell.exe"), "Windows automation shell"),
+                ("control", "Control Panel", "System", "control.exe", Path.Combine(sysDir, "control.exe"), "Classic system applets"),
+                ("settings", "Windows Settings", "System", "ms-settings:", Path.Combine(sysDir, "control.exe"), "System configuration")
+            };
+
+            foreach (var spec in builtInSpecs)
+            {
+                if (!seenNames.Add(spec.Name))
+                    continue;
+
+                string? iconUrl = TryExtractIconDataUrl(spec.IconCandidate) ?? TryExtractIconDataUrl(spec.LaunchTarget);
+                apps.Add(new InstalledAppSnapshot(
+                    spec.Id,
+                    spec.Name,
+                    spec.Category,
+                    spec.LaunchTarget,
+                    spec.Desc,
+                    iconUrl));
+            }
+
             _cachedInstalledApps = apps;
             return apps;
         });
+    }
+
+    private static string? TryExtractIconDataUrl(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+
+        IntPtr hIcon = IntPtr.Zero;
+        try
+        {
+            var shinfo = new Win32.SHFILEINFOW();
+            uint flags = Win32.SHGFI_ICON | Win32.SHGFI_LARGEICON;
+            if (!File.Exists(path) && !Directory.Exists(path))
+            {
+                flags |= Win32.SHGFI_USEFILEATTRIBUTES;
+            }
+
+            IntPtr res = Win32.SHGetFileInfoW(
+                path,
+                0,
+                ref shinfo,
+                (uint)Marshal.SizeOf<Win32.SHFILEINFOW>(),
+                flags);
+
+            if (res == IntPtr.Zero || shinfo.hIcon == IntPtr.Zero)
+                return null;
+
+            hIcon = shinfo.hIcon;
+            BitmapSource bmp = Imaging.CreateBitmapSourceFromHIcon(
+                hIcon,
+                Int32Rect.Empty,
+                BitmapSizeOptions.FromEmptyOptions());
+            bmp.Freeze();
+
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(bmp));
+            using var ms = new MemoryStream();
+            encoder.Save(ms);
+            return $"data:image/png;base64,{Convert.ToBase64String(ms.ToArray())}";
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            if (hIcon != IntPtr.Zero)
+            {
+                _ = Win32.DestroyIcon(hIcon);
+            }
+        }
     }
 
     public static bool LaunchApp(string? target)

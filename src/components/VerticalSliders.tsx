@@ -75,7 +75,7 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {
-      // Ignore if pointer capture is unavailable
+      // Ignore if pointer capture unavailable
     }
     setActiveDrag(id);
     const pct = computePercentFromPointer(e.currentTarget, e.clientY);
@@ -132,8 +132,8 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
     label: string;
     value: number;
     displayValue: string;
-    fillClass: string;
-    glowClass: string;
+    fillStyle: React.CSSProperties;
+    glowColor: string;
     muted?: boolean;
   }> = [
     {
@@ -141,8 +141,13 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
       label: 'Volume',
       value: clampedVolume,
       displayValue: clampedVolume === 0 ? 'Mute' : `${clampedVolume}%`,
-      fillClass: clampedVolume === 0 ? 'bg-zinc-500/40' : 'bg-amber-500/80',
-      glowClass: 'border-t border-amber-200/40 shadow-[0_-4px_16px_rgba(245,158,11,0.3)]',
+      fillStyle: {
+        background:
+          clampedVolume === 0
+            ? 'var(--theme-track, rgba(255, 255, 255, 0.12))'
+            : 'linear-gradient(to top, var(--theme-accent, #A29BFE) 0%, var(--theme-text-primary, #FFFFFF) 100%)',
+      },
+      glowColor: 'var(--theme-accent, #A29BFE)',
       muted: clampedVolume === 0,
     },
     ...(showBrightness
@@ -152,8 +157,11 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
             label: 'Brightness',
             value: clampedBrightness,
             displayValue: `${clampedBrightness}%`,
-            fillClass: 'bg-amber-400/60',
-            glowClass: 'border-t border-amber-100/40 shadow-[0_-4px_16px_rgba(251,191,36,0.28)]',
+            fillStyle: {
+              background:
+                'linear-gradient(to top, var(--theme-accent, #A29BFE) 0%, #FDE047 100%)',
+            },
+            glowColor: 'var(--theme-accent, #A29BFE)',
             muted: false,
           },
         ]
@@ -163,10 +171,12 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
       label: 'Mic',
       value: effectiveMicMuted ? 0 : clampedMic,
       displayValue: effectiveMicMuted ? 'Muted' : `${clampedMic}%`,
-      fillClass: effectiveMicMuted ? 'bg-rose-500/45' : 'bg-emerald-500/70',
-      glowClass: effectiveMicMuted
-        ? 'border-t border-rose-300/35 shadow-[0_-4px_14px_rgba(244,63,94,0.25)]'
-        : 'border-t border-emerald-200/40 shadow-[0_-4px_16px_rgba(16,185,129,0.28)]',
+      fillStyle: {
+        background: effectiveMicMuted
+          ? 'rgba(239, 68, 68, 0.65)'
+          : 'linear-gradient(to top, var(--theme-accent, #A29BFE) 0%, #89DCEB 100%)',
+      },
+      glowColor: effectiveMicMuted ? 'rgba(239, 68, 68, 0.7)' : 'var(--theme-accent, #A29BFE)',
       muted: effectiveMicMuted,
     },
   ];
@@ -192,8 +202,10 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
               pointerEvents: 'auto',
               cursor: 'pointer',
               touchAction: 'none',
-              background: 'var(--theme-track)',
-              borderColor: isDragging ? 'var(--theme-accent)' : 'var(--theme-border)',
+              background: 'var(--theme-track, rgba(255, 255, 255, 0.06))',
+              borderColor: isDragging
+                ? 'var(--theme-accent, #A29BFE)'
+                : 'var(--theme-border, rgba(255, 255, 255, 0.08))',
             }}
             onPointerEnter={() => setHoveredSlider(slider.id)}
             onPointerLeave={() => setHoveredSlider((prev) => (prev === slider.id ? null : prev))}
@@ -204,7 +216,7 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
             onWheel={(e) =>
               handleWheel(slider.id, slider.id === 'mic' ? clampedMic : slider.value, e)
             }
-            className="relative flex-1 min-w-0 max-w-[38px] h-full rounded-full border transition-colors duration-150 overflow-hidden flex flex-col items-center justify-between py-2.5 shadow-inner"
+            className="relative flex-1 min-w-0 max-w-[38px] h-full rounded-full border transition-colors duration-200 overflow-hidden flex flex-col items-center justify-between py-2.5 shadow-inner"
           >
             {/* Native range input for accessibility */}
             <input
@@ -219,15 +231,19 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
               className="sr-only"
             />
 
-            {/* Vertical fill bar anchored at bottom */}
+            {/* Vertical fill bar anchored at bottom (reacts 100% to wallpaper theme colors) */}
             <div
               data-tauri-drag-region="false"
               style={{
                 height: `${slider.value}%`,
                 pointerEvents: 'none',
+                ...slider.fillStyle,
+                boxShadow: `0 -4px 16px ${slider.glowColor}40`,
               }}
-              className={`absolute bottom-0 left-0 right-0 rounded-b-full ${slider.fillClass} ${slider.glowClass} ${
-                isDragging ? 'transition-none' : 'transition-[height,background-color] duration-100 ease-out'
+              className={`absolute bottom-0 left-0 right-0 rounded-b-full ${
+                isDragging
+                  ? 'transition-none'
+                  : 'transition-[height,background] duration-150 ease-out'
               }`}
             />
 
@@ -238,7 +254,7 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
               className={`relative z-10 px-1 py-0.5 rounded-full text-[9px] font-mono font-semibold tabular-nums tracking-tight transition-all duration-150 ${
                 showTooltip
                   ? 'bg-black/75 text-white shadow-sm scale-105'
-                  : 'opacity-80'
+                  : 'opacity-85'
               }`}
             >
               {slider.displayValue}
@@ -257,58 +273,44 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
               <span className="w-1.5 h-[1px] bg-current rounded-full" />
             </div>
 
-            {/* Bottom Icon / Mute Control */}
-            {slider.id === 'volume' && (
-              <button
-                type="button"
-                data-slider-icon-btn="true"
-                data-tauri-drag-region="false"
-                style={{ pointerEvents: 'auto', cursor: 'pointer' }}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={handleVolumeIconClick}
-                title={clampedVolume === 0 ? 'Unmute volume' : 'Mute volume'}
-                className="relative z-10 w-7 h-7 rounded-full flex items-center justify-center bg-black/30 hover:bg-black/50 text-white active:scale-90 transition-all border border-white/10"
-              >
-                {clampedVolume === 0 ? (
-                  <VolumeX className="w-3.5 h-3.5 text-rose-300" strokeWidth={2} />
+            {/* Bottom Icon Button */}
+            <button
+              type="button"
+              data-slider-icon-btn="true"
+              data-tauri-drag-region="false"
+              aria-label={`Toggle ${slider.label}`}
+              onClick={
+                slider.id === 'volume'
+                  ? handleVolumeIconClick
+                  : slider.id === 'mic'
+                  ? handleMicIconClick
+                  : undefined
+              }
+              className={`relative z-10 p-1.5 rounded-full transition-transform active:scale-90 pointer-events-auto cursor-pointer ${
+                slider.muted ? 'text-rose-400 opacity-90' : 'text-current opacity-90'
+              }`}
+              style={{
+                color: slider.muted
+                  ? 'rgb(244, 63, 94)'
+                  : 'var(--theme-text-primary, #F1F2F6)',
+              }}
+            >
+              {slider.id === 'volume' ? (
+                slider.value === 0 ? (
+                  <VolumeX className="w-3.5 h-3.5" strokeWidth={2.3} />
                 ) : (
-                  <Volume2 className="w-3.5 h-3.5 text-white" strokeWidth={2} />
-                )}
-              </button>
-            )}
-
-            {slider.id === 'brightness' && (
-              <div
-                data-tauri-drag-region="false"
-                style={{ pointerEvents: 'none' }}
-                className="relative z-10 w-7 h-7 rounded-full flex items-center justify-center bg-black/25 text-white border border-white/10"
-              >
-                <Sun className="w-3.5 h-3.5 text-amber-100" strokeWidth={2} />
-              </div>
-            )}
-
-            {slider.id === 'mic' && (
-              <button
-                type="button"
-                data-slider-icon-btn="true"
-                data-tauri-drag-region="false"
-                style={{ pointerEvents: 'auto', cursor: 'pointer' }}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={handleMicIconClick}
-                title={effectiveMicMuted ? 'Unmute microphone' : 'Mute microphone'}
-                className={`relative z-10 w-7 h-7 rounded-full flex items-center justify-center active:scale-90 transition-all border ${
-                  effectiveMicMuted
-                    ? 'bg-rose-500/30 hover:bg-rose-500/45 border-rose-300/30 text-rose-200'
-                    : 'bg-black/30 hover:bg-black/50 border-white/10 text-white'
-                }`}
-              >
-                {effectiveMicMuted ? (
-                  <MicOff className="w-3.5 h-3.5 text-rose-200" strokeWidth={2} />
+                  <Volume2 className="w-3.5 h-3.5" strokeWidth={2.3} />
+                )
+              ) : slider.id === 'mic' ? (
+                effectiveMicMuted ? (
+                  <MicOff className="w-3.5 h-3.5 text-rose-400" strokeWidth={2.3} />
                 ) : (
-                  <Mic className="w-3.5 h-3.5 text-white" strokeWidth={2} />
-                )}
-              </button>
-            )}
+                  <Mic className="w-3.5 h-3.5" strokeWidth={2.3} />
+                )
+              ) : (
+                <Sun className="w-3.5 h-3.5" strokeWidth={2.3} />
+              )}
+            </button>
           </div>
         );
       })}

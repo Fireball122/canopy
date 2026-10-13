@@ -52,7 +52,18 @@ function renderAppIcon(app: InstalledAppItem): React.ReactNode {
   if (key.includes('taskmgr') || key.includes('task manager') || key.includes('resource') || key.includes('perf')) {
     return <Cpu className="w-4 h-4" strokeWidth={1.9} />;
   }
-  if (key.includes('edge') || key.includes('chrome') || key.includes('firefox') || key.includes('browser')) {
+  if (
+    key.includes('brave') ||
+    key.includes('bravehtml') ||
+    key.includes('zen') ||
+    key.includes('arc') ||
+    key.includes('vivaldi') ||
+    key.includes('opera') ||
+    key.includes('edge') ||
+    key.includes('chrome') ||
+    key.includes('firefox') ||
+    key.includes('browser')
+  ) {
     return <Compass className="w-4 h-4" strokeWidth={1.9} />;
   }
   if (key.includes('calc')) {
@@ -81,6 +92,7 @@ export const AppsView: React.FC<AppsViewProps> = ({ onAppLaunched }) => {
   const [launchingId, setLaunchingId] = useState<string | null>(null);
   const [launchedId, setLaunchedId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [failedIconIds, setFailedIconIds] = useState<Record<string, boolean>>({});
 
   const loadApps = async () => {
     setLoading(true);
@@ -131,21 +143,31 @@ export const AppsView: React.FC<AppsViewProps> = ({ onAppLaunched }) => {
   const filteredApps = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return apps.filter((app) => {
+      const combinedKey = `${app.id} ${app.name} ${app.path} ${app.category} ${app.description || ''}`.toLowerCase();
+      const isBrowser =
+        app.category.toLowerCase() === 'browser' ||
+        combinedKey.includes('brave') ||
+        combinedKey.includes('brave.exe') ||
+        combinedKey.includes('bravehtml') ||
+        combinedKey.includes('zen') ||
+        combinedKey.includes('arc') ||
+        combinedKey.includes('vivaldi') ||
+        combinedKey.includes('opera') ||
+        combinedKey.includes('chrome') ||
+        combinedKey.includes('firefox') ||
+        combinedKey.includes('msedge');
+
       const matchesCategory =
         activeCategory === 'All' ||
-        app.category.toLowerCase() === activeCategory.toLowerCase();
+        app.category.toLowerCase() === activeCategory.toLowerCase() ||
+        (activeCategory.toLowerCase() === 'browser' && isBrowser);
       if (!matchesCategory) {
         return false;
       }
       if (!query) {
         return true;
       }
-      return (
-        app.name.toLowerCase().includes(query) ||
-        app.category.toLowerCase().includes(query) ||
-        app.path.toLowerCase().includes(query) ||
-        (app.description && app.description.toLowerCase().includes(query))
-      );
+      return combinedKey.includes(query);
     });
   }, [apps, activeCategory, searchQuery]);
 
@@ -386,6 +408,21 @@ export const AppsView: React.FC<AppsViewProps> = ({ onAppLaunched }) => {
                     >
                       {isLaunched ? (
                         <CheckCircle2 className="w-4 h-4 text-[#a6e3a1]" strokeWidth={2} />
+                      ) : app.icon_data_url &&
+                        app.icon_data_url.trim().length > 0 &&
+                        !failedIconIds[app.id] ? (
+                        <img
+                          src={app.icon_data_url}
+                          alt={app.name}
+                          className="w-6 h-6 object-contain drop-shadow-sm select-none"
+                          loading="lazy"
+                          onError={() =>
+                            setFailedIconIds((prev) => ({
+                              ...prev,
+                              [app.id]: true,
+                            }))
+                          }
+                        />
                       ) : (
                         renderAppIcon(app)
                       )}

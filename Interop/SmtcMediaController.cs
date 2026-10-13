@@ -26,7 +26,8 @@ public sealed record SmtcMediaSnapshot(
 
 /// <summary>
 /// Queries Windows 11 GlobalSystemMediaTransportControlsSessionManager (SMTC) for track metadata,
-/// active media sessions, timeline progress, and album artwork, with infallible Win32 virtual media keys.
+/// active media sessions, timeline progress, and album artwork, with automatic Chromium/Brave
+/// verification and fallback to native Win32 virtual media keys (0xB3, 0xB0, 0xB1).
 /// </summary>
 public sealed class SmtcMediaController
 {
@@ -51,17 +52,46 @@ public sealed class SmtcMediaController
         }
     }
 
+    private static bool IsSelfWebViewSession(string? rawId)
+    {
+        if (string.IsNullOrWhiteSpace(rawId))
+            return false;
+
+        return rawId.Contains("Canopy", StringComparison.OrdinalIgnoreCase) ||
+               rawId.Contains("Caelestia", StringComparison.OrdinalIgnoreCase) ||
+               rawId.Contains("msedgewebview2", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsChromiumSession(string? rawId)
+    {
+        if (string.IsNullOrWhiteSpace(rawId))
+            return false;
+
+        return rawId.Contains("Brave", StringComparison.OrdinalIgnoreCase) ||
+               rawId.Contains("Chrome", StringComparison.OrdinalIgnoreCase) ||
+               rawId.Contains("msedge", StringComparison.OrdinalIgnoreCase) ||
+               rawId.Contains("Vivaldi", StringComparison.OrdinalIgnoreCase) ||
+               rawId.Contains("Opera", StringComparison.OrdinalIgnoreCase) ||
+               rawId.Contains("Arc", StringComparison.OrdinalIgnoreCase) ||
+               rawId.Contains("Zen", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string FormatAppName(string? sourceAppUserModelId)
     {
         if (string.IsNullOrWhiteSpace(sourceAppUserModelId))
             return "System Media";
 
         string raw = sourceAppUserModelId.Trim();
+        if (raw.Contains("Brave", StringComparison.OrdinalIgnoreCase)) return "Brave";
         if (raw.Contains("Spotify", StringComparison.OrdinalIgnoreCase)) return "Spotify";
         if (raw.Contains("Feishin", StringComparison.OrdinalIgnoreCase)) return "Feishin";
         if (raw.Contains("Chrome", StringComparison.OrdinalIgnoreCase)) return "Chrome";
         if (raw.Contains("msedge", StringComparison.OrdinalIgnoreCase)) return "Edge";
         if (raw.Contains("Firefox", StringComparison.OrdinalIgnoreCase)) return "Firefox";
+        if (raw.Contains("Vivaldi", StringComparison.OrdinalIgnoreCase)) return "Vivaldi";
+        if (raw.Contains("Opera", StringComparison.OrdinalIgnoreCase)) return "Opera";
+        if (raw.Contains("Arc", StringComparison.OrdinalIgnoreCase)) return "Arc";
+        if (raw.Contains("Zen", StringComparison.OrdinalIgnoreCase)) return "Zen";
         if (raw.Contains("ZuneMusic", StringComparison.OrdinalIgnoreCase) || raw.Contains("MediaPlayer", StringComparison.OrdinalIgnoreCase)) return "Media Player";
         if (raw.Contains("VLC", StringComparison.OrdinalIgnoreCase)) return "VLC";
 
@@ -83,8 +113,8 @@ public sealed class SmtcMediaController
             if (manager is null)
                 return list;
 
-            var current = manager.GetCurrentSession();
-            string? currentId = current?.SourceAppUserModelId;
+            var targetSession = ResolveTargetSession(manager);
+            string? targetId = targetSession?.SourceAppUserModelId;
             var allSessions = manager.GetSessions();
             if (allSessions is null)
                 return list;
@@ -94,13 +124,14 @@ public sealed class SmtcMediaController
                 try
                 {
                     string id = s.SourceAppUserModelId ?? "system";
+                    if (IsSelfWebViewSession(id))
+                        continue;
+
                     string appName = FormatAppName(id);
                     var props = await s.TryGetMediaPropertiesAsync();
                     var playback = s.GetPlaybackInfo();
                     bool playing = playback?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
-                    bool isSelected = !string.IsNullOrWhiteSpace(_selectedSessionId)
-                        ? string.Equals(id, _selectedSessionId, StringComparison.OrdinalIgnoreCase)
-                        : string.Equals(id, currentId, StringComparison.OrdinalIgnoreCase);
+                    bool isSelected = string.Equals(id, targetId, StringComparison.OrdinalIgnoreCase);
 
                     list.Add(new MediaSessionSnapshot(
                         id: id,
@@ -126,16 +157,44 @@ public sealed class SmtcMediaController
     {
         try
         {
-            if (!string.IsNullOrWhiteSpace(_selectedSessionId))
+            var sessions = manager.GetSessions();
+            if (!string.IsNullOrWhiteSpace(_selectedSessionId) && sessions is not null)
             {
-                var sessions = manager.GetSessions();
-                if (sessions is not null)
+                foreach (var s in sessions)
                 {
-                    foreach (var s in sessions)
+                    string sid = s.SourceAppUserModelId ?? string.Empty;
+                    if (string.Equals(sid, _selectedSessionId, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(FormatAppName(sid), _selectedSessionId, StringComparison.OrdinalIgnoreCase))
                     {
-                        if (string.Equals(s.SourceAppUserModelId, _selectedSessionId, StringComparison.OrdinalIgnoreCase))
-                            return s;
+                        return s;
                     }
+                }
+            }
+
+            // Prefer any non-self session that is actively playing
+            if (sessions is not null)
+            {
+                foreach (var s in sessions)
+                {
+                    string sid = s.SourceAppUserModelId ?? string.Empty;
+                    if (IsSelfWebViewSession(sid))
+                        continue;
+
+                    if (s.GetPlaybackInfo()?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
+                        return s;
+                }
+            }
+
+            var current = manager.GetCurrentSession();
+            if (current is not null && !IsSelfWebViewSession(current.SourceAppUserModelId))
+                return current;
+
+            if (sessions is not null)
+            {
+                foreach (var s in sessions)
+                {
+                    if (!IsSelfWebViewSession(s.SourceAppUserModelId))
+                        return s;
                 }
             }
         }
@@ -143,7 +202,7 @@ public sealed class SmtcMediaController
         {
         }
 
-        return manager.GetCurrentSession();
+        return null;
     }
 
     public async Task<SmtcMediaSnapshot> GetMediaInfoAsync()
@@ -231,57 +290,152 @@ public sealed class SmtcMediaController
         }
     }
 
-    public async Task PlayPauseAsync()
+    public Task PlayPauseAsync()
     {
-        try
+        return Task.Run(async () =>
         {
-            var manager = await GetManagerAsync();
-            var session = manager is not null ? ResolveTargetSession(manager) : null;
-            if (session is not null)
+            try
             {
-                bool ok = await session.TryTogglePlayPauseAsync();
-                if (ok) return;
+                var manager = await GetManagerAsync();
+                var session = manager is not null ? ResolveTargetSession(manager) : null;
+                if (session is not null)
+                {
+                    string appId = session.SourceAppUserModelId ?? string.Empty;
+                    var beforeStatus = session.GetPlaybackInfo()?.PlaybackStatus;
+                    bool wasPlaying = beforeStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+
+                    // Chromium's system_media_controls_win.cc explicitly handles Play & Pause buttons;
+                    // try explicit Play/Pause first, then TogglePlayPause.
+                    bool ok = wasPlaying
+                        ? await session.TryPauseAsync()
+                        : await session.TryPlayAsync();
+
+                    if (!ok)
+                    {
+                        ok = await session.TryTogglePlayPauseAsync();
+                    }
+
+                    if (ok && IsChromiumSession(appId))
+                    {
+                        await Task.Delay(140);
+                        var afterStatus = session.GetPlaybackInfo()?.PlaybackStatus;
+                        if (afterStatus != beforeStatus)
+                            return;
+                    }
+                    else if (ok)
+                    {
+                        return;
+                    }
+                }
             }
-        }
-        catch
-        {
-        }
-        Win32.SendMediaKey(Win32.VK_MEDIA_PLAY_PAUSE);
+            catch
+            {
+            }
+
+            // Fallback to native Windows virtual media key VK_MEDIA_PLAY_PAUSE (0xB3)
+            Win32.SendMediaKey(Win32.VK_MEDIA_PLAY_PAUSE);
+        });
     }
 
-    public async Task NextAsync()
+    public Task NextAsync()
     {
-        try
+        return Task.Run(async () =>
         {
-            var manager = await GetManagerAsync();
-            var session = manager is not null ? ResolveTargetSession(manager) : null;
-            if (session is not null)
+            try
             {
-                bool ok = await session.TrySkipNextAsync();
-                if (ok) return;
+                var manager = await GetManagerAsync();
+                var session = manager is not null ? ResolveTargetSession(manager) : null;
+                if (session is not null)
+                {
+                    string appId = session.SourceAppUserModelId ?? string.Empty;
+                    var controls = session.GetPlaybackInfo()?.Controls;
+                    bool isNextEnabled = controls?.IsNextEnabled == true;
+                    string? beforeTitle = (await session.TryGetMediaPropertiesAsync())?.Title;
+
+                    bool ok = await session.TrySkipNextAsync();
+                    if (ok && (!IsChromiumSession(appId) || isNextEnabled))
+                    {
+                        if (IsChromiumSession(appId))
+                        {
+                            await Task.Delay(150);
+                            string? afterTitle = (await session.TryGetMediaPropertiesAsync())?.Title;
+                            if (!string.Equals(beforeTitle, afterTitle, StringComparison.Ordinal))
+                                return;
+                        }
+                        else
+                        {
+                            return;
+                        }
+                    }
+                }
             }
-        }
-        catch
-        {
-        }
-        Win32.SendMediaKey(Win32.VK_MEDIA_NEXT_TRACK);
+            catch
+            {
+            }
+
+            // Fallback to native Windows virtual media key VK_MEDIA_NEXT_TRACK (0xB0)
+            Win32.SendMediaKey(Win32.VK_MEDIA_NEXT_TRACK);
+        });
     }
 
-    public async Task PreviousAsync()
+    public Task PreviousAsync()
     {
-        try
+        return Task.Run(async () =>
         {
-            var manager = await GetManagerAsync();
-            var session = manager is not null ? ResolveTargetSession(manager) : null;
-            if (session is not null)
+            try
             {
-                bool ok = await session.TrySkipPreviousAsync();
-                if (ok) return;
+                var manager = await GetManagerAsync();
+                var session = manager is not null ? ResolveTargetSession(manager) : null;
+                if (session is not null)
+                {
+                    string appId = session.SourceAppUserModelId ?? string.Empty;
+                    var controls = session.GetPlaybackInfo()?.Controls;
+                    bool isPrevEnabled = controls?.IsPreviousEnabled == true;
+                    string? beforeTitle = (await session.TryGetMediaPropertiesAsync())?.Title;
+
+                    bool ok = await session.TrySkipPreviousAsync();
+                    if (ok && (!IsChromiumSession(appId) || isPrevEnabled))
+                    {
+                        if (IsChromiumSession(appId))
+                        {
+                            await Task.Delay(150);
+                            string? afterTitle = (await session.TryGetMediaPropertiesAsync())?.Title;
+                            if (!string.Equals(beforeTitle, afterTitle, StringComparison.Ordinal))
+                                return;
+                        }
+                        else
+                        {
+                            return;
+                        }
+                    }
+                }
             }
-        }
-        catch
+            catch
+            {
+            }
+
+            // Fallback to native Windows virtual media key VK_MEDIA_PREV_TRACK (0xB1)
+            Win32.SendMediaKey(Win32.VK_MEDIA_PREV_TRACK);
+        });
+    }
+
+    public Task SeekAsync(double positionSeconds)
+    {
+        return Task.Run(async () =>
         {
-        }
-        Win32.SendMediaKey(Win32.VK_MEDIA_PREV_TRACK);
+            try
+            {
+                var manager = await GetManagerAsync();
+                var session = manager is not null ? ResolveTargetSession(manager) : null;
+                if (session is not null)
+                {
+                    long ticks = TimeSpan.FromSeconds(Math.Max(0.0, positionSeconds)).Ticks;
+                    _ = await session.TryChangePlaybackPositionAsync(ticks);
+                }
+            }
+            catch
+            {
+            }
+        });
     }
 }

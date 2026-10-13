@@ -18,6 +18,7 @@ import { BongoCat } from '../components/BongoCat';
 import {
   MediaInfo,
   MediaSessionItem,
+  getAudioSpectrum,
   getMediaSessions,
   selectMediaSession,
 } from '../services/tauriBridge';
@@ -179,31 +180,61 @@ function renderSessionIcon(appName: string): React.ReactNode {
   return <Music className="w-3.5 h-3.5 text-[#cba6f7]" strokeWidth={2} />;
 }
 
-function resolveFallbackLyrics(title: string, artist: string, durationSecs: number): LyricLine[] {
+function resolveBuiltinLyrics(title: string, artist: string): LyricLine[] {
   const haystack = `${title} ${artist}`.toLowerCase();
   for (const [key, lines] of Object.entries(BUILTIN_SYNCED_LYRICS)) {
     if (haystack.includes(key)) {
       return lines;
     }
   }
-  if (haystack.includes('synthwave')) {
-    return BUILTIN_SYNCED_LYRICS.lofi;
+  return [];
+}
+
+function cleanTrackMetadata(
+  rawTitle: string,
+  rawArtist: string
+): { cleanTitle: string; cleanArtist: string } {
+  let cleanTitle = rawTitle
+    .replace(
+      /\s*[\(\[【](?:official\s*(?:music\s*)?(?:video|audio|lyric\s*video|lyrics|visualizer|mv)|lyric\s*video|lyrics?|audio|video|visualizer|mv|hd|hq|4k|remastered[^)\]]*|live[^)\]]*|feat\.?[^)\]]*|ft\.?[^)\]]*)[\)\]】]/gi,
+      ''
+    )
+    .replace(/\s+(?:feat\.?|ft\.?|featuring)\s+.+$/i, '')
+    .replace(/\s*[-|]\s*(?:youtube(?:\s+music)?|spotify|soundcloud).*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  let cleanArtist = rawArtist
+    .replace(/\s*-\s*topic$/i, '')
+    .replace(/\s*[\(\[](?:feat\.?|ft\.?)[^)\]]*[\)\]]/gi, '')
+    .replace(/\s+(?:feat\.?|ft\.?|featuring)\s+.+$/i, '')
+    .split('•')[0]
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (
+    cleanArtist.toLowerCase() === 'windows smtc audio' ||
+    cleanArtist.toLowerCase() === 'unknown artist' ||
+    cleanArtist.toLowerCase() === 'no media playing'
+  ) {
+    cleanArtist = '';
   }
 
-  const total = Math.max(60, durationSecs || 210);
-  const segments = [
-    `♪ ${title || 'Now Playing'} — ${artist || 'Live Audio Stream'}`,
-    'Synced audio telemetry locked to active SMTC session',
-    'Rhythmic harmonic peaks flowing through the canopy stage',
-    'Floating across the midnight glass horizon',
-    'Every pulse aligned with the radial spectrum',
-    'Crystal frequencies echoing in stereo space',
-    'Drifting into the final cadence of the track',
-  ];
-  return segments.map((text, idx) => ({
-    time: Math.floor((idx / segments.length) * (total * 0.85)),
-    text,
-  }));
+  if (cleanTitle.includes(' - ')) {
+    const parts = cleanTitle
+      .split(' - ')
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (parts.length >= 2 && (!cleanArtist || cleanArtist.toLowerCase().includes('youtube'))) {
+      cleanArtist = parts[0];
+      cleanTitle = parts.slice(1).join(' - ');
+    }
+  }
+
+  return {
+    cleanTitle: cleanTitle || rawTitle.trim(),
+    cleanArtist: cleanArtist || rawArtist.trim(),
+  };
 }
 
 function parseLrcLyrics(syncedLrc?: string | null, plainText?: string | null, durationSecs = 210): LyricLine[] {
@@ -261,8 +292,8 @@ export const MediaView: React.FC<MediaViewProps> = ({
   const [isDraggingScrubber, setIsDraggingScrubber] = useState<boolean>(false);
 
   // Radial spoke visualizer phase (animates strictly when media.is_playing is true)
-  const [visualizerTick, setVisualizerTick] = useState<number>(0);
-
+  // Live 40-band WASAPI Loopback FFT spectrum amplitudes in [0.0, 1.0]
+  const [spectrumBands, setSpectrumBands] = useState<number[]>(() => new Array(40).fill(0));
   // Interactive Lyrics Toggle & Synced Lyrics state
   const [showLyrics, setShowLyrics] = useState<boolean>(false);
   const [lyricsLines, setLyricsLines] = useState<LyricLine[]>([]);
@@ -284,17 +315,30 @@ export const MediaView: React.FC<MediaViewProps> = ({
   }, [media.position_secs, isDraggingScrubber]);
 
   // Animate radial 40-spoke visualizer strictly when music is actively playing
+  // Poll real 40-band WASAPI Loopback FFT spectrum strictly when audio is playing
   useEffect(() => {
     if (!isPlaying) {
-      setVisualizerTick(0);
+      setSpectrumBands(new Array(40).fill(0));
       return;
     }
-    const timer = window.setInterval(() => {
-      setVisualizerTick((prev) => (prev + 1) % 360);
-    }, 85);
-    return () => window.clearInterval(timer);
+    let active = true;
+    const pollSpectrum = async () => {
+      try {
+        const bands = await getAudioSpectrum();
+        if (active && Array.isArray(bands) && bands.length > 0) {
+          setSpectrumBands(bands);
+        }
+      } catch {
+        // Ignore transient spectrum read errors
+      }
+    };
+    void pollSpectrum();
+    const timer = window.setInterval(pollSpectrum, 45);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
   }, [isPlaying]);
-
   // Load available SMTC sessions when popover opens or media updates
   useEffect(() => {
     let mounted = true;
@@ -366,7 +410,16 @@ export const MediaView: React.FC<MediaViewProps> = ({
 
   // Automatically populate built-in time-synced lyrics and fetch live lyrics from LRCLIB
   useEffect(() => {
-    const cacheKey = `${trackTitle.toLowerCase()}__${trackArtist.toLowerCase()}`;
+    const rawTitle = media.title?.trim() || '';
+    const rawArtist = media.artist?.trim() || '';
+
+    if (!rawTitle || rawTitle === 'No Media Playing') {
+      setLyricsLines([]);
+      setLyricsSourceLabel('No Lyrics');
+      return;
+    }
+
+    const cacheKey = `${rawTitle.toLowerCase()}__${rawArtist.toLowerCase()}`;
     const cached = lyricsCacheRef.current[cacheKey];
     if (cached) {
       setLyricsLines(cached.lines);
@@ -374,48 +427,148 @@ export const MediaView: React.FC<MediaViewProps> = ({
       return;
     }
 
-    const fallbackLines = resolveFallbackLyrics(trackTitle, trackArtist, effectiveDuration);
-    setLyricsLines(fallbackLines);
-    setLyricsSourceLabel('Synced Lyrics');
-
-    if (!media.title?.trim() || trackTitle === 'No Media Playing') {
-      return;
+    const builtinLines = resolveBuiltinLyrics(rawTitle, rawArtist);
+    if (builtinLines.length > 0) {
+      setLyricsLines(builtinLines);
+      setLyricsSourceLabel('Synced Lyrics');
+    } else {
+      setLyricsLines([]);
+      setLyricsSourceLabel('Searching LRCLIB...');
     }
 
     const controller = new AbortController();
-    const url = `https://lrclib.net/api/get?track_name=${encodeURIComponent(
-      trackTitle
-    )}&artist_name=${encodeURIComponent(trackArtist)}`;
+    const { cleanTitle, cleanArtist } = cleanTrackMetadata(rawTitle, rawArtist);
 
-    fetch(url, { signal: controller.signal })
-      .then((res) => (res.ok ? res.json() : null))
-      .then(
-        (
-          data: {
-            syncedLyrics?: string | null;
-            plainLyrics?: string | null;
-          } | null
-        ) => {
-          if (!data) return;
-          const parsed = parseLrcLyrics(
-            data.syncedLyrics,
-            data.plainLyrics,
-            effectiveDuration
-          );
-          if (parsed.length > 0) {
-            const label = data.syncedLyrics ? 'LRCLIB Synced' : 'LRCLIB Lyrics';
-            lyricsCacheRef.current[cacheKey] = { lines: parsed, label };
-            setLyricsLines(parsed);
-            setLyricsSourceLabel(label);
+    interface LrclibTrackResponse {
+      syncedLyrics?: string | null;
+      plainLyrics?: string | null;
+    }
+
+    const extractValidLyrics = (
+      item: LrclibTrackResponse | null | undefined
+    ): { lines: LyricLine[]; label: string } | null => {
+      if (!item) return null;
+      const parsed = parseLrcLyrics(
+        item.syncedLyrics,
+        item.plainLyrics,
+        effectiveDuration
+      );
+      if (parsed.length > 0) {
+        return {
+          lines: parsed,
+          label: item.syncedLyrics ? 'LRCLIB Synced' : 'LRCLIB Lyrics',
+        };
+      }
+      return null;
+    };
+
+    const fetchFromLrclib = async () => {
+      try {
+        // 1. Primary query: /api/get?artist_name={artist}&track_name={title}
+        const getUrl = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(
+          rawArtist
+        )}&track_name=${encodeURIComponent(rawTitle)}`;
+        const getRes = await fetch(getUrl, { signal: controller.signal });
+        if (getRes.ok) {
+          const getData = (await getRes.json()) as LrclibTrackResponse;
+          const found = extractValidLyrics(getData);
+          if (found) {
+            lyricsCacheRef.current[cacheKey] = found;
+            setLyricsLines(found.lines);
+            setLyricsSourceLabel(found.label);
+            return;
           }
         }
-      )
-      .catch(() => {
-        // Keep immediate built-in synced lyrics on offline/404
-      });
+
+        // 2. If cleaned metadata differs, try /api/get with cleaned artist & title
+        if (cleanTitle !== rawTitle || cleanArtist !== rawArtist) {
+          const cleanGetUrl = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(
+            cleanArtist
+          )}&track_name=${encodeURIComponent(cleanTitle)}`;
+          const cleanGetRes = await fetch(cleanGetUrl, { signal: controller.signal });
+          if (cleanGetRes.ok) {
+            const cleanGetData = (await cleanGetRes.json()) as LrclibTrackResponse;
+            const found = extractValidLyrics(cleanGetData);
+            if (found) {
+              lyricsCacheRef.current[cacheKey] = found;
+              setLyricsLines(found.lines);
+              setLyricsSourceLabel(found.label);
+              return;
+            }
+          }
+        }
+
+        // 3. Fallback search: /api/search?track_name={cleanTitle}&artist_name={cleanArtist}
+        const searchByFieldsUrl = `https://lrclib.net/api/search?track_name=${encodeURIComponent(
+          cleanTitle
+        )}&artist_name=${encodeURIComponent(cleanArtist)}`;
+        const searchRes = await fetch(searchByFieldsUrl, { signal: controller.signal });
+        if (searchRes.ok) {
+          const list = (await searchRes.json()) as LrclibTrackResponse[];
+          if (Array.isArray(list)) {
+            const syncedMatch = list.find((item) => item?.syncedLyrics?.trim());
+            const firstMatch = syncedMatch || list.find((item) => item?.plainLyrics?.trim());
+            const found = extractValidLyrics(firstMatch);
+            if (found) {
+              lyricsCacheRef.current[cacheKey] = found;
+              setLyricsLines(found.lines);
+              setLyricsSourceLabel(found.label);
+              return;
+            }
+          }
+        }
+
+        // 4. Broad fallback search: /api/search?q={cleanArtist} {cleanTitle}
+        const queryText = `${cleanArtist} ${cleanTitle}`.trim();
+        if (queryText) {
+          const searchByQueryUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(
+            queryText
+          )}`;
+          const queryRes = await fetch(searchByQueryUrl, { signal: controller.signal });
+          if (queryRes.ok) {
+            const list = (await queryRes.json()) as LrclibTrackResponse[];
+            if (Array.isArray(list)) {
+              const syncedMatch = list.find((item) => item?.syncedLyrics?.trim());
+              const firstMatch = syncedMatch || list.find((item) => item?.plainLyrics?.trim());
+              const found = extractValidLyrics(firstMatch);
+              if (found) {
+                lyricsCacheRef.current[cacheKey] = found;
+                setLyricsLines(found.lines);
+                setLyricsSourceLabel(found.label);
+                return;
+              }
+            }
+          }
+        }
+
+        // 5. No LRCLIB match found: keep builtinLines if present, otherwise []
+        if (builtinLines.length > 0) {
+          const fallbackEntry = { lines: builtinLines, label: 'Synced Lyrics' };
+          lyricsCacheRef.current[cacheKey] = fallbackEntry;
+          setLyricsLines(builtinLines);
+          setLyricsSourceLabel('Synced Lyrics');
+        } else {
+          const emptyEntry = { lines: [], label: 'No Lyrics' };
+          lyricsCacheRef.current[cacheKey] = emptyEntry;
+          setLyricsLines([]);
+          setLyricsSourceLabel('No Lyrics');
+        }
+      } catch (err) {
+        if ((err as Error)?.name === 'AbortError') return;
+        if (builtinLines.length > 0) {
+          setLyricsLines(builtinLines);
+          setLyricsSourceLabel('Synced Lyrics');
+        } else {
+          setLyricsLines([]);
+          setLyricsSourceLabel('No Lyrics');
+        }
+      }
+    };
+
+    void fetchFromLrclib();
 
     return () => controller.abort();
-  }, [trackTitle, trackArtist, effectiveDuration, media.title]);
+  }, [media.title, media.artist, effectiveDuration]);
 
   const activeLyricIndex = useMemo(() => {
     if (lyricsLines.length === 0) return 0;
@@ -444,6 +597,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
   }, [activeLyricIndex, showLyrics]);
 
   // Precompute 40 radial spoke bars around cx=95, cy=95
+  // Precompute 40 radial spoke bars driven by live 40-band FFT audio spectrum
   const spokes = useMemo(() => {
     const count = 40;
     const cx = 95;
@@ -452,14 +606,14 @@ export const MediaView: React.FC<MediaViewProps> = ({
 
     return Array.from({ length: count }, (_, idx) => {
       const angle = (idx / count) * Math.PI * 2 - Math.PI / 2;
-      let length = 6 + (idx % 3) * 1.5;
+      let length = 5.5;
 
       if (isPlaying) {
-        const waveA = Math.sin(visualizerTick * 0.42 + idx * 0.55);
-        const waveB = Math.cos(visualizerTick * 0.27 - idx * 0.35);
-        const harmonic = ((waveA + waveB + 2) / 4) * 18;
-        const bassSpike = idx % 5 === visualizerTick % 5 ? 5 : 0;
-        length = Math.max(5, Math.min(25, 6 + harmonic + bassSpike));
+        const rawAmp =
+          Array.isArray(spectrumBands) && typeof spectrumBands[idx] === 'number'
+            ? spectrumBands[idx]
+            : 0;
+        length = Math.max(5.5, Math.min(26, 5.5 + rawAmp * 21.5));
       }
 
       const outerRadius = innerRadius + length;
@@ -470,8 +624,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
 
       return { idx, x1, y1, x2, y2, length };
     });
-  }, [isPlaying, visualizerTick]);
-
+  }, [isPlaying, spectrumBands]);
   return (
     <div
       data-tauri-drag-region="false"
@@ -653,8 +806,8 @@ export const MediaView: React.FC<MediaViewProps> = ({
           <div
             className={`w-full h-full flex flex-col items-center justify-center gap-3 transition-all duration-300 ease-out ${
               showLyrics
-                ? 'opacity-0 translate-y-4 scale-[0.97] pointer-events-none absolute inset-0'
-                : 'opacity-100 translate-y-0 scale-100 relative'
+                ? 'opacity-0 translate-y-2 pointer-events-none hidden'
+                : 'opacity-100 translate-y-0 pointer-events-auto relative z-10'
             }`}
           >
             {/* Large Transport Buttons: Previous (|<), Circular Play/Pause (( > )), Next (>|) */}
@@ -863,8 +1016,8 @@ export const MediaView: React.FC<MediaViewProps> = ({
           <div
             className={`w-full h-full rounded-xl border px-3 py-2 flex flex-col justify-between transition-all duration-300 ease-out ${
               showLyrics
-                ? 'opacity-100 translate-y-0 scale-100 relative'
-                : 'opacity-0 -translate-y-4 scale-[0.97] pointer-events-none absolute inset-0'
+                ? 'opacity-100 translate-y-0 pointer-events-auto relative z-10'
+                : 'opacity-0 translate-y-2 pointer-events-none hidden'
             }`}
             style={{
               background: 'var(--theme-track, rgba(255, 255, 255, 0.03))',
@@ -874,54 +1027,74 @@ export const MediaView: React.FC<MediaViewProps> = ({
             <div
               ref={lyricsScrollRef}
               data-tauri-drag-region="false"
-              className="flex-1 overflow-y-auto space-y-1.5 pr-1 py-2 pointer-events-auto"
+              className={`flex-1 overflow-y-auto space-y-1.5 pr-1 py-2 ${
+                showLyrics ? 'pointer-events-auto' : 'pointer-events-none'
+              }`}
             >
-              {lyricsLines.map((line, index) => {
-                const isActive = index === activeLyricIndex;
-                const isPast = index < activeLyricIndex;
-                return (
-                  <button
-                    key={`${line.time}-${index}`}
-                    ref={isActive ? activeLyricItemRef : null}
-                    type="button"
-                    data-tauri-drag-region="false"
-                    onClick={() => {
-                      setLocalPosition(line.time);
-                      onSeek?.(line.time);
+              {lyricsLines.length === 0 ? (
+                <div className="w-full h-full flex flex-col items-center justify-center text-center px-4 py-6 gap-1.5">
+                  <Mic2
+                    className="w-5 h-5 opacity-45"
+                    style={{ color: 'var(--theme-accent, #cba6f7)' }}
+                    strokeWidth={1.8}
+                  />
+                  <p
+                    className="text-xs font-medium"
+                    style={{
+                      color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))',
                     }}
-                    className={`w-full text-left px-2.5 py-1.5 rounded-lg transition-all duration-200 flex items-center justify-between gap-2 pointer-events-auto cursor-pointer ${
-                      isActive
-                        ? 'font-bold scale-[1.01]'
-                        : isPast
-                        ? 'opacity-45 hover:opacity-80'
-                        : 'opacity-70 hover:opacity-100'
-                    }`}
-                    style={
-                      isActive
-                        ? {
-                            background: 'var(--theme-track, rgba(203, 166, 247, 0.14))',
-                            color: 'var(--theme-accent, #cba6f7)',
-                          }
-                        : {
-                            color: 'var(--theme-text-primary, #cdd6f4)',
-                          }
-                    }
-                    title={`Jump to ${formatMediaTime(line.time)}`}
                   >
-                    <span className="text-xs leading-snug">{line.text}</span>
-                    <span
-                      className="text-[10px] font-mono tabular-nums shrink-0 opacity-75"
-                      style={{
-                        color: isActive
-                          ? 'var(--theme-accent, #cba6f7)'
-                          : 'var(--theme-text-secondary, rgba(205, 214, 244, 0.6))',
+                    No lyrics available for this track
+                  </p>
+                </div>
+              ) : (
+                lyricsLines.map((line, index) => {
+                  const isActive = index === activeLyricIndex;
+                  const isPast = index < activeLyricIndex;
+                  return (
+                    <button
+                      key={`${line.time}-${index}`}
+                      ref={isActive ? activeLyricItemRef : null}
+                      type="button"
+                      data-tauri-drag-region="false"
+                      onClick={() => {
+                        setLocalPosition(line.time);
+                        onSeek?.(line.time);
                       }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-lg transition-all duration-200 flex items-center justify-between gap-2 pointer-events-auto cursor-pointer ${
+                        isActive
+                          ? 'font-bold scale-[1.01]'
+                          : isPast
+                          ? 'opacity-45 hover:opacity-80'
+                          : 'opacity-70 hover:opacity-100'
+                      }`}
+                      style={
+                        isActive
+                          ? {
+                              background: 'var(--theme-track, rgba(203, 166, 247, 0.14))',
+                              color: 'var(--theme-accent, #cba6f7)',
+                            }
+                          : {
+                              color: 'var(--theme-text-primary, #cdd6f4)',
+                            }
+                      }
+                      title={`Jump to ${formatMediaTime(line.time)}`}
                     >
-                      {formatMediaTime(line.time)}
-                    </span>
-                  </button>
-                );
-              })}
+                      <span className="text-xs leading-snug">{line.text}</span>
+                      <span
+                        className="text-[10px] font-mono tabular-nums shrink-0 opacity-75"
+                        style={{
+                          color: isActive
+                            ? 'var(--theme-accent, #cba6f7)'
+                            : 'var(--theme-text-secondary, rgba(205, 214, 244, 0.6))',
+                        }}
+                      >
+                        {formatMediaTime(line.time)}
+                      </span>
+                    </button>
+                  );
+                })
+              )}
             </div>
 
             <div

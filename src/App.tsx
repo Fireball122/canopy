@@ -39,6 +39,7 @@ import {
   mediaPlayPause,
   mediaNext,
   mediaPrev,
+  mediaSeek,
   getMasterVolume,
   setMasterVolume,
   getBrightness,
@@ -247,8 +248,11 @@ const CanopyShellContent: React.FC = () => {
     return () => window.clearInterval(id);
   }, []);
 
+  // Track when the dropdown was last closed so brief mouse-out/mouse-in or duplicate open events
+  // never reset the user's active tab while they are interacting with the shell.
+  const lastClosedTimestampRef = useRef<number>(0);
+
   // Listen for native host events ('caelestia:set-open' / 'caelestia:toggle') and Escape key.
-  // Whenever the shell is reopened, always default activeTab to 'dashboard'.
   useEffect(() => {
     const onSetOpen = (e: Event) => {
       const custom = e as CustomEvent<{ open?: boolean }>;
@@ -259,17 +263,19 @@ const CanopyShellContent: React.FC = () => {
             ? custom.detail
             : null;
       if (nextOpen !== null) {
-        if (nextOpen) {
-          setActiveTab('dashboard');
-        }
-        setIsOpen(nextOpen);
+        setIsOpen((prevOpen) => {
+          if (nextOpen && !prevOpen) {
+            setActiveTab('dashboard');
+          }
+          return nextOpen;
+        });
       }
     };
 
     const onToggle = () => {
       setIsOpen((prev) => {
         const next = !prev;
-        if (next) {
+        if (next && !prev) {
           setActiveTab('dashboard');
         }
         return next;
@@ -278,20 +284,20 @@ const CanopyShellContent: React.FC = () => {
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        lastClosedTimestampRef.current = Date.now();
         setIsOpen(false);
         setDropdownOpen(false).catch(() => {});
       } else if (e.key === '`' && (e.ctrlKey || e.altKey || e.metaKey)) {
         e.preventDefault();
         setIsOpen((prev) => {
           const next = !prev;
-          if (next) {
+          if (next && !prev) {
             setActiveTab('dashboard');
           }
           return next;
         });
       }
     };
-
     window.addEventListener('caelestia:set-open', onSetOpen);
     window.addEventListener('caelestia:toggle', onToggle);
     window.addEventListener('keydown', handleKeyDown);
@@ -345,13 +351,25 @@ const CanopyShellContent: React.FC = () => {
     };
   }, []);
 
+  // Lock window after user transport actions so background poll never overwrites optimistic toggle
+  const mediaActionLockUntilRef = useRef<number>(0);
+
+  const delayMs = (ms: number): Promise<void> => {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    window.setTimeout(resolve, ms);
+    return promise;
+  };
+
   // Poll media info every 800ms
   useEffect(() => {
     let active = true;
     const pollMedia = async () => {
+      if (Date.now() < mediaActionLockUntilRef.current) {
+        return;
+      }
       try {
         const info = await getMediaInfo();
-        if (!active) return;
+        if (!active || Date.now() < mediaActionLockUntilRef.current) return;
         setMedia(info);
         if (info.position_secs > 0) {
           setScrubPosition(info.position_secs);
@@ -456,9 +474,11 @@ const CanopyShellContent: React.FC = () => {
 
   // Media transport handlers
   const handlePlayPause = async () => {
+    mediaActionLockUntilRef.current = Date.now() + 750;
     setMedia((prev) => ({ ...prev, is_playing: !prev.is_playing }));
     try {
       await mediaPlayPause();
+      await delayMs(240);
       const updated = await getMediaInfo();
       if (updated) setMedia(updated);
     } catch {
@@ -467,9 +487,11 @@ const CanopyShellContent: React.FC = () => {
   };
 
   const handlePrev = async () => {
+    mediaActionLockUntilRef.current = Date.now() + 750;
     setScrubPosition(0);
     try {
       await mediaPrev();
+      await delayMs(240);
       const updated = await getMediaInfo();
       if (updated) setMedia(updated);
     } catch {
@@ -478,13 +500,26 @@ const CanopyShellContent: React.FC = () => {
   };
 
   const handleNext = async () => {
+    mediaActionLockUntilRef.current = Date.now() + 750;
     setScrubPosition(0);
     try {
       await mediaNext();
+      await delayMs(240);
       const updated = await getMediaInfo();
       if (updated) setMedia(updated);
     } catch {
       // Fallback
+    }
+  };
+
+  const handleSeek = async (seconds: number) => {
+    mediaActionLockUntilRef.current = Date.now() + 600;
+    setScrubPosition(seconds);
+    setMedia((prev) => ({ ...prev, position_secs: seconds }));
+    try {
+      await mediaSeek(seconds);
+    } catch {
+      // Ignore
     }
   };
 
@@ -657,14 +692,13 @@ const CanopyShellContent: React.FC = () => {
   const uvRiskLabel = uvValue >= 8 ? 'Very High' : uvValue >= 6 ? 'High' : uvValue >= 3 ? 'Moderate' : 'Low';
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-transparent select-none flex flex-col items-center">
-      {/* Top-Screen 2px Transparent Trigger Strip */}
-      {settings.topHoverTrigger && (
+    <div className="relative w-[850px] h-[430px] overflow-hidden bg-transparent select-none flex flex-col items-center">
+      {/* Top-Screen 2px Transparent Trigger Strip (only active when closed so it never intercepts or resets open tabs) */}
+      {!isOpen && settings.topHoverTrigger && (
         <div
           data-tauri-drag-region="false"
           className="fixed top-0 left-0 right-0 h-[2px] z-50 bg-transparent pointer-events-auto cursor-pointer"
           onMouseEnter={() => {
-            setActiveTab('dashboard');
             setIsOpen(true);
           }}
           title="Hover top edge to summon Canopy"
@@ -1071,7 +1105,7 @@ const CanopyShellContent: React.FC = () => {
               onPlayPause={handlePlayPause}
               onPrev={handlePrev}
               onNext={handleNext}
-              onSeek={(sec) => setScrubPosition(sec)}
+              onSeek={handleSeek}
               onSelectSession={handleSelectSession}
             />
           )}

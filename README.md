@@ -4,73 +4,58 @@
 
 ---
 
-## Key Features
+## Latest Upgrades & Architectural Refinements
 
-### 1. Dynamic Wallpaper-Adaptive Theming
-- Automatically samples dominant and accent palettes from the active Windows desktop wallpaper (`Services/WallpaperService.cs` & `src/services/palette.ts`).
-- Supports **Auto**, **Dark**, and **Light** theme modes with smooth CSS custom property transitions.
-- **Featured Wallpaper Showcase & Carousel** (`src/views/WallpaperView.tsx`) with instant wallpaper switching, custom directory scanning, and live color swatch previews.
+### 1. Zero-Margin Seamless Window Framing
+- Aligned the WPF window bounds (`MainWindow.xaml`) and CSS `.canopy-shell` to an exact **850 × 430px** footprint.
+- Eliminated Windows 11 DWM non-client glass border dead zones and removed ghost drop shadows for a razor-sharp, seamless overlay.
+- Cursor hit-testing precisely bounds the visible card with 0px perimeter dead-zones.
 
-### 2. Seven Navigation Tabs & Expandable Overlay Bar
-- **Compact Pill Bar** docked at the top center of the primary display (`Win + \`` hotkey or top-edge hover trigger).
-- **Dashboard (`src/App.tsx`)**: Unified Bento grid with quick profile/uptime summary, live media mini-player, radial system gauges, weather snapshot, interactive calendar, and self-contained vertical volume/mic/brightness capsule sliders (`src/components/VerticalSliders.tsx`).
-- **Media (`src/views/MediaView.tsx`)**:
-  - Windows SMTC live session integration (`Interop/SmtcMediaController.cs`) with album art, play/pause/skip, and timeline scrubbing.
-  - Music-reactive radial spectrum visualizer, spinning vinyl platter, and Bongo Cat / custom uploaded GIF widget (`src/components/BongoCat.tsx`).
-  - Interactive **`[ Lyrics ]`** toggle with live time-synced lyrics fetched from `lrclib.net`.
-- **Performance (`src/views/PerformanceView.tsx`)**:
-  - Concentric dual-arc gauges for **GPU**, **CPU**, and **Memory** load + temperature.
-  - Real-time **Network Traffic** (`↓ Download` / `↑ Upload` throughput in KB/s & MB/s) sampled from active network adapters.
-  - Expandable per-core CPU load drawer and top processes table.
-- **Apps (`src/views/AppsView.tsx`)**:
-  - Optional toggleable **`[ Apps ]`** tab scanning installed Windows applications & Start Menu shortcuts with search, category filtering, and one-click native launch.
-- **Wallpaper (`src/views/WallpaperView.tsx`)**:
-  - Hero active wallpaper showcase card + horizontal preview carousel.
-- **Weather (`src/App.tsx` & `src/services/weather.ts`)**:
-  - Live Open-Meteo integration with current conditions, daily Low–High range bar, 2×2 atmospheric card (**Feels Like**, **Humidity**, **Wind Speed**, **UV Index** with risk badge), and multi-day forecast.
-- **Settings (`src/views/SettingsView.tsx`)**:
-  - Centralized persistence for all preferences: temperature unit (`°C`/`°F`), clock format (`12H`/`24H`), brightness slider toggle, Apps tab toggle, custom mascot GIF URL/file upload, top-edge hover trigger, and Windows startup registration.
+### 2. Wallpaper-Adaptive Theming with WCAG Mathematical Contrast Engine
+- Automatic palette extraction from active Windows wallpapers (`Services/WallpaperService.cs` & `src/services/palette.ts`).
+- W3C luminance and mathematical contrast ratio calculations guarantee minimum 4.5:1 text-to-background contrast across dark, light, and auto modes.
+- Fully dynamic theme color cascading: Vertical sliders (Volume, Microphone, Brightness), icons, glow rings, and active indicators update instantly upon wallpaper rotation.
 
----
+### 3. Media Controls, Live LRCLIB Lyrics & WASAPI Audio Spectrum
+- Real-time Windows SMTC session tracking with fallback to native virtual media keys (`VK_MEDIA_*`) for Chromium/Brave browsers.
+- **Interactive Inline Lyrics:** Seamless crossfade toggle between media controls and time-synced lyrics queried live from `lrclib.net`.
+- **True WASAPI Audio Visualizer:** High-fidelity audio spectrum frequency analysis responding dynamically to live system audio output.
+- **Custom Mascot Widget:** Support for animated Bongo Cat or custom user-uploaded animated GIF mascots.
 
-## Project Structure
+### 4. Performance & Telemetry Dashboard
+- Concentric dual-arc gauges for GPU, CPU, and RAM load/temperature.
+- Live **Network Traffic** (real-time download and upload throughput in KB/s & MB/s).
+- Expandable CPU per-core utilization drawer and top process resource monitor.
 
-```text
-Canopy/
-├── App.xaml / App.xaml.cs            # .NET 8 WPF application entry point
-├── MainWindow.xaml / .cs             # Borderless WebView2 overlay window, Win32 hotkeys & IPC bridge
-├── Caelestia-Win.csproj              # .NET 8 Windows project configuration
-├── Interop/                          # Native Win32 P/Invoke, CoreAudio & Windows SMTC media controllers
-├── Services/                         # SystemMonitorService (CPU/GPU/RAM/Net/Apps) & WallpaperService
-├── Models/                           # Wallpaper metadata models
-├── src/                              # React 18 + TypeScript + Tailwind CSS frontend
-│   ├── components/                   # BongoCat, CalendarCard, RadialGauge, VerticalSliders
-│   ├── context/                      # SettingsContext (persistent user configuration)
-│   ├── services/                     # tauriBridge, weather (Open-Meteo), palette extractor
-│   └── views/                        # MediaView, PerformanceView, AppsView, WallpaperView, SettingsView
-├── src-tauri/                        # Rust / Tauri backend crate (system, media, audio, theme)
-├── dist/                             # Pre-built Vite production frontend bundle
-├── release/                          # Pre-built Canopy.exe & Canopy.dll native host binaries
-└── Start Canopy.bat                  # Desktop launcher script
-```
+### 5. Windows Apps & Browser Launcher
+- System-wide scanning of both `%ProgramData%` and `%AppData%` Start Menu trees.
+- Native application icon extraction and auto-detection of default browsers (Brave, Chrome, Firefox, Edge, Zen, Arc, Vivaldi).
+
+### 6. Minimalist Wallpaper Showcase & Gallery
+- Hero showcase card displaying the active wallpaper with live theme swatch preview.
+- Clean 16:9 thumbnail gallery with smooth hover zoom effects and instant wallpaper application.
+
+### 7. Interactive Calendar & Time Selector Modal
+- Repositioned notification badges that cleanly align inside date selection rings.
+- Dedicated interactive time selector popover with 12-hour scrolling, minute selector, and AM/PM toggle.
 
 ---
 
 ## Building & Running
 
-### Frontend (`dist/`)
+### Frontend
 ```bash
 npm install
 npm run build
 ```
 
-### Native Host (`.NET 8 WebView2`)
+### Native Host (.NET 8 WPF)
 ```bash
 dotnet publish -c Release -o "C:\Users\CEO\AppData\Local\Canopy"
 ```
 
-### Launching
-Run `Start Canopy.bat` or execute:
+### Desktop Launcher
+Execute `Start Canopy.bat` on your Desktop or run:
 ```bash
-C:\Users\CEO\AppData\Local\Canopy\Canopy.exe --expand
+"C:\Users\CEO\AppData\Local\Canopy\Canopy.exe" --expand
 ```

@@ -29,6 +29,38 @@ const STORAGE_KEY = 'shell_calendar_events';
 const WEEKDAYS_MONDAY = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'] as const;
 const WEEKDAYS_SUNDAY = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'] as const;
 
+function parse24HourTime(hhmm: string): {
+  hour12: number;
+  minute: number;
+  period: 'AM' | 'PM';
+} {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
+  if (!match) {
+    return { hour12: 9, minute: 0, period: 'AM' };
+  }
+  const rawH = Math.min(23, Math.max(0, parseInt(match[1], 10)));
+  const rawM = Math.min(59, Math.max(0, parseInt(match[2], 10)));
+  const period: 'AM' | 'PM' = rawH >= 12 ? 'PM' : 'AM';
+  const hour12 = rawH % 12 === 0 ? 12 : rawH % 12;
+  return { hour12, minute: rawM, period };
+}
+
+function to24HourTime(hour12: number, minute: number, period: 'AM' | 'PM'): string {
+  let h24 = hour12 % 12;
+  if (period === 'PM') {
+    h24 += 12;
+  }
+  return `${String(h24).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function format12HourDisplay(hhmm: string): string {
+  const { hour12, minute, period } = parse24HourTime(hhmm);
+  return `${String(hour12).padStart(2, '0')}:${String(minute).padStart(2, '0')} ${period}`;
+}
+
+const HOURS_12 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
+const MINUTES_60 = Array.from({ length: 60 }, (_, i) => i);
+
 export const CalendarCard: React.FC<CalendarCardProps> = ({
   className = '',
   firstDayOfWeek,
@@ -56,6 +88,13 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
   const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
   const [newReminderText, setNewReminderText] = useState<string>('');
   const [newReminderTime, setNewReminderTime] = useState<string>('09:00');
+  const [timePickerOpen, setTimePickerOpen] = useState<boolean>(false);
+  const [pickerHour, setPickerHour] = useState<number>(9);
+  const [pickerMinute, setPickerMinute] = useState<number>(0);
+  const [pickerPeriod, setPickerPeriod] = useState<'AM' | 'PM'>('AM');
+
+  const hourColumnRef = useRef<HTMLDivElement | null>(null);
+  const minuteColumnRef = useRef<HTMLDivElement | null>(null);
 
   const [events, setEvents] = useState<CalendarEvent[]>(() => {
     try {
@@ -116,6 +155,22 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
       // Ignore storage errors
     }
   }, [events]);
+
+  useEffect(() => {
+    if (!timePickerOpen) return;
+    const raf = window.requestAnimationFrame(() => {
+      const activeHourEl = hourColumnRef.current?.querySelector<HTMLButtonElement>(
+        '[data-active="true"]'
+      );
+      activeHourEl?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+
+      const activeMinuteEl = minuteColumnRef.current?.querySelector<HTMLButtonElement>(
+        '[data-active="true"]'
+      );
+      activeMinuteEl?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [timePickerOpen]);
 
   // Every 30 seconds, check if any reminder matches today's YYYY-MM-DD and current HH:MM
   useEffect(() => {
@@ -255,6 +310,19 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
     setDrawerOpen(true);
   };
 
+  const handleOpenTimePicker = () => {
+    const parsed = parse24HourTime(newReminderTime);
+    setPickerHour(parsed.hour12);
+    setPickerMinute(parsed.minute);
+    setPickerPeriod(parsed.period);
+    setTimePickerOpen(true);
+  };
+
+  const handleConfirmTimePicker = () => {
+    setNewReminderTime(to24HourTime(pickerHour, pickerMinute, pickerPeriod));
+    setTimePickerOpen(false);
+  };
+
   const handleAddReminder = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = newReminderText.trim();
@@ -367,7 +435,12 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
                 : 'var(--theme-text-secondary, #94A3B8)',
             background: 'var(--theme-track, rgba(255, 255, 255, 0.06))',
           }}
-          onClick={() => setDrawerOpen((prev) => !prev)}
+          onClick={() => {
+            setDrawerOpen((prev) => {
+              if (prev) setTimePickerOpen(false);
+              return !prev;
+            });
+          }}
           title="Toggle reminders for selected date"
           className="pointer-events-auto cursor-pointer flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all border"
         >
@@ -440,13 +513,15 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
                 isToday ? 'font-bold' : isSelected ? 'font-semibold' : 'font-medium'
               }`}
             >
-              <span className="leading-none">{cell.dayNumber}</span>
+              <span className={`leading-none ${cell.eventCount > 0 ? '-translate-y-[1.5px]' : ''}`}>
+                {cell.dayNumber}
+              </span>
               {cell.eventCount > 0 && (
                 <span
                   style={{
                     background: isToday ? '#FFFFFF' : 'var(--theme-accent, #A29BFE)',
                   }}
-                  className="absolute -bottom-0.5 w-1 h-1 rounded-full"
+                  className="absolute bottom-[2px] w-1 h-1 rounded-full"
                 />
               )}
             </button>
@@ -496,7 +571,10 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
                 cursor: 'pointer',
                 color: 'var(--theme-text-secondary, #94A3B8)',
               }}
-              onClick={() => setDrawerOpen(false)}
+              onClick={() => {
+                setTimePickerOpen(false);
+                setDrawerOpen(false);
+              }}
               aria-label="Close reminders"
               className="pointer-events-auto cursor-pointer p-1 rounded-md hover:opacity-100 transition-colors"
             >
@@ -538,7 +616,7 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
                         className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded font-mono text-[9px] shrink-0 font-semibold"
                       >
                         <Clock className="w-2.5 h-2.5" />
-                        {ev.time}
+                        {format12HourDisplay(ev.time)}
                       </span>
                     )}
                     <span
@@ -590,20 +668,28 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
               }}
               className="pointer-events-auto flex-1 min-w-0 border rounded-lg px-2 py-1 text-[11px] focus:outline-none"
             />
-            <input
-              type="time"
-              value={newReminderTime}
-              onChange={(e) => setNewReminderTime(e.target.value)}
+            <button
+              type="button"
+              onClick={handleOpenTimePicker}
               data-tauri-drag-region="false"
+              title="Select reminder time"
               style={{
                 pointerEvents: 'auto',
                 cursor: 'pointer',
                 background: 'var(--theme-track, rgba(255, 255, 255, 0.08))',
-                borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.12))',
+                borderColor: timePickerOpen
+                  ? 'var(--theme-accent, #A29BFE)'
+                  : 'var(--theme-border, rgba(255, 255, 255, 0.12))',
                 color: 'var(--theme-text-primary, #F8FAFC)',
               }}
-              className="pointer-events-auto cursor-pointer w-[68px] border rounded-lg px-1.5 py-1 text-[10px] font-mono focus:outline-none"
-            />
+              className="pointer-events-auto cursor-pointer inline-flex items-center gap-1 border rounded-lg px-2 py-1 text-[10px] font-mono font-semibold hover:border-white/25 active:scale-95 transition-all shrink-0 tabular-nums"
+            >
+              <Clock
+                className="w-3 h-3 shrink-0"
+                style={{ color: 'var(--theme-accent, #A29BFE)' }}
+              />
+              <span>{format12HourDisplay(newReminderTime)}</span>
+            </button>
             <button
               type="submit"
               data-tauri-drag-region="false"
@@ -619,6 +705,236 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
               <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
             </button>
           </form>
+
+          {/* Interactive Time Selector Popup Modal */}
+          {timePickerOpen && (
+            <div
+              data-tauri-drag-region="false"
+              style={{
+                pointerEvents: 'auto',
+                background: 'var(--theme-bg, rgba(16, 16, 22, 0.98))',
+                borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.16))',
+                color: 'var(--theme-text-primary, #F8FAFC)',
+              }}
+              className="absolute inset-0 z-30 rounded-xl backdrop-blur-2xl border p-2.5 flex flex-col justify-between shadow-2xl animate-in fade-in duration-150"
+            >
+              {/* Modal Header */}
+              <div
+                style={{ borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.1))' }}
+                className="flex items-center justify-between border-b pb-1.5"
+              >
+                <div className="flex items-center gap-1.5">
+                  <Clock
+                    className="w-3.5 h-3.5"
+                    style={{ color: 'var(--theme-accent, #A29BFE)' }}
+                  />
+                  <span className="text-[11px] font-semibold tracking-tight">Select Time</span>
+                </div>
+                <span
+                  style={{
+                    background: 'var(--theme-track, rgba(255, 255, 255, 0.1))',
+                    color: 'var(--theme-accent, #A29BFE)',
+                  }}
+                  className="px-1.5 py-0.5 rounded font-mono text-[10px] font-bold tabular-nums"
+                >
+                  {`${String(pickerHour).padStart(2, '0')}:${String(pickerMinute).padStart(2, '0')} ${pickerPeriod}`}
+                </span>
+              </div>
+
+              {/* Scrollable / Clickable Selector Columns: Hours (1-12), Minutes (00-59), AM/PM */}
+              <div
+                data-tauri-drag-region="false"
+                style={{ pointerEvents: 'auto' }}
+                className="grid grid-cols-3 gap-1.5 flex-1 min-h-0 my-1.5"
+              >
+                {/* Hours Column (1..12) */}
+                <div
+                  style={{
+                    background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
+                    borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
+                  }}
+                  className="flex flex-col rounded-lg border p-1 min-h-0"
+                >
+                  <div
+                    style={{ color: 'var(--theme-text-secondary, #94A3B8)' }}
+                    className="text-[9px] font-mono font-semibold uppercase tracking-wider text-center pb-0.5"
+                  >
+                    Hour
+                  </div>
+                  <div
+                    ref={hourColumnRef}
+                    data-tauri-drag-region="false"
+                    style={{ pointerEvents: 'auto' }}
+                    className="flex-1 overflow-y-auto space-y-0.5 pr-0.5"
+                  >
+                    {HOURS_12.map((h) => {
+                      const active = pickerHour === h;
+                      return (
+                        <button
+                          key={h}
+                          type="button"
+                          data-active={active}
+                          data-tauri-drag-region="false"
+                          onClick={() => setPickerHour(h)}
+                          style={{
+                            pointerEvents: 'auto',
+                            cursor: 'pointer',
+                            background: active
+                              ? 'var(--theme-accent, #A29BFE)'
+                              : 'transparent',
+                            color: active
+                              ? '#FFFFFF'
+                              : 'var(--theme-text-primary, #F8FAFC)',
+                          }}
+                          className={`pointer-events-auto cursor-pointer w-full py-0.5 rounded text-[11px] font-mono tabular-nums text-center transition-all ${
+                            active ? 'font-bold shadow-sm' : 'hover:bg-white/10 opacity-80'
+                          }`}
+                        >
+                          {String(h).padStart(2, '0')}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Minutes Column (00..59) */}
+                <div
+                  style={{
+                    background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
+                    borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
+                  }}
+                  className="flex flex-col rounded-lg border p-1 min-h-0"
+                >
+                  <div
+                    style={{ color: 'var(--theme-text-secondary, #94A3B8)' }}
+                    className="text-[9px] font-mono font-semibold uppercase tracking-wider text-center pb-0.5"
+                  >
+                    Min
+                  </div>
+                  <div
+                    ref={minuteColumnRef}
+                    data-tauri-drag-region="false"
+                    style={{ pointerEvents: 'auto' }}
+                    className="flex-1 overflow-y-auto space-y-0.5 pr-0.5"
+                  >
+                    {MINUTES_60.map((m) => {
+                      const active = pickerMinute === m;
+                      return (
+                        <button
+                          key={m}
+                          type="button"
+                          data-active={active}
+                          data-tauri-drag-region="false"
+                          onClick={() => setPickerMinute(m)}
+                          style={{
+                            pointerEvents: 'auto',
+                            cursor: 'pointer',
+                            background: active
+                              ? 'var(--theme-accent, #A29BFE)'
+                              : 'transparent',
+                            color: active
+                              ? '#FFFFFF'
+                              : 'var(--theme-text-primary, #F8FAFC)',
+                          }}
+                          className={`pointer-events-auto cursor-pointer w-full py-0.5 rounded text-[11px] font-mono tabular-nums text-center transition-all ${
+                            active ? 'font-bold shadow-sm' : 'hover:bg-white/10 opacity-80'
+                          }`}
+                        >
+                          {String(m).padStart(2, '0')}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* AM / PM Toggle Pill Column */}
+                <div
+                  style={{
+                    background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
+                    borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
+                  }}
+                  className="flex flex-col justify-between rounded-lg border p-1 min-h-0"
+                >
+                  <div
+                    style={{ color: 'var(--theme-text-secondary, #94A3B8)' }}
+                    className="text-[9px] font-mono font-semibold uppercase tracking-wider text-center pb-0.5"
+                  >
+                    AM/PM
+                  </div>
+                  <div
+                    style={{
+                      background: 'var(--theme-track, rgba(255, 255, 255, 0.06))',
+                      borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.1))',
+                    }}
+                    className="flex-1 flex flex-col justify-center gap-1 p-1 rounded-md border"
+                  >
+                    {(['AM', 'PM'] as const).map((period) => {
+                      const active = pickerPeriod === period;
+                      return (
+                        <button
+                          key={period}
+                          type="button"
+                          data-tauri-drag-region="false"
+                          onClick={() => setPickerPeriod(period)}
+                          style={{
+                            pointerEvents: 'auto',
+                            cursor: 'pointer',
+                            background: active
+                              ? 'var(--theme-accent, #A29BFE)'
+                              : 'transparent',
+                            color: active
+                              ? '#FFFFFF'
+                              : 'var(--theme-text-secondary, #94A3B8)',
+                          }}
+                          className={`pointer-events-auto cursor-pointer flex-1 rounded py-1 text-[11px] font-mono font-bold tracking-wider transition-all active:scale-95 ${
+                            active ? 'shadow-sm' : 'hover:text-white'
+                          }`}
+                        >
+                          {period}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Modal Footer: Cancel + Confirm */}
+              <div
+                style={{ borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.1))' }}
+                className="flex items-center justify-end gap-1.5 pt-1.5 border-t"
+              >
+                <button
+                  type="button"
+                  data-tauri-drag-region="false"
+                  onClick={() => setTimePickerOpen(false)}
+                  style={{
+                    pointerEvents: 'auto',
+                    cursor: 'pointer',
+                    background: 'var(--theme-track, rgba(255, 255, 255, 0.06))',
+                    borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.1))',
+                    color: 'var(--theme-text-secondary, #94A3B8)',
+                  }}
+                  className="pointer-events-auto cursor-pointer px-2.5 py-1 rounded-lg border text-[10px] font-semibold hover:opacity-100 active:scale-95 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  data-tauri-drag-region="false"
+                  onClick={handleConfirmTimePicker}
+                  style={{
+                    pointerEvents: 'auto',
+                    cursor: 'pointer',
+                    background: 'var(--theme-accent, #A29BFE)',
+                    color: '#FFFFFF',
+                  }}
+                  className="pointer-events-auto cursor-pointer px-3 py-1 rounded-lg text-[10px] font-semibold shadow-sm active:scale-95 transition-all"
+                >
+                  Confirm
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

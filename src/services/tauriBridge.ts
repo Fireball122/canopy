@@ -58,6 +58,7 @@ export interface WallpaperEntry {
   name: string;
   path: string;
   data_url?: string;
+  resolution?: string;
   active: boolean;
 }
 
@@ -67,6 +68,7 @@ export interface InstalledAppItem {
   category: string;
   path: string;
   description?: string;
+  icon_data_url?: string | null;
 }
 
 interface CaelestiaNativeBridge {
@@ -496,6 +498,29 @@ export async function mediaPrev(): Promise<void> {
     fallbackTrackStartMs = Date.now();
   });
 }
+export async function mediaSeek(seconds: number): Promise<void> {
+  const clamped = Math.max(0, Math.round(seconds));
+  fallbackPausedElapsedSecs = clamped;
+  fallbackTrackStartMs = Date.now() - clamped * 1000;
+  await invokeBridge<unknown>('media_seek', { seconds: clamped }, () => undefined);
+}
+
+export async function getAudioSpectrum(): Promise<number[]> {
+  const bands = await invokeBridge<number[]>('get_audio_spectrum', undefined, () => {
+    if (!fallbackIsPlaying) {
+      return new Array(40).fill(0);
+    }
+    const t = Date.now() / 1000;
+    return Array.from({ length: 40 }, (_, i) => {
+      const wave = Math.abs(Math.sin(t * 6.5 + i * 0.45) * Math.cos(t * 3.8 - i * 0.25));
+      return Math.min(1, Math.max(0.05, wave));
+    });
+  });
+  if (!Array.isArray(bands) || bands.length === 0) {
+    return new Array(40).fill(0);
+  }
+  return bands;
+}
 
 export async function getMasterVolume(): Promise<number> {
   const level = await invokeBridge<number>('get_master_volume', undefined, () => fallbackAudioState.volume);
@@ -684,6 +709,7 @@ export async function setDropdownOpen(open: boolean): Promise<void> {
 }
 
 const FALLBACK_INSTALLED_APPS: InstalledAppItem[] = [
+  { id: 'brave', name: 'Brave', category: 'Browser', path: 'brave.exe', description: 'Default Web Browser (BraveHTML)' },
   { id: 'wt', name: 'Windows Terminal', category: 'Developer', path: 'wt.exe', description: 'Modern tabs & shells' },
   { id: 'explorer', name: 'File Explorer', category: 'System', path: 'explorer.exe', description: 'Browse local drives & files' },
   { id: 'taskmgr', name: 'Task Manager', category: 'System', path: 'taskmgr.exe', description: 'Process & resource monitor' },
