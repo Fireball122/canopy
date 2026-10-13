@@ -1,0 +1,8 @@
+node_modules/
+bin/
+obj/
+src-tauri/target/
+WebView2Data/
+*.pdb
+*.user
+error.log
