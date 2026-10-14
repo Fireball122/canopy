@@ -19,11 +19,21 @@ if (-not (Test-Path $OutputDir)) { New-Item -ItemType Directory -Path $OutputDir
 $dotnet = "$HOME/.dotnet/dotnet.exe"
 if (-not (Test-Path $dotnet)) { $dotnet = "dotnet" }
 
-& $dotnet publish "$ProjectRoot\Canopy.csproj" -c $Configuration -o $PublishDir --self-contained false -p:SkipFrontendBuild=true
+& $dotnet publish "$ProjectRoot\Canopy.csproj" -c $Configuration -r win-x64 -o $PublishDir --self-contained false -p:SkipFrontendBuild=true
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
 
 Copy-Item (Join-Path $ProjectRoot "app.ico") (Join-Path $PublishDir "app.ico") -Force
 
+# Ensure x64 WebView2Loader.dll is in both root and runtimes\win-x64\native for robust native loading
+$nativeLoader = Join-Path $PublishDir "runtimes\win-x64\native\WebView2Loader.dll"
+$rootLoader = Join-Path $PublishDir "WebView2Loader.dll"
+if ((Test-Path $nativeLoader) -and (-not (Test-Path $rootLoader))) {
+    Copy-Item $nativeLoader $rootLoader -Force
+} elseif ((Test-Path $rootLoader) -and (-not (Test-Path $nativeLoader))) {
+    $nativeDir = Join-Path $PublishDir "runtimes\win-x64\native"
+    if (-not (Test-Path $nativeDir)) { New-Item -ItemType Directory -Path $nativeDir -Force | Out-Null }
+    Copy-Item $rootLoader $nativeLoader -Force
+}
 Write-Host "==> 2. Generating WiX components for payload..." -ForegroundColor Cyan
 $allFiles = Get-ChildItem -Path $PublishDir -Recurse -File
 
@@ -56,13 +66,11 @@ foreach ($file in $allFiles) {
 [void]$sb.AppendLine('    </ComponentGroup>')
 [void]$sb.AppendLine('  </Fragment>')
 
-# Directory tree for subdirectories (e.g. dist, dist/assets)
+# Directory tree for subdirectories (preserving exact parent-child hierarchy)
 $subDirs = Get-ChildItem -Path $PublishDir -Recurse -Directory | Sort-Object FullName
 if ($subDirs) {
     [void]$sb.AppendLine('  <Fragment>')
-    [void]$sb.AppendLine('    <DirectoryRef Id="INSTALLFOLDER">')
     
-    $createdDirs = @{}
     foreach ($dir in $subDirs) {
         $relPath = $dir.FullName.Substring($PublishDir.Length).TrimStart('\', '/')
         $parentPath = Split-Path -Parent $relPath
@@ -71,10 +79,11 @@ if ($subDirs) {
         $dirId = "DIR_" + $cleanDir
         
         $parentId = if ($parentPath) { "DIR_" + ($parentPath -replace '[\\/]', '_' -replace '[^a-zA-Z0-9_]', '') } else { "INSTALLFOLDER" }
+        [void]$sb.AppendLine("    <DirectoryRef Id=`"$parentId`">")
         [void]$sb.AppendLine("      <Directory Id=`"$dirId`" Name=`"$dirName`" />")
+        [void]$sb.AppendLine('    </DirectoryRef>')
     }
     
-    [void]$sb.AppendLine('    </DirectoryRef>')
     [void]$sb.AppendLine('  </Fragment>')
 }
 
