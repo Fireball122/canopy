@@ -130,8 +130,46 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
+    /// Resolves the true DPI scale and physical pixel dimensions for the panel.
+    /// Queries Win32 GetDpiForWindow first for reliable PerMonitorV2 scale, falling back to VisualTreeHelper.
+    /// </summary>
+    private (double scaleX, double scaleY, int physicalWidth, int physicalHeight) GetDpiScaleAndPhysicalSize()
+    {
+        double scaleX = 1.0;
+        double scaleY = 1.0;
+
+        if (_hwnd != IntPtr.Zero)
+        {
+            uint dpi = Win32.GetDpiForWindow(_hwnd);
+            if (dpi > 0)
+            {
+                scaleX = dpi / 96.0;
+                scaleY = dpi / 96.0;
+            }
+        }
+
+        if (scaleX <= 0.0 || scaleY <= 0.0 || Math.Abs(scaleX - 1.0) < 0.001)
+        {
+            try
+            {
+                DpiScale dpi = VisualTreeHelper.GetDpi(this);
+                if (dpi.DpiScaleX > 0) scaleX = dpi.DpiScaleX;
+                if (dpi.DpiScaleY > 0) scaleY = dpi.DpiScaleY;
+            }
+            catch
+            {
+            }
+        }
+
+        int physicalWidth = (int)Math.Round(Width * scaleX);
+        int physicalHeight = (int)Math.Round(Height * scaleY);
+        return (scaleX, scaleY, physicalWidth, physicalHeight);
+    }
+
+    /// <summary>
     /// SetWindowRgn works in physical pixels, so the DIP window size must be scaled first or the
     /// panel's right/bottom edge is clipped on any monitor that is not at 100%.
+    /// </summary>
     private void ApplyRoundedRegionForCurrentDpi()
     {
         if (_hwnd == IntPtr.Zero)
@@ -139,11 +177,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        DpiScale dpi = VisualTreeHelper.GetDpi(this);
-        double scaleX = dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1.0;
-        double scaleY = dpi.DpiScaleY > 0 ? dpi.DpiScaleY : 1.0;
-        int physicalWidth = (int)Math.Round(Width * scaleX);
-        int physicalHeight = (int)Math.Round(Height * scaleY);
+        var (_, scaleY, physicalWidth, physicalHeight) = GetDpiScaleAndPhysicalSize();
         int cornerRadius = (int)Math.Round(24 * scaleY);
 
         Win32.ApplyWindowRoundedRegion(_hwnd, physicalWidth, physicalHeight, cornerRadius);
@@ -1108,6 +1142,13 @@ public partial class MainWindow : Window
                 handled = true;
             }
         }
+        else if (msg == 0x02E0) // WM_DPICHANGED
+        {
+            ApplyRoundedRegionForCurrentDpi();
+            Win32.RECT panelMonitor = GetPanelMonitor();
+            PositionWindowAtTopCenter(panelMonitor, offscreen: !_isExpanded);
+            handled = true;
+        }
 
         return IntPtr.Zero;
     }
@@ -1164,11 +1205,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void PositionWindowAtTopCenter(Win32.RECT monitor, bool offscreen)
     {
-        DpiScale dpi = VisualTreeHelper.GetDpi(this);
-        double scaleX = dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1.0;
-        double scaleY = dpi.DpiScaleY > 0 ? dpi.DpiScaleY : 1.0;
-        int physicalWidth = (int)Math.Round(Width * scaleX);
-        int physicalHeight = (int)Math.Round(Height * scaleY);
+        var (scaleX, scaleY, physicalWidth, physicalHeight) = GetDpiScaleAndPhysicalSize();
 
         int physicalX = monitor.Left + ((monitor.Width - physicalWidth) / 2);
         int physicalY = offscreen
@@ -1177,8 +1214,8 @@ public partial class MainWindow : Window
 
         if (_hwnd != IntPtr.Zero)
         {
-            Win32.SetWindowPos(_hwnd, IntPtr.Zero, physicalX, physicalY, 0, 0,
-                Win32.SWP_NOSIZE | Win32.SWP_NOZORDER | Win32.SWP_NOACTIVATE);
+            Win32.SetWindowPos(_hwnd, IntPtr.Zero, physicalX, physicalY, physicalWidth, physicalHeight,
+                Win32.SWP_NOZORDER | Win32.SWP_NOACTIVATE);
         }
 
         Left = Math.Round(physicalX / scaleX);
@@ -1191,11 +1228,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void SlideTo(bool expanded, Win32.RECT monitor)
     {
-        DpiScale dpi = VisualTreeHelper.GetDpi(this);
-        double scaleX = dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1.0;
-        double scaleY = dpi.DpiScaleY > 0 ? dpi.DpiScaleY : 1.0;
-        int physicalWidth = (int)Math.Round(Width * scaleX);
-        int physicalHeight = (int)Math.Round(Height * scaleY);
+        var (scaleX, scaleY, physicalWidth, physicalHeight) = GetDpiScaleAndPhysicalSize();
 
         int physicalX = monitor.Left + ((monitor.Width - physicalWidth) / 2);
         int physicalTargetY = expanded
@@ -1221,8 +1254,8 @@ public partial class MainWindow : Window
         {
             if (_hwnd != IntPtr.Zero)
             {
-                Win32.SetWindowPos(_hwnd, IntPtr.Zero, physicalX, physicalTargetY, 0, 0,
-                    Win32.SWP_NOSIZE | Win32.SWP_NOZORDER | Win32.SWP_NOACTIVATE);
+                Win32.SetWindowPos(_hwnd, IntPtr.Zero, physicalX, physicalTargetY, physicalWidth, physicalHeight,
+                    Win32.SWP_NOZORDER | Win32.SWP_NOACTIVATE);
             }
             Left = Math.Round(physicalX / scaleX);
             Top = Math.Round(physicalTargetY / scaleY);
@@ -1236,8 +1269,8 @@ public partial class MainWindow : Window
             _slideFromPhysicalY = physicalTargetY - physicalHeight - (int)Math.Round(100 * scaleY);
             if (_hwnd != IntPtr.Zero)
             {
-                Win32.SetWindowPos(_hwnd, IntPtr.Zero, physicalX, _slideFromPhysicalY, 0, 0,
-                    Win32.SWP_NOSIZE | Win32.SWP_NOZORDER | Win32.SWP_NOACTIVATE);
+                Win32.SetWindowPos(_hwnd, IntPtr.Zero, physicalX, _slideFromPhysicalY, physicalWidth, physicalHeight,
+                    Win32.SWP_NOZORDER | Win32.SWP_NOACTIVATE);
             }
         }
 
@@ -1246,6 +1279,7 @@ public partial class MainWindow : Window
         CompositionTarget.Rendering += OnCompositionRendering;
         _isSlideRenderingHooked = true;
     }
+
 
     private void OnCompositionRendering(object? sender, EventArgs e)
     {
@@ -1264,9 +1298,7 @@ public partial class MainWindow : Window
         {
             StopSlideAnimation();
 
-            DpiScale dpi = VisualTreeHelper.GetDpi(this);
-            double scaleX = dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1.0;
-            double scaleY = dpi.DpiScaleY > 0 ? dpi.DpiScaleY : 1.0;
+            var (scaleX, scaleY, _, _) = GetDpiScaleAndPhysicalSize();
             Left = Math.Round(_slidePhysicalX / scaleX);
             Top = Math.Round(_slideToPhysicalY / scaleY);
 

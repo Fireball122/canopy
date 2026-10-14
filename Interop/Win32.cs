@@ -379,6 +379,9 @@ public static class Win32
         int cx,
         int cy,
         uint uFlags);
+    [DllImport("user32.dll")]
+    public static extern uint GetDpiForWindow(IntPtr hWnd);
+
     private const uint INPUT_KEYBOARD = 1;
 
     [StructLayout(LayoutKind.Sequential)]
