@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { setHostConfig } from '../services/tauriBridge';
 
 export type TabId =
   | 'dashboard'
@@ -8,8 +9,8 @@ export type TabId =
   | 'wallpaper'
   | 'weather'
   | 'terminal'
+  | 'power'
   | 'settings';
-
 export interface CanopySettings {
   // Clock & Date Settings
   clockFormat: '12h' | '24h';
@@ -34,11 +35,53 @@ export interface CanopySettings {
   showAppsTab: boolean; // toggles [ Apps ] tab between Performance and Wallpaper
   mascotMode: 'bongo' | 'gif' | 'none'; // 'bongo', 'gif', or 'none' (No GIF option)
   customMascotGifUrl: string; // optional custom GIF URL or data URL replacing Bongo Cat
+  showTerminalTab: boolean; // toggles [ Terminal ] tab on/off
+  pinnedApps: string[]; // App IDs pinned to Dashboard dock
+  customApps?: Record<string, { label: string; path: string; icon_data_url?: string | null }>; // Metadata for custom pinned apps
+  visualizerStyle: 'radial' | 'bars' | 'wave'; // Audio visualizer mode
+  wallpaperFavorites: string[]; // List of favorite wallpaper paths
+
+  // Panel Motion
+  animationsEnabled: boolean; // default true
+  animationDurationMs: number; // 120 to 600 (default 280)
+
+  // Fullscreen & Quiet Hours Suppression
+  pauseTriggerInFullscreen: boolean; // default true
+  pauseTriggerDuringPresentations: boolean; // default true
+  quietHoursEnabled: boolean; // default false
+  quietHoursStart: string; // "HH:mm", default "22:00"
+  quietHoursEnd: string; // "HH:mm", default "07:00"
+
+  // Panel Placement
+  panelMonitorMode: 'cursor' | 'primary'; // default 'cursor'
+  triggerMonitorScope: 'all' | 'primary'; // default 'all'
+  showPanelOnLaunch: boolean; // default true
+
+  // Performance
+  suspendWebViewWhenClosed: boolean; // default true
+
+  // Audio
+  showMicSlider: boolean; // default true
+  lyricOffsetMs: number; // -2000 to 2000, default 0. Applied to synced-lyric highlighting.
+
+  // Wallpaper (experimental)
+  wallpaperPerMonitor: boolean; // default false
+  wallpaperSlideshowEnabled: boolean; // default false
+  wallpaperSlideshowMinutes: number; // 5 to 1440 (default 30)
+  wallpaperShuffle: boolean; // default false
+
+  // Diagnostics & Telemetry
+  diagnosticLogging: boolean; // default false
+  showBatteryChip: boolean; // default true
+
   // Window & System Mechanics
   launchOnStartup: boolean;
   topHoverTrigger: boolean;
+  triggerWidth: number; // 100 to 1920 (default 950)
+  triggerHeight: number; // 1 to 30 (default 8)
+  triggerDelayMs: number; // 0 to 1000 (default 0)
+  hideDebounceMs: number; // 100 to 2000 (default 300)
   globalHotkey: string; // default "Win+`"
-  defaultTab: 'dashboard';
 }
 
 export interface SettingsContextValue {
@@ -67,8 +110,37 @@ export const DEFAULT_SETTINGS: CanopySettings = {
   showAppsTab: true,
   mascotMode: 'bongo',
   customMascotGifUrl: '',
+  showTerminalTab: false,
+  pinnedApps: ['terminal', 'explorer', 'taskmgr', 'msedge', 'code'],
+  customApps: {},
+  visualizerStyle: 'radial',
+  wallpaperFavorites: [],
+  animationsEnabled: true,
+  animationDurationMs: 280,
+  pauseTriggerInFullscreen: true,
+  pauseTriggerDuringPresentations: true,
+  quietHoursEnabled: false,
+  quietHoursStart: '22:00',
+  quietHoursEnd: '07:00',
+  panelMonitorMode: 'cursor',
+  triggerMonitorScope: 'all',
+  showPanelOnLaunch: true,
+  suspendWebViewWhenClosed: true,
+  showMicSlider: true,
+  lyricOffsetMs: 0,
+  wallpaperPerMonitor: false,
+  wallpaperSlideshowEnabled: false,
+  wallpaperSlideshowMinutes: 30,
+  wallpaperShuffle: false,
+  diagnosticLogging: false,
+  showBatteryChip: true,
+  launchOnStartup: false,
+  topHoverTrigger: true,
+  triggerWidth: 950,
+  triggerHeight: 8,
+  triggerDelayMs: 0,
+  hideDebounceMs: 200,
   globalHotkey: 'Win+`',
-  defaultTab: 'dashboard',
 };
 
 function applyGlassCssVariables(blurStrength: number, opacity: number): void {
@@ -106,8 +178,6 @@ function loadStoredSettings(): CanopySettings {
     return {
       ...DEFAULT_SETTINGS,
       ...parsed,
-      // Always enforce 'dashboard' as startup default tab
-      defaultTab: 'dashboard',
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -131,20 +201,57 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     applyGlassCssVariables(settings.glassBlurStrength, settings.glassOpacity);
     try {
       if (typeof window !== 'undefined') {
-        const normalized: CanopySettings = { ...settings, defaultTab: 'dashboard' };
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
       }
     } catch {
       // Ignore storage quota errors
     }
   }, [settings]);
 
+  // Push every host-relevant setting to the native host in one message.
+  useEffect(() => {
+    void setHostConfig({
+      triggerWidth: settings.triggerWidth,
+      triggerHeight: settings.triggerHeight,
+      triggerDelayMs: settings.triggerDelayMs,
+      hideDebounceMs: settings.hideDebounceMs,
+      pauseInFullscreen: settings.pauseTriggerInFullscreen,
+      pauseInPresentation: settings.pauseTriggerDuringPresentations,
+      quietHoursEnabled: settings.quietHoursEnabled,
+      quietHoursStart: settings.quietHoursStart,
+      quietHoursEnd: settings.quietHoursEnd,
+      panelMonitorMode: settings.panelMonitorMode,
+      triggerMonitorScope: settings.triggerMonitorScope,
+      animationsEnabled: settings.animationsEnabled,
+      animationDurationMs: settings.animationDurationMs,
+      suspendWhenClosed: settings.suspendWebViewWhenClosed,
+      hotkey: settings.globalHotkey,
+      diagnosticLogging: settings.diagnosticLogging,
+    });
+  }, [
+    settings.triggerWidth,
+    settings.triggerHeight,
+    settings.triggerDelayMs,
+    settings.hideDebounceMs,
+    settings.pauseTriggerInFullscreen,
+    settings.pauseTriggerDuringPresentations,
+    settings.quietHoursEnabled,
+    settings.quietHoursStart,
+    settings.quietHoursEnd,
+    settings.panelMonitorMode,
+    settings.triggerMonitorScope,
+    settings.animationsEnabled,
+    settings.animationDurationMs,
+    settings.suspendWebViewWhenClosed,
+    settings.globalHotkey,
+    settings.diagnosticLogging,
+  ]);
+
   const updateSettings = useCallback((partial: Partial<CanopySettings>) => {
     setSettings((prev) => {
       const next: CanopySettings = {
         ...prev,
         ...partial,
-        defaultTab: 'dashboard',
       };
       applyGlassCssVariables(next.glassBlurStrength, next.glassOpacity);
       try {

@@ -7,6 +7,7 @@ export interface VerticalSlidersProps {
   brightness: number;
   onBrightnessChange: (val: number) => void;
   showBrightness?: boolean;
+  showMic?: boolean;
   micLevel?: number;
   onMicLevelChange?: (val: number) => void;
   micMuted?: boolean;
@@ -21,6 +22,7 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
   brightness,
   onBrightnessChange,
   showBrightness = false,
+  showMic = true,
   micLevel,
   onMicLevelChange,
   micMuted,
@@ -166,19 +168,23 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
           },
         ]
       : []),
-    {
-      id: 'mic',
-      label: 'Mic',
-      value: effectiveMicMuted ? 0 : clampedMic,
-      displayValue: effectiveMicMuted ? 'Muted' : `${clampedMic}%`,
-      fillStyle: {
-        background: effectiveMicMuted
-          ? 'rgba(239, 68, 68, 0.65)'
-          : 'linear-gradient(to top, var(--theme-accent, #A29BFE) 0%, #89DCEB 100%)',
-      },
-      glowColor: effectiveMicMuted ? 'rgba(239, 68, 68, 0.7)' : 'var(--theme-accent, #A29BFE)',
-      muted: effectiveMicMuted,
-    },
+    ...(showMic
+      ? [
+          {
+            id: 'mic' as SliderId,
+            label: 'Mic',
+            value: effectiveMicMuted ? 0 : clampedMic,
+            displayValue: effectiveMicMuted ? 'Muted' : `${clampedMic}%`,
+            fillStyle: {
+              background: effectiveMicMuted
+                ? 'rgba(239, 68, 68, 0.65)'
+                : 'linear-gradient(to top, var(--theme-accent, #A29BFE) 0%, #89DCEB 100%)',
+            },
+            glowColor: effectiveMicMuted ? 'rgba(239, 68, 68, 0.7)' : 'var(--theme-accent, #A29BFE)',
+            muted: effectiveMicMuted,
+          },
+        ]
+      : []),
   ];
 
   return (

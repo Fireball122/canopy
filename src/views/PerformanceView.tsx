@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   ArrowDown,
@@ -157,8 +157,53 @@ const ConcentricDualArcGauge: React.FC<ConcentricGaugeProps> = ({
   );
 };
 
+const SparklineMini: React.FC<{
+  data: number[];
+  color: string;
+  width?: number;
+  height?: number;
+}> = ({ data, color, width = 94, height = 22 }) => {
+  const max = Math.max(10, ...data);
+  const min = 0;
+  const range = max - min || 1;
+  const points = data
+    .map((val, i) => {
+      const x = (i / (data.length - 1)) * width;
+      const y = height - ((val - min) / range) * (height - 4) - 2;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+
+  const areaPoints = `0,${height} ${points} ${width},${height}`;
+  const safeId = color.replace(/[^a-zA-Z0-9]/g, '');
+
+  return (
+    <svg width={width} height={height} className="overflow-visible">
+      <defs>
+        <linearGradient id={`grad-${safeId}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.4" />
+          <stop offset="100%" stopColor={color} stopOpacity="0.0" />
+        </linearGradient>
+      </defs>
+      <polygon points={areaPoints} fill={`url(#grad-${safeId})`} />
+      <polyline
+        points={points}
+        fill="none"
+        stroke={color}
+        strokeWidth={1.6}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+};
+
 export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
   const [detailsOpen, setDetailsOpen] = useState<boolean>(false);
+  const [cpuHistory, setCpuHistory] = useState<number[]>(() => new Array(30).fill(18));
+  const [ramHistory, setRamHistory] = useState<number[]>(() => new Array(30).fill(35));
+  const [netDownHistory, setNetDownHistory] = useState<number[]>(() => new Array(30).fill(10));
+  const [netUpHistory, setNetUpHistory] = useState<number[]>(() => new Array(30).fill(5));
 
   const gpuTempC = Math.round(stats.gpu_temp_c || 54);
   const gpuUsage = Math.round(stats.gpu_usage ?? 4);
@@ -178,6 +223,12 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
   const netUpKbps =
     Number.isFinite(stats.net_up_kbps) && stats.net_up_kbps >= 0 ? stats.net_up_kbps : 1433.6;
 
+  useEffect(() => {
+    setCpuHistory((prev) => [...prev.slice(1), cpuUsage]);
+    setRamHistory((prev) => [...prev.slice(1), ramUsage]);
+    setNetDownHistory((prev) => [...prev.slice(1), Math.min(100, Math.round((netDownKbps / 1024) * 10))]);
+    setNetUpHistory((prev) => [...prev.slice(1), Math.min(100, Math.round((netUpKbps / 1024) * 10))]);
+  }, [cpuUsage, ramUsage, netDownKbps, netUpKbps]);
   const downFormatted =
     netDownKbps >= 1024
       ? `${(netDownKbps / 1024).toFixed(1)} MB/s`
@@ -302,56 +353,36 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
         />
       </div>
 
-      {/* Network Traffic Metric Card alongside the top gauge deck */}
+      {/* 30-Sample Rolling History Mini-Sparklines Bar */}
       <div
-        className="bento-card px-3.5 py-2 flex items-center justify-between gap-3 shrink-0"
+        className="bento-card px-3 py-1.5 flex items-center justify-between gap-3 shrink-0 rounded-xl"
+        style={{
+          background: 'var(--theme-card, rgba(255, 255, 255, 0.035))',
+          borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
+        }}
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-mono font-medium text-[var(--theme-text-secondary)]">CPU Activity</span>
+          <SparklineMini data={cpuHistory} color="var(--theme-accent, #cba6f7)" width={90} height={20} />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-mono font-medium text-[var(--theme-text-secondary)]">Memory Load</span>
+          <SparklineMini data={ramHistory} color="#a6e3a1" width={90} height={20} />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-mono font-medium text-[var(--theme-text-secondary)]">Network I/O</span>
+          <SparklineMini data={netDownHistory} color="#89dceb" width={90} height={20} />
+        </div>
+      </div>
+      {/* Centered Download (↓) and Upload (↑) Live Throughput Indicators */}
+      <div
+        className="bento-card px-4 py-2 flex items-center justify-center gap-4 shrink-0"
         style={{
           background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
           borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
         }}
       >
-        {/* Left: Network Traffic Header */}
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div
-            className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border"
-            style={{
-              background: 'var(--theme-track, rgba(255, 255, 255, 0.06))',
-              borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.1))',
-              color: 'var(--theme-accent, #cba6f7)',
-            }}
-          >
-            <Wifi className="w-4 h-4" strokeWidth={2} />
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5">
-              <span
-                className="text-xs font-semibold tracking-tight"
-                style={{ color: 'var(--theme-text-primary, #cdd6f4)' }}
-              >
-                Network Traffic
-              </span>
-              <span className="relative flex h-1.5 w-1.5">
-                <span
-                  className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
-                  style={{ backgroundColor: '#a6e3a1' }}
-                />
-                <span
-                  className="relative inline-flex rounded-full h-1.5 w-1.5"
-                  style={{ backgroundColor: '#a6e3a1' }}
-                />
-              </span>
-            </div>
-            <div
-              className="text-[10px] font-mono truncate"
-              style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.68))' }}
-            >
-              Real-time throughput telemetry
-            </div>
-          </div>
-        </div>
-
-        {/* Middle/Right: Single Non-Redundant Download (↓) and Upload (↑) Live Throughput Indicator with Proportional Activity Bars */}
-        <div className="flex items-center gap-3 flex-1 max-w-[360px] justify-end">
+        <div className="flex items-center gap-3 w-full max-w-[480px] justify-center">
           <div
             className="flex-1 px-3 py-1.5 rounded-xl border flex flex-col gap-1 min-w-[132px]"
             style={{

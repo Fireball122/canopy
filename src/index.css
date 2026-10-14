@@ -14,8 +14,30 @@
   --glass-opacity: 0.86;
 }
 
-* {
+/* Colour transitions live only on the theme-coloured surfaces (glass shell, cards, pills).
+   A global `*` transition made every node animate and cost ~2 re-renders/s. */
+.canopy-shell,
+.canopy-dropdown,
+.bento-card,
+.canopy-pill,
+.caelestia-pill,
+input[type="range"].canopy-slider,
+input[type="range"].caelestia-slider {
   transition: background-color 350ms ease, color 350ms ease, border-color 350ms ease;
+}
+
+/* Low-specificity fallback for shell buttons so utility classes (transition-all, transform
+   hovers) always win while bare buttons still fade their theme colours. */
+:where(.canopy-shell) button,
+:where(.canopy-shell) [role="button"] {
+  transition: background-color 350ms ease, color 350ms ease, border-color 350ms ease;
+}
+
+/* Shell-local motion kill switch driven by settings.animationsEnabled */
+.no-motion,
+.no-motion * {
+  transition: none !important;
+  animation: none !important;
 }
 
 @layer base {
@@ -61,20 +83,16 @@
   border-top: none;
   border-top-left-radius: 0px;
   border-top-right-radius: 0px;
-  border-bottom-left-radius: 20px;
-  border-bottom-right-radius: 20px;
+  border-bottom-left-radius: 24px;
+  border-bottom-right-radius: 24px;
   overflow: hidden;
-  box-shadow:
-    0 4px 14px -2px rgba(0, 0, 0, 0.35),
-    0 16px 36px -6px rgba(0, 0, 0, 0.55);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
   -webkit-app-region: no-drag;
 }
 
 /* Light wallpaper / Force Light adaptive text & surface overrides */
 html[data-theme="light"] .canopy-shell {
-  box-shadow:
-    0 4px 14px -2px rgba(0, 0, 0, 0.22),
-    0 16px 36px -6px rgba(0, 0, 0, 0.35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 
 html[data-theme="light"] .canopy-shell .text-white,
@@ -90,24 +108,24 @@ html[data-theme="light"] .canopy-shell .text-zinc-500 {
 }
 
 /* Slide-down Dropdown Transition States */
+.canopy-dropdown,
 .caelestia-dropdown {
-  transition: transform 300ms cubic-bezier(0.16, 1, 0.3, 1), opacity 300ms cubic-bezier(0.16, 1, 0.3, 1), background-color 350ms ease;
-  will-change: transform, opacity;
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+  transition: background-color 350ms ease;
+  will-change: background-color;
 }
 
-.caelestia-dropdown-open {
+.canopy-dropdown-open,
+.caelestia-dropdown-open,
+.canopy-dropdown-closed,
+.caelestia-dropdown-closed {
   transform: translateY(0);
   opacity: 1;
   pointer-events: auto;
 }
-
-.caelestia-dropdown-closed {
-  transform: translateY(-100%);
-  opacity: 0;
-  pointer-events: none;
-}
-
-/* Tab Switch Fade & Slide Animation (opacity: 0, translateY(6px) -> opacity: 1, translateY(0)) */
+/* Tab Switch Fade & Slide Animation */
 @keyframes canopyTabFadeSlide {
   from {
     opacity: 0;
@@ -122,6 +140,7 @@ html[data-theme="light"] .canopy-shell .text-zinc-500 {
 .canopy-tab-transition {
   animation: canopyTabFadeSlide 220ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
+
 /* Centered Circular Expand (Iris Wipe) Animation */
 @keyframes canopyIrisWipe {
   0% {
@@ -133,10 +152,10 @@ html[data-theme="light"] .canopy-shell .text-zinc-500 {
 }
 
 .canopy-iris-wipe {
-  animation: canopyIrisWipe 260ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: canopyIrisWipe 480ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-/* Inner Bento Cards with concentric 14px corners matching outer 20px radius */
+/* Inner Bento Cards with concentric 14px corners matching outer 24px radius */
 .bento-card {
   background: var(--theme-card);
   border: 1px solid var(--theme-border);
@@ -144,6 +163,7 @@ html[data-theme="light"] .canopy-shell .text-zinc-500 {
   box-shadow: inset 0 1px 0 0 var(--theme-border);
   transition: background-color 350ms ease, border-color 350ms ease, transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
 }
+
 .bento-card-interactive:hover {
   border-color: var(--theme-accent);
   box-shadow:
@@ -180,6 +200,7 @@ html[data-theme="light"] .canopy-shell .text-zinc-500 {
 }
 
 /* Custom Range Slider Styling */
+input[type="range"].canopy-slider,
 input[type="range"].caelestia-slider {
   -webkit-appearance: none;
   appearance: none;
@@ -187,11 +208,13 @@ input[type="range"].caelestia-slider {
   cursor: pointer;
 }
 
+input[type="range"].canopy-slider::-webkit-slider-runnable-track,
 input[type="range"].caelestia-slider::-webkit-slider-runnable-track {
   height: 6px;
   border-radius: 9999px;
 }
 
+input[type="range"].canopy-slider::-webkit-slider-thumb,
 input[type="range"].caelestia-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
@@ -204,6 +227,7 @@ input[type="range"].caelestia-slider::-webkit-slider-thumb {
   transition: transform 150ms ease;
 }
 
+input[type="range"].canopy-slider::-webkit-slider-thumb:hover,
 input[type="range"].caelestia-slider::-webkit-slider-thumb:hover {
   transform: scale(1.18);
 }
@@ -219,4 +243,21 @@ input[type="range"].caelestia-slider::-webkit-slider-thumb:hover {
 
 .animate-vinyl-spin {
   animation: vinylSpin 7s linear infinite;
+}
+
+/* Newly active lyric line rises in instead of snapping (duration comes from animationDurationMs).
+   Uses the standalone `translate` property so it never fights a transform utility. */
+@keyframes canopyLyricRise {
+  from {
+    opacity: 0.35;
+    translate: 0 6px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+.canopy-lyric-active {
+  animation: canopyLyricRise 260ms cubic-bezier(0.16, 1, 0.3, 1);
 }

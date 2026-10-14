@@ -185,15 +185,6 @@ public static class Win32
     [DllImport("user32.dll")]
     public static extern short GetAsyncKeyState(int vKey);
 
-    [DllImport("user32.dll")]
-    public static extern IntPtr GetForegroundWindow();
-
-    [DllImport("user32.dll")]
-    public static extern IntPtr GetDesktopWindow();
-
-    [DllImport("user32.dll")]
-    public static extern IntPtr GetShellWindow();
-
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
@@ -235,6 +226,52 @@ public static class Win32
         }
         return list;
     }
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool LockWorkStation();
+
+    [DllImport("powrprof.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SetSuspendState(bool hibernate, bool forceCritical, bool disableWakeEvent);
+
+    public static bool ExecutePowerAction(string action)
+    {
+        try
+        {
+            switch (action.Trim().ToLowerInvariant())
+            {
+                case "lock":
+                    return LockWorkStation();
+
+                case "sleep":
+                    return SetSuspendState(hibernate: false, forceCritical: true, disableWakeEvent: true);
+
+                case "hibernate":
+                    return SetSuspendState(hibernate: true, forceCritical: true, disableWakeEvent: true);
+
+                case "restart":
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("shutdown.exe", "/r /t 0") { CreateNoWindow = true, UseShellExecute = false });
+                    return true;
+
+                case "shutdown":
+                case "poweroff":
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("shutdown.exe", "/s /t 0") { CreateNoWindow = true, UseShellExecute = false });
+                    return true;
+
+                case "signout":
+                case "logoff":
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("shutdown.exe", "/l") { CreateNoWindow = true, UseShellExecute = false });
+                    return true;
+
+                default:
+                    return false;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -271,6 +308,42 @@ public static class Win32
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool DestroyIcon(IntPtr hIcon);
+    public const uint NIM_ADD = 0x00000000;
+    public const uint NIM_MODIFY = 0x00000001;
+    public const uint NIM_DELETE = 0x00000002;
+    public const uint NIF_MESSAGE = 0x00000001;
+    public const uint NIF_ICON = 0x00000002;
+    public const uint NIF_TIP = 0x00000004;
+    public const int WM_TRAYICON = 0x0400 + 101;
+    public static readonly IntPtr IDI_APPLICATION = new IntPtr(32512);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct NOTIFYICONDATAW
+    {
+        public uint cbSize;
+        public IntPtr hWnd;
+        public uint uID;
+        public uint uFlags;
+        public uint uCallbackMessage;
+        public IntPtr hIcon;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string szTip;
+        public uint dwState;
+        public uint dwStateMask;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
+        public string szInfo;
+        public uint uTimeoutOrVersion;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
+        public string szInfoTitle;
+        public uint dwInfoFlags;
+    }
+
+    [DllImport("shell32.dll", EntryPoint = "Shell_NotifyIconW", CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool Shell_NotifyIcon(uint dwMessage, ref NOTIFYICONDATAW lpData);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr LoadIcon(IntPtr hInstance, IntPtr lpIconName);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -375,22 +448,6 @@ public static class Win32
     }
 
     /// <summary>
-    /// Applies Windows 11 Immersive Dark Mode and Acrylic Backdrop attributes via DWM.
-    /// </summary>
-    public static void ApplyAcrylicBackdrop(IntPtr hwnd, bool enableAcrylic = true)
-    {
-        if (hwnd == IntPtr.Zero)
-            return;
-
-        int darkMode = 1;
-        _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref darkMode, sizeof(int));
-        _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1, ref darkMode, sizeof(int));
-
-        int backdropType = enableAcrylic ? DWMSBT_TRANSIENTWINDOW : DWMSBT_NONE;
-        _ = DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref backdropType, sizeof(int));
-    }
-
-    /// <summary>
     /// Configures the window as a non-activating tool window and toggles click-through (WS_EX_TRANSPARENT).
     /// </summary>
     public static void DisableNativeWindowFrameAndShadow(IntPtr hwnd)
@@ -407,8 +464,55 @@ public static class Win32
         int backdropNone = DWMSBT_NONE;
         _ = DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref backdropNone, sizeof(int));
 
-        int cornerNone = DWMWCP_DONOTROUND;
-        _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref cornerNone, sizeof(int));
+        int cornerPref = DWMWCP_ROUND;
+        _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref cornerPref, sizeof(int));
+    }
+
+    [DllImport("gdi32.dll")]
+    public static extern IntPtr CreateRoundRectRgn(int x1, int y1, int x2, int y2, int cx, int cy);
+
+    [DllImport("user32.dll")]
+    public static extern int SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool bRedraw);
+
+    /// <summary>
+    /// Physically clips the HWND so the bottom corners are mathematically rounded with zero rectangular background artifact.
+    /// </summary>
+    public static void ApplyWindowRoundedRegion(IntPtr hwnd, int width, int height, int cornerRadius)
+    {
+        if (hwnd == IntPtr.Zero) return;
+        try
+        {
+            // A round rect starting at top = -cornerRadius to height clips the bottom corners with exactly cornerRadius,
+            // while leaving the top edge perfectly flat and flush to the screen bezel.
+            IntPtr rgn = CreateRoundRectRgn(0, -cornerRadius, width + 1, height + 1, cornerRadius * 2, cornerRadius * 2);
+            SetWindowRgn(hwnd, rgn, true);
+        }
+        catch
+        {
+        }
+    }
+
+    [DllImport("user32.dll", EntryPoint = "SetClassLongPtr")]
+    public static extern IntPtr SetClassLongPtr64(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+
+    [DllImport("user32.dll", EntryPoint = "SetClassLong")]
+    public static extern int SetClassLong32(IntPtr hWnd, int nIndex, int dwNewLong);
+
+    public const int GCLP_HBRBACKGROUND = -10;
+
+    public static void DisableWindowClassBackgroundBrush(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return;
+        try
+        {
+            if (IntPtr.Size == 8)
+                SetClassLongPtr64(hwnd, GCLP_HBRBACKGROUND, IntPtr.Zero);
+            else
+                SetClassLong32(hwnd, GCLP_HBRBACKGROUND, 0);
+        }
+        catch
+        {
+        }
     }
 
     /// <summary>
@@ -463,6 +567,206 @@ public static class Win32
         }
 
         return new RECT { Left = 0, Top = 0, Right = 1920, Bottom = 1080 };
+    }
+
+    // SHQueryUserNotificationState result codes
+    public const int QUNS_BUSY = 2;
+    public const int QUNS_RUNNING_D3D_FULL_SCREEN = 3;
+    public const int QUNS_PRESENTATION_MODE = 4;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SYSTEM_POWER_STATUS
+    {
+        public byte ACLineStatus;
+        public byte BatteryFlag;
+        public byte BatteryLifePercent;
+        public byte SystemStatusFlag;
+        public int BatteryLifeTime;
+        public int BatteryFullLifeTime;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetSystemPowerStatus(out SYSTEM_POWER_STATUS status);
+
+    /// <summary>
+    /// Reads the battery state. <c>HasBattery</c> is false on desktops, where no chip should be shown.
+    /// </summary>
+    public static (bool HasBattery, int Percent, bool Charging) GetBatteryStatus()
+    {
+        try
+        {
+            if (!GetSystemPowerStatus(out SYSTEM_POWER_STATUS status))
+            {
+                return (false, 0, false);
+            }
+
+            bool hasBattery = status.BatteryFlag != 128 && status.BatteryLifePercent != 255;
+            int percent = status.BatteryLifePercent == 255 ? 0 : status.BatteryLifePercent;
+            bool charging = status.ACLineStatus == 1;
+            return (hasBattery, percent, charging);
+        }
+        catch
+        {
+            return (false, 0, false);
+        }
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, out bool pvParam, uint fWinIni);
+
+    /// <summary>
+    /// Whether the user allows window animations, honouring the system "Show animations" accessibility setting.
+    /// </summary>
+    public static bool AreSystemAnimationsEnabled()
+    {
+        try
+        {
+            return SystemParametersInfo(SPI_GETCLIENTAREAANIMATION, 0, out bool enabled, 0) && enabled;
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    public const uint SPI_GETCLIENTAREAANIMATION = 0x1042;
+
+    /// <summary>
+    /// Parses a hotkey string such as <c>Win+`</c>, <c>Ctrl+Shift+Space</c> or <c>Ctrl+Alt+C</c>
+    /// into RegisterHotKey modifiers and a virtual key code.
+    /// </summary>
+    public static bool TryParseHotkey(string? text, out uint modifiers, out uint virtualKey)
+    {
+        modifiers = 0;
+        virtualKey = 0;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        bool hasModifier = false;
+        bool hasKey = false;
+
+        foreach (string rawPart in text.Split('+', StringSplitOptions.RemoveEmptyEntries))
+        {
+            string part = rawPart.Trim();
+            if (part.Length == 0)
+            {
+                continue;
+            }
+
+            switch (part.ToLowerInvariant())
+            {
+                case "win":
+                case "windows":
+                case "super":
+                case "meta":
+                    modifiers |= MOD_WIN;
+                    hasModifier = true;
+                    continue;
+                case "ctrl":
+                case "control":
+                    modifiers |= MOD_CONTROL;
+                    hasModifier = true;
+                    continue;
+                case "alt":
+                    modifiers |= MOD_ALT;
+                    hasModifier = true;
+                    continue;
+                case "shift":
+                    modifiers |= MOD_SHIFT;
+                    hasModifier = true;
+                    continue;
+            }
+
+            if (hasKey)
+            {
+                return false;
+            }
+
+            hasKey = TryParseKey(part, out virtualKey);
+            if (!hasKey)
+            {
+                return false;
+            }
+        }
+
+        // A bare key would swallow normal typing, so a modifier is required.
+        return hasModifier && hasKey;
+    }
+
+    private static bool TryParseKey(string part, out uint virtualKey)
+    {
+        virtualKey = 0;
+        string key = part.Trim();
+
+        if (key.Length == 1)
+        {
+            char c = char.ToUpperInvariant(key[0]);
+            if (c is >= 'A' and <= 'Z' or >= '0' and <= '9')
+            {
+                virtualKey = c;
+                return true;
+            }
+
+            if (key[0] == '`')
+            {
+                virtualKey = VK_OEM_3;
+                return true;
+            }
+        }
+
+        switch (key.ToLowerInvariant())
+        {
+            case "space":
+            case "spacebar":
+                virtualKey = VK_SPACE;
+                return true;
+            case "tab":
+                virtualKey = 0x09;
+                return true;
+            case "enter":
+            case "return":
+                virtualKey = 0x0D;
+                return true;
+            case "escape":
+            case "esc":
+                virtualKey = 0x1B;
+                return true;
+            case "grave":
+            case "backtick":
+            case "`":
+                virtualKey = VK_OEM_3;
+                return true;
+            case "f1": case "f2": case "f3": case "f4": case "f5": case "f6":
+            case "f7": case "f8": case "f9": case "f10": case "f11": case "f12":
+                virtualKey = 0x6F + uint.Parse(key[1..]);
+                return true;
+        }
+
+        return false;
+    }
+
+    [DllImport("shell32.dll")]
+    private static extern int SHQueryUserNotificationState(out int state);
+
+    /// <summary>
+    /// Raw shell notification state, or -1 when the query is unavailable. This is the same OS signal
+    /// the shell uses to withhold toasts over games, so a merely maximized window is never mistaken
+    /// for full screen. Callers decide which states to act on.
+    /// </summary>
+    public static int QueryUserNotificationState()
+    {
+        try
+        {
+            return SHQueryUserNotificationState(out int state) == 0 ? state : -1;
+        }
+        catch (Exception)
+        {
+            return -1;
+        }
     }
 
     /// <summary>

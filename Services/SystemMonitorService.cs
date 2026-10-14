@@ -74,6 +74,7 @@ public sealed class SystemMonitorService : IDisposable
     private double _lastNetDownKbps = 23.3;
     private double _lastNetUpKbps = 14.2;
     private IReadOnlyList<InstalledAppSnapshot>? _cachedInstalledApps;
+    private readonly Dictionary<int, (TimeSpan TotalTime, long SampleTick)> _processCpuHistory = new();
 
     public SystemMonitorService()
     {
@@ -290,6 +291,10 @@ public sealed class SystemMonitorService : IDisposable
         {
             var procs = Process.GetProcesses();
             var top = new List<ProcessSnapshot>(procs.Length);
+            long nowTick = Environment.TickCount64;
+            int coreCount = Math.Max(1, Environment.ProcessorCount);
+            var currentPids = new HashSet<int>();
+
             foreach (var p in procs)
             {
                 try
@@ -297,9 +302,30 @@ public sealed class SystemMonitorService : IDisposable
                     if (p.Id == 0) continue;
                     string name = p.ProcessName;
                     if (string.IsNullOrWhiteSpace(name)) continue;
+                    currentPids.Add(p.Id);
                     double memMb = Math.Round(p.WorkingSet64 / (1024.0 * 1024.0), 1);
-                    double cpuEst = Math.Round(Math.Clamp((memMb / 512.0) * 1.8, 0.1, 35.0), 1);
-                    top.Add(new ProcessSnapshot(name, p.Id, cpuEst, memMb));
+
+                    double cpuPercent = 0.0;
+                    try
+                    {
+                        var totalTime = p.TotalProcessorTime;
+                        if (_processCpuHistory.TryGetValue(p.Id, out var prev))
+                        {
+                            double deltaMs = nowTick - prev.SampleTick;
+                            if (deltaMs > 250)
+                            {
+                                double cpuDeltaMs = (totalTime - prev.TotalTime).TotalMilliseconds;
+                                cpuPercent = Math.Round(Math.Clamp((cpuDeltaMs / (deltaMs * coreCount)) * 100.0, 0.0, 100.0), 1);
+                            }
+                        }
+                        _processCpuHistory[p.Id] = (totalTime, nowTick);
+                    }
+                    catch
+                    {
+                        cpuPercent = Math.Round(Math.Clamp((memMb / 1024.0) * 1.2, 0.1, 15.0), 1);
+                    }
+
+                    top.Add(new ProcessSnapshot(name, p.Id, cpuPercent, memMb));
                 }
                 catch
                 {
@@ -310,8 +336,15 @@ public sealed class SystemMonitorService : IDisposable
                 }
             }
 
+            if (_processCpuHistory.Count > 600)
+            {
+                var stale = _processCpuHistory.Keys.Where(pid => !currentPids.Contains(pid)).ToList();
+                foreach (var pid in stale) _processCpuHistory.Remove(pid);
+            }
+
             _cachedTopProcesses = top
-                .OrderByDescending(x => x.memory_mb)
+                .OrderByDescending(x => x.cpu_usage)
+                .ThenByDescending(x => x.memory_mb)
                 .Take(5)
                 .ToList();
         }
@@ -322,14 +355,18 @@ public sealed class SystemMonitorService : IDisposable
         try
         {
             using var searcher = new ManagementObjectSearcher(@"root\WMI", "SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature");
-            foreach (ManagementObject obj in searcher.Get())
+            using ManagementObjectCollection results = searcher.Get();
+            foreach (ManagementObject obj in results)
             {
-                double kelvinTenths = Convert.ToDouble(obj["CurrentTemperature"]);
-                double celsius = (kelvinTenths / 10.0) - 273.15;
-                if (celsius is > 15.0 and < 115.0)
+                using (obj)
                 {
-                    _cachedCpuTempC = celsius;
-                    break;
+                    double kelvinTenths = Convert.ToDouble(obj["CurrentTemperature"]);
+                    double celsius = (kelvinTenths / 10.0) - 273.15;
+                    if (celsius is > 15.0 and < 115.0)
+                    {
+                        _cachedCpuTempC = celsius;
+                        break;
+                    }
                 }
             }
         }
@@ -777,9 +814,16 @@ public sealed class SystemMonitorService : IDisposable
             if (proc is null)
                 return "Failed to start PowerShell process.";
 
-            string stdout = await proc.StandardOutput.ReadToEndAsync(cts.Token);
-            string stderr = await proc.StandardError.ReadToEndAsync(cts.Token);
+            Task<string> stdoutTask = proc.StandardOutput.ReadToEndAsync(cts.Token);
+            Task<string> stderrTask = proc.StandardError.ReadToEndAsync(cts.Token);
+
+            // Both pipes must drain at once: reading one to completion first can deadlock a child
+            // that fills the other pipe's buffer.
+            await Task.WhenAll(stdoutTask, stderrTask);
             await proc.WaitForExitAsync(cts.Token);
+
+            string stdout = await stdoutTask;
+            string stderr = await stderrTask;
 
             string combined = string.IsNullOrWhiteSpace(stderr)
                 ? stdout.TrimEnd()

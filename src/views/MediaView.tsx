@@ -13,17 +13,32 @@ import {
   Radio,
   SkipBack,
   SkipForward,
+  Shuffle,
+  Repeat,
+  Sliders,
+  Volume2,
+  VolumeX,
+  BarChart2,
+  Activity,
 } from 'lucide-react';
-import { BongoCat } from '../components/BongoCat';
+import { CanopyMascot } from '../components/CanopyMascot';
+import { RadialGauge } from '../components/RadialGauge';
 import { useSettings } from '../context/SettingsContext';
 import {
   MediaInfo,
   MediaSessionItem,
+  AudioSessionEntry,
   getAudioSpectrum,
+  getAudioSessions,
+  setAudioSessionVolume,
+  setAudioSessionMute,
   getMediaSessions,
   selectMediaSession,
+  mediaToggleShuffle,
+  mediaCycleRepeat,
 } from '../services/tauriBridge';
-
+import { usePanelOpen } from '../hooks/usePanelOpen';
+import { usePlaybackClock } from '../hooks/usePlaybackClock';
 export interface MediaViewProps {
   media: MediaInfo;
   onPlayPause: () => void;
@@ -167,15 +182,15 @@ function formatMediaTime(seconds: number): string {
   return `${mins}:${String(secs).padStart(2, '0')}`;
 }
 
-function renderSessionIcon(appName: string): React.ReactNode {
-  const lower = appName.toLowerCase();
+function renderSessionIcon(appName?: string): React.ReactNode {
+  const lower = (appName || '').toLowerCase();
   if (lower.includes('spotify')) {
     return <Radio className="w-3.5 h-3.5 text-[#a6e3a1]" strokeWidth={2} />;
   }
   if (lower.includes('feishin') || lower.includes('foobar') || lower.includes('musicbee')) {
     return <Headphones className="w-3.5 h-3.5 text-[#cba6f7]" strokeWidth={2} />;
   }
-  if (lower.includes('chrome') || lower.includes('edge') || lower.includes('firefox')) {
+  if (lower.includes('chrome') || lower.includes('edge') || lower.includes('firefox') || lower.includes('brave')) {
     return <Globe className="w-3.5 h-3.5 text-[#89dceb]" strokeWidth={2} />;
   }
   return <Music className="w-3.5 h-3.5 text-[#cba6f7]" strokeWidth={2} />;
@@ -288,10 +303,15 @@ export const MediaView: React.FC<MediaViewProps> = ({
 }) => {
   const { settings } = useSettings();
   const isPlaying = Boolean(media.is_playing);
+  // Whether the Canopy panel is currently expanded: no point polling the host while closed.
+  const panelOpen = usePanelOpen();
+  // Guards against queueing spectrum polls when the host is slower than the 40 ms cadence.
+  const spectrumInFlightRef = useRef<boolean>(false);
 
-  // Local interactive scrub state synced with media.position_secs
-  const [localPosition, setLocalPosition] = useState<number>(media.position_secs || 0);
+  // The dashboard already runs the shared playhead and hands it to us through `media.position_secs`;
+  // re-anchoring here keeps this view correct even if it is ever mounted on its own.
   const [isDraggingScrubber, setIsDraggingScrubber] = useState<boolean>(false);
+  const playbackClock = usePlaybackClock(media, { enabled: panelOpen, hold: isDraggingScrubber });
 
   // Continuous rhythmic harmonic tick (dances whenever music is playing)
   const [visualizerTick, setVisualizerTick] = useState<number>(0);
@@ -302,12 +322,32 @@ export const MediaView: React.FC<MediaViewProps> = ({
   const [lyricsLines, setLyricsLines] = useState<LyricLine[]>([]);
   const [lyricsSourceLabel, setLyricsSourceLabel] = useState<string>('Synced Lyrics');
   const [inferredDuration, setInferredDuration] = useState<number>(0);
+  const [isShuffle, setIsShuffle] = useState<boolean>(Boolean(media.is_shuffle));
+  const [repeatMode, setRepeatMode] = useState<number>(media.auto_repeat ?? 0);
+
+  useEffect(() => {
+    if (typeof media.is_shuffle === 'boolean') {
+      setIsShuffle(media.is_shuffle);
+    }
+    if (typeof media.auto_repeat === 'number') {
+      setRepeatMode(media.auto_repeat);
+    }
+  }, [media.is_shuffle, media.auto_repeat]);
+
+  const handleToggleShuffle = async () => {
+    const next = !isShuffle;
+    setIsShuffle(next);
+    await mediaToggleShuffle();
+  };
+
+  const handleCycleRepeat = async () => {
+    const next = (repeatMode + 1) % 3;
+    setRepeatMode(next);
+    await mediaCycleRepeat();
+  };
   const lyricsCacheRef = useRef<Record<string, { lines: LyricLine[]; label: string; duration?: number }>>({});
   const lyricsScrollRef = useRef<HTMLDivElement | null>(null);
   const activeLyricItemRef = useRef<HTMLButtonElement | null>(null);
-
-  const lastTrackKeyRef = useRef<string>('');
-  const localProgressSecsRef = useRef<number>(media.position_secs || 0);
 
   // Active SMTC session switcher popover state
   const [sessionMenuOpen, setSessionMenuOpen] = useState<boolean>(false);
@@ -315,15 +355,24 @@ export const MediaView: React.FC<MediaViewProps> = ({
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const sessionPopoverRef = useRef<HTMLDivElement | null>(null);
 
-  // Animate radial 40-spoke visualizer strictly when music is actively playing
-  // Poll real 40-band WASAPI Loopback FFT spectrum strictly when audio is playing
+  // Per-application volume mixer state (polled only while the mixer panel is visible)
+  const [showMixer, setShowMixer] = useState<boolean>(false);
+  const [mixerSessions, setMixerSessions] = useState<AudioSessionEntry[]>([]);
+  const [mixerLoading, setMixerLoading] = useState<boolean>(false);
+  const mixerInFlightRef = useRef<boolean>(false);
+
+  // Poll the real 40-band WASAPI Loopback FFT spectrum only while music is playing AND the
+  // panel is expanded. A poll is skipped while the previous one is still in flight, so the
+  // host is never queued with more than one outstanding get_audio_spectrum request.
   useEffect(() => {
-    if (!isPlaying) {
+    if (!isPlaying || !panelOpen) {
       setSpectrumBands(new Array(40).fill(0));
       return;
     }
     let active = true;
     const pollSpectrum = async () => {
+      if (spectrumInFlightRef.current) return;
+      spectrumInFlightRef.current = true;
       try {
         const bands = await getAudioSpectrum();
         if (active && Array.isArray(bands) && bands.length > 0) {
@@ -331,27 +380,68 @@ export const MediaView: React.FC<MediaViewProps> = ({
         }
       } catch {
         // Ignore transient spectrum read errors
+      } finally {
+        spectrumInFlightRef.current = false;
       }
     };
     void pollSpectrum();
-    const timer = window.setInterval(pollSpectrum, 45);
+    const timer = window.setInterval(pollSpectrum, 40);
     return () => {
       active = false;
       window.clearInterval(timer);
     };
-  }, [isPlaying]);
+  }, [isPlaying, panelOpen]);
 
-  // Continuous harmonic wave ticker for smooth dancing spoke visualizer
+  // Harmonic wave ticker for the synthetic fallback shapes: only ticks while music plays and
+  // the panel is visible, so a hidden or paused panel does not churn React state.
   useEffect(() => {
-    if (!isPlaying) {
-      setVisualizerTick(0);
-      return;
-    }
+    if (!isPlaying || !panelOpen) return;
     const timer = window.setInterval(() => {
       setVisualizerTick((prev) => (prev + 1) % 360);
-    }, 50);
+    }, 45);
     return () => window.clearInterval(timer);
-  }, [isPlaying]);
+  }, [isPlaying, panelOpen]);
+
+  // Per-app mixer: poll host sessions only while the mixer panel is visible and the panel is
+  // open. Skips a tick while the previous request is still in flight (no queueing).
+  useEffect(() => {
+    if (!showMixer || !panelOpen) return;
+    let active = true;
+    const pollSessions = async () => {
+      if (mixerInFlightRef.current) return;
+      mixerInFlightRef.current = true;
+      try {
+        const list = await getAudioSessions();
+        if (active) {
+          setMixerSessions(Array.isArray(list) ? list : []);
+          setMixerLoading(false);
+        }
+      } catch {
+        if (active) setMixerLoading(false);
+      } finally {
+        mixerInFlightRef.current = false;
+      }
+    };
+    setMixerLoading(true);
+    void pollSessions();
+    const timer = window.setInterval(pollSessions, 1500);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [showMixer, panelOpen]);
+
+  const handleMixerVolume = (id: string, level: number) => {
+    setMixerSessions((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, volume: level, muted: false } : s))
+    );
+    void setAudioSessionVolume(id, level).catch(() => {});
+  };
+
+  const handleMixerMute = (id: string, muted: boolean) => {
+    setMixerSessions((prev) => prev.map((s) => (s.id === id ? { ...s, muted } : s)));
+    void setAudioSessionMute(id, muted).catch(() => {});
+  };
   // Load available SMTC sessions when popover opens or media updates
   useEffect(() => {
     let mounted = true;
@@ -400,17 +490,19 @@ export const MediaView: React.FC<MediaViewProps> = ({
   }, [media.sessions, fetchedSessions, selectedSessionId]);
 
   const currentSession = useMemo(() => {
-    const active = sessions.find((s) => s.is_current);
+    const base = sessions && sessions.length > 0 ? sessions : DEFAULT_FALLBACK_SESSIONS;
+    const active = base.find((s) => s && s.is_current);
     if (active) return active;
     if (media.source_app) {
-      const matched = sessions.find(
+      const src = (media.source_app || '').toLowerCase();
+      const matched = base.find(
         (s) =>
-          s.app_name.toLowerCase() === media.source_app?.toLowerCase() ||
-          s.id.toLowerCase() === media.source_app?.toLowerCase()
+          (s.app_name || '').toLowerCase() === src ||
+          (s.id || '').toLowerCase() === src
       );
       if (matched) return matched;
     }
-    return sessions[0] || DEFAULT_FALLBACK_SESSIONS[0];
+    return base[0] || DEFAULT_FALLBACK_SESSIONS[0];
   }, [sessions, media.source_app]);
   const smtcDuration = Number(media.duration_secs) || 0;
   const effectiveDuration =
@@ -419,51 +511,16 @@ export const MediaView: React.FC<MediaViewProps> = ({
       : inferredDuration > 2.0
       ? inferredDuration
       : 219;
-  const clampedPosition = Math.min(effectiveDuration, Math.max(0, localPosition));
+  const clampedPosition = Math.min(effectiveDuration, Math.max(0, playbackClock.position));
   const progressPercent = Math.min(100, Math.max(0, (clampedPosition / effectiveDuration) * 100));
 
   const trackTitle = media.title?.trim() || 'No Media Playing';
   const trackArtist = media.artist?.trim() || 'Windows SMTC Audio';
   const trackAlbum = media.album?.trim() || '';
 
-  // Reset or sync local progression when track changes
-  useEffect(() => {
-    const key = `${trackTitle}__${trackArtist}`;
-    if (lastTrackKeyRef.current !== key) {
-      lastTrackKeyRef.current = key;
-      localProgressSecsRef.current = media.position_secs > 1.5 ? media.position_secs : 0;
-      setLocalPosition(localProgressSecsRef.current);
-    }
-  }, [trackTitle, trackArtist]);
-
-  // Sync from SMTC if player provides valid progressing position (> 1.5s)
-  useEffect(() => {
-    if (!isDraggingScrubber && media.position_secs > 1.5) {
-      localProgressSecsRef.current = media.position_secs;
-      setLocalPosition(media.position_secs);
-    }
-  }, [media.position_secs, isDraggingScrubber]);
-
-  // Live monotonic progression when music is playing (crucial for Jellyfin / web players)
-  useEffect(() => {
-    if (!isPlaying) return;
-    const timer = window.setInterval(() => {
-      if (isDraggingScrubber) return;
-      if ((media.position_secs || 0) <= 1.5) {
-        localProgressSecsRef.current = Math.min(
-          effectiveDuration,
-          localProgressSecsRef.current + 1
-        );
-        setLocalPosition(localProgressSecsRef.current);
-      }
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [isPlaying, media.position_secs, isDraggingScrubber, effectiveDuration]);
-
   const handleUserSeek = (targetSec: number) => {
     const clamped = Math.max(0, Math.min(effectiveDuration, targetSec));
-    localProgressSecsRef.current = clamped;
-    setLocalPosition(clamped);
+    playbackClock.seek(clamped);
     onSeek?.(clamped);
   };
   // Automatically populate built-in time-synced lyrics and fetch live lyrics from LRCLIB
@@ -635,69 +692,41 @@ export const MediaView: React.FC<MediaViewProps> = ({
     return () => controller.abort();
   }, [media.title, media.artist, effectiveDuration]);
 
+  // Lyric highlight is a pure function of (clock position, user offset): a positive offset makes a
+  // line light up later, compensating for whatever lag the source's timestamps carry.
+  const lyricPosition = clampedPosition - (settings.lyricOffsetMs ?? 0) / 1000;
   const activeLyricIndex = useMemo(() => {
     if (lyricsLines.length === 0) return 0;
     let idx = 0;
     for (let i = 0; i < lyricsLines.length; i++) {
-      if (clampedPosition >= lyricsLines[i].time) {
+      if (lyricPosition >= lyricsLines[i].time) {
         idx = i;
       } else {
         break;
       }
     }
     return idx;
-  }, [lyricsLines, clampedPosition]);
+  }, [lyricsLines, lyricPosition]);
 
-  // Smoothly center the active lyric line in the scrollable stage
+  // Lyric motion gate: settings, panel visibility and transport state all have to agree before
+  // anything animates.
+  const lyricMotionEnabled = Boolean(settings.animationsEnabled) && panelOpen && isPlaying;
+
+  // Smoothly center the active lyric line in the scrollable stage. Keyed on the active index only,
+  // so the column never animates on every clock tick.
   useEffect(() => {
-    if (!showLyrics || !activeLyricItemRef.current || !lyricsScrollRef.current) return;
+    if (!showLyrics || !panelOpen) return;
     const container = lyricsScrollRef.current;
     const item = activeLyricItemRef.current;
+    if (!container || !item) return;
     const targetTop =
-      item.offsetTop - container.clientHeight / 2 + item.clientHeight / 2;
+      item.offsetTop - container.offsetTop - container.clientHeight / 2 + item.clientHeight / 2;
     container.scrollTo({
       top: Math.max(0, targetTop),
-      behavior: 'smooth',
+      behavior: lyricMotionEnabled ? 'smooth' : 'auto',
     });
-  }, [activeLyricIndex, showLyrics]);
+  }, [activeLyricIndex, showLyrics, panelOpen, lyricMotionEnabled]);
 
-  // Precompute 40 radial spoke bars around cx=95, cy=95
-  // Precompute 40 radial spoke bars driven by live FFT spectrum + rhythmic dance wave
-  const spokes = useMemo(() => {
-    const count = 40;
-    const cx = 95;
-    const cy = 95;
-    const innerRadius = 64;
-
-    return Array.from({ length: count }, (_, idx) => {
-      const angle = (idx / count) * Math.PI * 2 - Math.PI / 2;
-      let length = 5.5;
-
-      if (isPlaying) {
-        const rawAmp =
-          Array.isArray(spectrumBands) && typeof spectrumBands[idx] === 'number'
-            ? spectrumBands[idx]
-            : 0;
-
-        // Rhythmic harmonic visualizer wave dancing smoothly around the rotating vinyl
-        const waveA = Math.sin(visualizerTick * 0.42 + idx * 0.55);
-        const waveB = Math.cos(visualizerTick * 0.26 - idx * 0.35);
-        const harmonicDance = ((waveA + waveB + 2) / 4) * 0.65;
-
-        // When live WASAPI audio frequencies spike, amplify vigorously
-        const totalEnergy = Math.max(rawAmp * 1.6, rawAmp * 0.5 + harmonicDance);
-        length = Math.max(6.0, Math.min(27.0, 6.0 + totalEnergy * 21.0));
-      }
-
-      const outerRadius = innerRadius + length;
-      const x1 = cx + Math.cos(angle) * innerRadius;
-      const y1 = cy + Math.sin(angle) * innerRadius;
-      const x2 = cx + Math.cos(angle) * outerRadius;
-      const y2 = cy + Math.sin(angle) * outerRadius;
-
-      return { idx, x1, y1, x2, y2, length };
-    });
-  }, [isPlaying, visualizerTick, spectrumBands]);
   return (
     <div
       data-tauri-drag-region="false"
@@ -722,53 +751,16 @@ export const MediaView: React.FC<MediaViewProps> = ({
       {/* ========================================================================= */}
       <div className="w-[210px] shrink-0 h-full flex flex-col items-center justify-center relative">
         <div className="relative w-[190px] h-[190px] flex items-center justify-center">
-          {/* 40-Spoke Radial Visualizer SVG around cx=95, cy=95 */}
-          <svg
-            width={190}
-            height={190}
-            viewBox="0 0 190 190"
-            className="absolute inset-0 overflow-visible pointer-events-none"
-            aria-hidden="true"
-          >
-            <defs>
-              <linearGradient id="canopyMediaSpokeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stopColor="var(--theme-accent, #cba6f7)" />
-                <stop offset="100%" stopColor="#89dceb" />
-              </linearGradient>
-            </defs>
-
-            {/* Subtle inner guide track circle */}
-            <circle
-              cx={95}
-              cy={95}
-              r={61}
-              fill="none"
-              stroke="var(--theme-track, rgba(255, 255, 255, 0.08))"
-              strokeWidth={1.25}
+          {/* 40-Spoke Radial Visualizer: the live WASAPI loopback FFT bands drive the gauge */}
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <RadialGauge
+              bands={spectrumBands}
+              active={isPlaying}
+              size={190}
+              accentColor="var(--theme-accent, #cba6f7)"
+              secondaryColor="#89dceb"
             />
-
-            {/* 40 Radial SVG Spoke Bars */}
-            {spokes.map((spoke) => (
-              <line
-                key={spoke.idx}
-                x1={spoke.x1}
-                y1={spoke.y1}
-                x2={spoke.x2}
-                y2={spoke.y2}
-                stroke={
-                  isPlaying
-                    ? 'url(#canopyMediaSpokeGrad)'
-                    : 'var(--theme-track, rgba(255, 255, 255, 0.22))'
-                }
-                strokeWidth={2.6}
-                strokeLinecap="round"
-                style={{
-                  transition: 'all 85ms ease-out',
-                  opacity: isPlaying ? Math.min(1, 0.55 + spoke.length / 32) : 0.45,
-                }}
-              />
-            ))}
-          </svg>
+          </div>
 
           {/* Circular Rotating Album Thumbnail / Stylized Vinyl Disc at Center */}
           <div
@@ -843,34 +835,67 @@ export const MediaView: React.FC<MediaViewProps> = ({
             </p>
           </div>
 
-          <button
-            type="button"
-            data-tauri-drag-region="false"
-            onClick={() => {
-              setSessionMenuOpen(false);
-              setShowLyrics((prev) => !prev);
-            }}
-            aria-pressed={showLyrics}
-            className="shrink-0 px-3 py-1 rounded-full border text-[11px] font-semibold flex items-center gap-1.5 transition-all duration-200 hover:scale-105 active:scale-95 pointer-events-auto cursor-pointer"
-            style={
-              showLyrics
-                ? {
-                    background: 'var(--theme-accent, #cba6f7)',
-                    borderColor: 'var(--theme-accent, #cba6f7)',
-                    color: '#11111b',
-                    boxShadow: '0 0 16px rgba(203, 166, 247, 0.38)',
-                  }
-                : {
-                    background: 'var(--theme-track, rgba(255, 255, 255, 0.06))',
-                    borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.12))',
-                    color: 'var(--theme-text-primary, #cdd6f4)',
-                  }
-            }
-            title={showLyrics ? 'Return to transport controls' : 'Show time-synced lyrics'}
-          >
-            <Mic2 className="w-3.5 h-3.5" strokeWidth={2.1} />
-            <span>Lyrics</span>
-          </button>
+          <div className="shrink-0 flex items-center gap-1.5">
+            <button
+              type="button"
+              data-tauri-drag-region="false"
+              onClick={() => {
+                setSessionMenuOpen(false);
+                setShowMixer(false);
+                setShowLyrics((prev) => !prev);
+              }}
+              aria-pressed={showLyrics}
+              className="shrink-0 px-3 py-1 rounded-full border text-[11px] font-semibold flex items-center gap-1.5 transition-all duration-200 hover:scale-105 active:scale-95 pointer-events-auto cursor-pointer"
+              style={
+                showLyrics
+                  ? {
+                      background: 'var(--theme-accent, #cba6f7)',
+                      borderColor: 'var(--theme-accent, #cba6f7)',
+                      color: '#11111b',
+                      boxShadow: '0 0 16px rgba(203, 166, 247, 0.38)',
+                    }
+                  : {
+                      background: 'var(--theme-track, rgba(255, 255, 255, 0.06))',
+                      borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.12))',
+                      color: 'var(--theme-text-primary, #cdd6f4)',
+                    }
+              }
+              title={showLyrics ? 'Return to transport controls' : 'Show time-synced lyrics'}
+            >
+              <Mic2 className="w-3.5 h-3.5" strokeWidth={2.1} />
+              <span>Lyrics</span>
+            </button>
+
+            <button
+              type="button"
+              data-tauri-drag-region="false"
+              onClick={() => {
+                setSessionMenuOpen(false);
+                setShowLyrics(false);
+                setShowMixer((prev) => !prev);
+              }}
+              aria-pressed={showMixer}
+              className="shrink-0 px-3 py-1 rounded-full border text-[11px] font-semibold flex items-center gap-1.5 transition-all duration-200 hover:scale-105 active:scale-95 pointer-events-auto cursor-pointer"
+              style={
+                showMixer
+                  ? {
+                      background: 'var(--theme-accent, #cba6f7)',
+                      borderColor: 'var(--theme-accent, #cba6f7)',
+                      color: '#11111b',
+                      boxShadow: '0 0 16px rgba(203, 166, 247, 0.38)',
+                    }
+                  : {
+                      background: 'var(--theme-track, rgba(255, 255, 255, 0.06))',
+                      borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.12))',
+                      color: 'var(--theme-text-primary, #cdd6f4)',
+                    }
+              }
+              title={showMixer ? 'Close volume mixer' : 'Open per-app volume mixer'}
+            >
+              <Sliders className="w-3.5 h-3.5" strokeWidth={2.1} />
+              <span>Mixer</span>
+            </button>
+          </div>
         </div>
 
         {/* Animated Dual Stage: Transport Controls <-> Time-Synced Lyrics */}
@@ -884,7 +909,25 @@ export const MediaView: React.FC<MediaViewProps> = ({
             }`}
           >
             {/* Large Transport Buttons: Previous (|<), Circular Play/Pause (( > )), Next (>|) */}
-            <div className="flex items-center justify-center gap-4">
+            {/* Transport Row: Shuffle, Previous, Play/Pause, Next, Repeat */}
+            <div className="flex items-center justify-center gap-3">
+              <button
+                type="button"
+                data-tauri-drag-region="false"
+                onClick={handleToggleShuffle}
+                className={`w-8 h-8 rounded-full flex items-center justify-center border transition-all hover:scale-105 active:scale-95 pointer-events-auto cursor-pointer ${
+                  isShuffle ? 'shadow-sm' : 'opacity-50 hover:opacity-80'
+                }`}
+                style={{
+                  background: isShuffle ? 'var(--theme-track)' : 'transparent',
+                  borderColor: isShuffle ? 'var(--theme-accent)' : 'var(--theme-border)',
+                  color: isShuffle ? 'var(--theme-accent)' : 'var(--theme-text-secondary)',
+                }}
+                title={isShuffle ? 'Shuffle is On' : 'Shuffle is Off'}
+              >
+                <Shuffle className="w-3.5 h-3.5" strokeWidth={2} />
+              </button>
+
               <button
                 type="button"
                 data-tauri-drag-region="false"
@@ -933,6 +976,31 @@ export const MediaView: React.FC<MediaViewProps> = ({
               >
                 <SkipForward className="w-4 h-4 fill-current" strokeWidth={2} />
               </button>
+
+              <button
+                type="button"
+                data-tauri-drag-region="false"
+                onClick={handleCycleRepeat}
+                className={`w-8 h-8 rounded-full flex items-center justify-center border transition-all hover:scale-105 active:scale-95 pointer-events-auto cursor-pointer relative ${
+                  repeatMode > 0 ? 'shadow-sm' : 'opacity-50 hover:opacity-80'
+                }`}
+                style={{
+                  background: repeatMode > 0 ? 'var(--theme-track)' : 'transparent',
+                  borderColor: repeatMode > 0 ? 'var(--theme-accent)' : 'var(--theme-border)',
+                  color: repeatMode > 0 ? 'var(--theme-accent)' : 'var(--theme-text-secondary)',
+                }}
+                title={repeatMode === 2 ? 'Repeat All' : repeatMode === 1 ? 'Repeat Current Track' : 'Repeat Off'}
+              >
+                <Repeat className="w-3.5 h-3.5" strokeWidth={2} />
+                {repeatMode === 1 && (
+                  <span
+                    className="absolute text-[8px] font-bold font-mono -top-1 -right-1 px-1 rounded-full"
+                    style={{ background: 'var(--theme-accent)', color: '#11111b' }}
+                  >
+                    1
+                  </span>
+                )}
+              </button>
             </div>
 
             {/* Interactive Horizontal Scrub Bar with Left Current Time & Right Duration */}
@@ -971,6 +1039,49 @@ export const MediaView: React.FC<MediaViewProps> = ({
               </span>
             </div>
 
+            {/* Alternate Audio Visualizer Modes (Linear Bars vs Oscilloscope Wave) */}
+            {settings.visualizerStyle === 'bars' && (
+              <div className="w-full max-w-[330px] h-9 flex items-end justify-between gap-1 px-1 pt-1.5 overflow-hidden">
+                {Array.from({ length: 32 }, (_, i) => {
+                  const rawAmp = spectrumBands[i] || 0;
+                  const waveDance = isPlaying ? ((Math.sin(visualizerTick * 0.35 + i * 0.35) + 1) / 2) * 0.45 : 0;
+                  const amp = rawAmp > 0.03 ? Math.min(1, rawAmp * 1.8) : waveDance;
+                  const heightPercent = Math.max(12, Math.min(100, Math.round(amp * 100)));
+                  return (
+                    <div
+                      key={i}
+                      className="flex-1 rounded-t-sm transition-all duration-75"
+                      style={{
+                        height: `${heightPercent}%`,
+                        background: 'linear-gradient(180deg, var(--theme-accent), var(--theme-border))',
+                        opacity: isPlaying || amp > 0.1 ? 0.95 : 0.3,
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            )}
+
+            {settings.visualizerStyle === 'wave' && (
+              <div className="w-full max-w-[330px] h-9 relative flex items-center justify-center overflow-hidden">
+                <svg className="w-full h-full" viewBox="0 0 330 36" preserveAspectRatio="none">
+                  <path
+                    d={`M 0 18 ${Array.from({ length: 22 }, (_, i) => {
+                      const x = (i / 21) * 330;
+                      const rawAmp = spectrumBands[i] || 0;
+                      const amp = rawAmp > 0.03 ? rawAmp * 2.0 : (isPlaying ? 0.45 : 0.05);
+                      const y = 18 + Math.sin(visualizerTick * 0.5 + i * 0.6) * (amp * 14 + (isPlaying ? 3 : 1));
+                      return `L ${x.toFixed(1)} ${y.toFixed(1)}`;
+                    }).join(' ')}`}
+                    fill="none"
+                    stroke="var(--theme-accent)"
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </div>
+            )}
+
             {/* Active Session Switcher Capsule + Popover Dropdown */}
             <div ref={sessionPopoverRef} className="relative flex flex-col items-center">
               <button
@@ -987,11 +1098,10 @@ export const MediaView: React.FC<MediaViewProps> = ({
                 }}
                 title="Switch active Windows SMTC media session"
               >
-                {renderSessionIcon(currentSession.app_name)}
-                <span className="truncate max-w-[130px]">{currentSession.app_name}</span>
+                {renderSessionIcon(currentSession?.app_name)}
+                <span className="truncate max-w-[130px]">{currentSession?.app_name || 'System Audio'}</span>
                 {sessionMenuOpen ? (
                   <ChevronUp
-                    className="w-3.5 h-3.5"
                     style={{ color: 'var(--theme-accent, #cba6f7)' }}
                     strokeWidth={2}
                   />
@@ -1027,11 +1137,9 @@ export const MediaView: React.FC<MediaViewProps> = ({
 
                   <div className="space-y-1 max-h-[140px] overflow-y-auto">
                     {sessions.map((session) => {
-                      const isCurrent = session.id === currentSession.id;
+                      const isCurrent = session.id === (currentSession?.id ?? '');
                       return (
                         <button
-                          key={session.id}
-                          type="button"
                           data-tauri-drag-region="false"
                           onClick={async () => {
                             setSelectedSessionId(session.id);
@@ -1122,6 +1230,9 @@ export const MediaView: React.FC<MediaViewProps> = ({
                 lyricsLines.map((line, index) => {
                   const isActive = index === activeLyricIndex;
                   const isPast = index < activeLyricIndex;
+                  // The line that just became active rises in. The class only ever sits on the
+                  // active line, so a clock tick cannot restart the animation.
+                  const riseIn = isActive && lyricMotionEnabled;
                   return (
                     <button
                       key={`${line.time}-${index}`}
@@ -1137,17 +1248,22 @@ export const MediaView: React.FC<MediaViewProps> = ({
                           : isPast
                           ? 'opacity-45 hover:opacity-80'
                           : 'opacity-70 hover:opacity-100'
-                      }`}
-                      style={
-                        isActive
+                      }${riseIn ? ' canopy-lyric-active' : ''}`}
+                      style={{
+                        ...(isActive
                           ? {
                               background: 'var(--theme-track, rgba(203, 166, 247, 0.14))',
                               color: 'var(--theme-accent, #cba6f7)',
                             }
                           : {
                               color: 'var(--theme-text-primary, #cdd6f4)',
+                            }),
+                        ...(riseIn
+                          ? {
+                              animationDuration: `${Math.max(120, Math.min(600, settings.animationDurationMs))}ms`,
                             }
-                      }
+                          : {}),
+                      }}
                       title={`Jump to ${formatMediaTime(line.time)}`}
                     >
                       <span className="text-xs leading-snug">{line.text}</span>
@@ -1180,6 +1296,101 @@ export const MediaView: React.FC<MediaViewProps> = ({
               </span>
             </div>
           </div>
+
+          {/* STAGE C: Per-app volume mixer overlay, polled only while visible */}
+          {showMixer && (
+            <div
+              data-tauri-drag-region="false"
+              className="absolute inset-0 z-30 rounded-xl border px-2.5 py-2 flex flex-col pointer-events-auto"
+              style={{
+                background: 'var(--theme-surface, rgba(20, 20, 28, 0.96))',
+                borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.12))',
+              }}
+            >
+              <div
+                className="flex items-center justify-between pb-1.5 mb-1 border-b text-[10px] font-mono uppercase tracking-widest"
+                style={{
+                  color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.65))',
+                  borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
+                }}
+              >
+                <span>Volume Mixer</span>
+                <span>{mixerSessions.length} apps</span>
+              </div>
+
+              {mixerSessions.length === 0 ? (
+                <div className="flex-1 flex flex-col items-center justify-center text-center gap-1.5">
+                  <Sliders
+                    className="w-5 h-5 opacity-45"
+                    style={{ color: 'var(--theme-accent, #cba6f7)' }}
+                    strokeWidth={1.8}
+                  />
+                  <p
+                    className="text-xs font-medium"
+                    style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))' }}
+                  >
+                    {mixerLoading ? 'Loading audio sessions…' : 'No active audio sessions'}
+                  </p>
+                </div>
+              ) : (
+                <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
+                  {mixerSessions.map((session) => (
+                    <div key={session.id} className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        data-tauri-drag-region="false"
+                        onClick={() => handleMixerMute(session.id, !session.muted)}
+                        className="w-6 h-6 shrink-0 rounded-md flex items-center justify-center border transition-all hover:scale-105 active:scale-95 pointer-events-auto cursor-pointer"
+                        style={{
+                          background: session.muted ? 'var(--theme-accent, #cba6f7)' : 'transparent',
+                          borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.12))',
+                          color: session.muted ? '#11111b' : 'var(--theme-text-primary, #cdd6f4)',
+                        }}
+                        title={session.muted ? `Unmute ${session.name}` : `Mute ${session.name}`}
+                      >
+                        {session.muted ? (
+                          <VolumeX className="w-3 h-3" strokeWidth={2} />
+                        ) : (
+                          <Volume2 className="w-3 h-3" strokeWidth={2} />
+                        )}
+                      </button>
+                      <span
+                        className="w-[74px] shrink-0 text-[11px] font-medium truncate"
+                        title={session.name}
+                        style={{ color: 'var(--theme-text-primary, #cdd6f4)' }}
+                      >
+                        {session.name}
+                      </span>
+                      <input
+                        type="range"
+                        data-tauri-drag-region="false"
+                        min={0}
+                        max={100}
+                        value={Math.round(session.volume)}
+                        onChange={(e) => handleMixerVolume(session.id, Number(e.target.value))}
+                        className="flex-1 h-1.5 rounded-full pointer-events-auto cursor-pointer"
+                        style={{
+                          background: `linear-gradient(to right, var(--theme-accent, #cba6f7) 0%, #89dceb ${Math.round(
+                            session.volume
+                          )}%, var(--theme-track, rgba(255,255,255,0.14)) ${Math.round(
+                            session.volume
+                          )}%, var(--theme-track, rgba(255,255,255,0.14)) 100%)`,
+                          opacity: session.is_active ? 1 : 0.55,
+                        }}
+                        title={`${session.name} — ${Math.round(session.volume)}%`}
+                      />
+                      <span
+                        className="w-8 shrink-0 text-right text-[10px] font-mono tabular-nums"
+                        style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.7))' }}
+                      >
+                        {Math.round(session.volume)}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -1187,9 +1398,11 @@ export const MediaView: React.FC<MediaViewProps> = ({
       {/* COLUMN 3 (Right w-[205px]): Natural Music-Reactive Mascot / Custom GIF    */}
       {/* COLUMN 3 (Right w-[205px]): Natural Music-Reactive Mascot / Custom GIF (toggleable) */}
       {settings.mascotMode !== 'none' && (
-        <div className="w-[205px] shrink-0 h-full flex items-center justify-center relative overflow-hidden">
-          <BongoCat
+        <div className="w-[205px] shrink-0 h-full flex items-center justify-center relative overflow-visible">
+          <CanopyMascot
             isPlaying={isPlaying}
+            showSleepZzz={true}
+            showAmbientGlow={true}
             className="w-[185px] h-[140px] transition-transform duration-200"
           />
         </div>

@@ -7,7 +7,7 @@
         Height="430"
         WindowStyle="None"
         AllowsTransparency="False"
-        Background="Transparent"
+        Background="{x:Null}"
         Topmost="True"
         ShowInTaskbar="False"
         ResizeMode="NoResize"
@@ -23,7 +23,7 @@
                       UseAeroCaptionButtons="False" />
     </WindowChrome.WindowChrome>
 
-    <Grid Background="Transparent">
+    <Grid Background="{x:Null}">
         <wv2:WebView2 x:Name="ShellWebView"
                       HorizontalAlignment="Stretch"
                       VerticalAlignment="Stretch"

@@ -47,8 +47,9 @@ export interface MediaInfo {
   artwork_url?: string | null;
   source_app?: string;
   sessions?: MediaSessionItem[];
+  is_shuffle?: boolean | null;
+  auto_repeat?: number; // 0 = none, 1 = track, 2 = list
 }
-
 export interface AudioState {
   volume: number;
   muted: boolean;
@@ -71,13 +72,14 @@ export interface InstalledAppItem {
   icon_data_url?: string | null;
 }
 
-interface CaelestiaNativeBridge {
+interface CanopyNativeBridge {
   invoke: <T = unknown>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 }
 
 declare global {
   interface Window {
-    __CAELESTIA_BRIDGE__?: CaelestiaNativeBridge;
+    __CANOPY_BRIDGE__?: CanopyNativeBridge;
+    __CAELESTIA_BRIDGE__?: CanopyNativeBridge;
     __TAURI_INTERNALS__?: unknown;
   }
 }
@@ -262,8 +264,11 @@ async function invokeBridge<T>(
   fallback: () => T | Promise<T>
 ): Promise<T> {
   try {
-    if (typeof window !== 'undefined' && window.__CAELESTIA_BRIDGE__?.invoke) {
-      return await window.__CAELESTIA_BRIDGE__.invoke<T>(cmd, args);
+    if (typeof window !== 'undefined') {
+      const bridge = window.__CANOPY_BRIDGE__ || window.__CAELESTIA_BRIDGE__;
+      if (bridge?.invoke) {
+        return await bridge.invoke<T>(cmd, args);
+      }
     }
     if (typeof window !== 'undefined' && Boolean(window.__TAURI_INTERNALS__)) {
       return await invoke<T>(cmd, args);
@@ -505,6 +510,137 @@ export async function mediaSeek(seconds: number): Promise<void> {
   await invokeBridge<unknown>('media_seek', { seconds: clamped }, () => undefined);
 }
 
+export async function mediaToggleShuffle(): Promise<boolean | null> {
+  return invokeBridge<boolean | null>('media_toggle_shuffle', undefined, () => null);
+}
+
+export async function mediaCycleRepeat(): Promise<number> {
+  return invokeBridge<number>('media_cycle_repeat', undefined, () => 0);
+}
+
+
+export interface HostConfig {
+  // Index signature keeps this assignable to the bridge's plain-object argument type.
+  [key: string]: unknown;
+  triggerWidth?: number;
+  triggerHeight?: number;
+  triggerDelayMs?: number;
+  hideDebounceMs?: number;
+  pauseInFullscreen?: boolean;
+  pauseInPresentation?: boolean;
+  quietHoursEnabled?: boolean;
+  quietHoursStart?: string;
+  quietHoursEnd?: string;
+  panelMonitorMode?: 'cursor' | 'primary';
+  triggerMonitorScope?: 'all' | 'primary';
+  animationsEnabled?: boolean;
+  animationDurationMs?: number;
+  suspendWhenClosed?: boolean;
+  hotkey?: string;
+  diagnosticLogging?: boolean;
+}
+
+export async function setHostConfig(config: HostConfig): Promise<void> {
+  await invokeBridge<unknown>('set_host_config', config, () => undefined);
+}
+
+export async function getHostConfig(): Promise<HostConfig> {
+  return invokeBridge<HostConfig>('get_host_config', undefined, () => ({}));
+}
+
+export interface AudioSessionEntry {
+  id: string;
+  name: string;
+  volume: number;
+  muted: boolean;
+  is_active: boolean;
+}
+
+export async function getAudioSessions(): Promise<AudioSessionEntry[]> {
+  return invokeBridge<AudioSessionEntry[]>('get_audio_sessions', undefined, () => []);
+}
+
+export async function setAudioSessionVolume(id: string, level: number): Promise<void> {
+  await invokeBridge<unknown>('set_session_volume', { id, level: Math.round(level) }, () => undefined);
+}
+
+export async function setAudioSessionMute(id: string, muted: boolean): Promise<void> {
+  await invokeBridge<unknown>('set_session_mute', { id, muted }, () => undefined);
+}
+
+export async function getMicState(): Promise<{ volume: number; muted: boolean }> {
+  return invokeBridge<{ volume: number; muted: boolean }>('get_mic_state', undefined, () => ({
+    volume: 0,
+    muted: false,
+  }));
+}
+
+export async function setMicVolume(level: number): Promise<void> {
+  await invokeBridge<unknown>('set_mic_volume', { level: Math.round(level) }, () => undefined);
+}
+
+export async function setMicMute(muted: boolean): Promise<void> {
+  await invokeBridge<unknown>('set_mic_mute', { muted }, () => undefined);
+}
+
+export interface BatteryStatus {
+  has_battery: boolean;
+  percent: number;
+  charging: boolean;
+}
+
+export async function getBatteryStatus(): Promise<BatteryStatus> {
+  return invokeBridge<BatteryStatus>('get_battery_status', undefined, () => ({
+    has_battery: false,
+    percent: 0,
+    charging: false,
+  }));
+}
+
+export interface MonitorWallpaperState {
+  id: string;
+  label: string;
+  path: string;
+}
+
+export interface DesktopWallpaperState {
+  per_monitor_supported: boolean;
+  monitors: MonitorWallpaperState[];
+  slideshow_enabled: boolean;
+  slideshow_minutes: number;
+  shuffle: boolean;
+}
+
+export async function getDesktopWallpaperState(): Promise<DesktopWallpaperState> {
+  return invokeBridge<DesktopWallpaperState>('get_desktop_wallpaper_state', undefined, () => ({
+    per_monitor_supported: false,
+    monitors: [],
+    slideshow_enabled: false,
+    slideshow_minutes: 30,
+    shuffle: false,
+  }));
+}
+
+export async function setDesktopWallpaperState(config: {
+  slideshow_enabled?: boolean;
+  slideshow_minutes?: number;
+  shuffle?: boolean;
+}): Promise<void> {
+  await invokeBridge<unknown>('set_desktop_wallpaper_state', config, () => undefined);
+}
+
+export async function setMonitorWallpaper(monitorId: string, path: string): Promise<void> {
+  await invokeBridge<unknown>('set_monitor_wallpaper', { monitor_id: monitorId, path }, () => undefined);
+}
+
+export async function openLogFolder(): Promise<void> {
+  await invokeBridge<unknown>('open_log_folder', undefined, () => undefined);
+}
+
+export async function reloadUi(): Promise<void> {
+  await invokeBridge<unknown>('reload_ui', undefined, () => undefined);
+}
+
 export async function getAudioSpectrum(): Promise<number[]> {
   const bands = await invokeBridge<number[]>('get_audio_spectrum', undefined, () => {
     if (!fallbackIsPlaying) {
@@ -554,12 +690,6 @@ export async function setBrightness(level: number): Promise<void> {
   await invokeBridge<unknown>('set_brightness', { level: clamped }, () => undefined);
 }
 
-export async function getAudioState(): Promise<AudioState> {
-  return invokeBridge<AudioState>('get_audio_state', undefined, () => ({
-    ...fallbackAudioState,
-  }));
-}
-
 export async function setAudioVolume(volume: number): Promise<void> {
   const clamped = Math.round(Math.min(100, Math.max(0, volume)));
   fallbackAudioState = {
@@ -568,16 +698,6 @@ export async function setAudioVolume(volume: number): Promise<void> {
   };
   await invokeBridge<unknown>('set_audio_volume', { volume: clamped }, async () => {
     await setMasterVolume(clamped);
-  });
-}
-
-export async function toggleAudioMute(): Promise<AudioState> {
-  return invokeBridge<AudioState>('toggle_audio_mute', undefined, () => {
-    fallbackAudioState = {
-      ...fallbackAudioState,
-      muted: !fallbackAudioState.muted,
-    };
-    return { ...fallbackAudioState };
   });
 }
 
@@ -619,19 +739,11 @@ export async function setDesktopWallpaper(path: string): Promise<boolean> {
   return true;
 }
 
-export async function getCurrentWallpaper(): Promise<string> {
-  const current = await invokeBridge<string>('get_current_wallpaper', undefined, () => {
-    const active = fallbackWallpapers.find((w) => w.active);
-    return active?.path ?? fallbackWallpapers[0]?.path ?? '';
-  });
-  return current || fallbackWallpapers.find((w) => w.active)?.path || '';
-}
-
 export async function pickWallpaperFolder(currentDir?: string): Promise<string | null> {
   return invokeBridge<string | null>(
     'pick_wallpaper_folder',
     { currentDir, current_dir: currentDir },
-    () => currentDir || 'C:\\Users\\CEO\\Pictures\\Wallpapers'
+    () => currentDir ?? null
   );
 }
 
@@ -708,6 +820,10 @@ export async function setDropdownOpen(open: boolean): Promise<void> {
   await invokeBridge<unknown>('set_dropdown_open', { open }, () => undefined);
 }
 
+export async function notifyTabSwitched(): Promise<void> {
+  await invokeBridge<unknown>('tab_changed', undefined, () => undefined);
+}
+
 const FALLBACK_INSTALLED_APPS: InstalledAppItem[] = [
   { id: 'brave', name: 'Brave', category: 'Browser', path: 'brave.exe', description: 'Default Web Browser (BraveHTML)' },
   { id: 'wt', name: 'Windows Terminal', category: 'Developer', path: 'wt.exe', description: 'Modern tabs & shells' },
@@ -736,4 +852,10 @@ export async function getInstalledApps(): Promise<InstalledAppItem[]> {
 
 export async function launchApp(target: string): Promise<boolean> {
   return invokeBridge<boolean>('launch_app', { target, path: target }, () => true);
+}
+
+export async function executePowerAction(
+  action: 'sleep' | 'restart' | 'shutdown' | 'lock' | 'signout' | 'hibernate'
+): Promise<boolean> {
+  return invokeBridge<boolean>('execute_power_action', { action }, () => true);
 }

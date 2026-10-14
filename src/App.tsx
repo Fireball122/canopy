@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Play,
   Pause,
@@ -29,6 +29,17 @@ import {
   Settings as SettingsIcon,
   AppWindow,
   Sparkles,
+  Power as PowerIcon,
+  FolderOpen,
+  Cpu,
+  Compass,
+  Code2,
+  Calculator,
+  FileText,
+  Plus,
+  Battery,
+  BatteryCharging,
+  Search,
 } from 'lucide-react';
 import {
   SystemStats,
@@ -52,18 +63,42 @@ import {
   runTerminalCommand,
   setDropdownOpen,
   setTopHoverTrigger,
+  launchApp,
+  notifyTabSwitched,
+  getMicState,
+  setMicVolume as writeMicVolume,
+  setMicMute as writeMicMute,
+  getBatteryStatus,
+  pickWallpaperFolder,
+  reloadUi,
+  BatteryStatus,
 } from './services/tauriBridge';
+import { usePanelOpen } from './hooks/usePanelOpen';
+import { usePlaybackClock } from './hooks/usePlaybackClock';
 import { WeatherData, fetchWeather } from './services/weather';
-import { BongoCat } from './components/BongoCat';
+import { CanopyMascot } from './components/CanopyMascot';
 import { CalendarCard } from './components/CalendarCard';
 import { VerticalSliders } from './components/VerticalSliders';
 import { SettingsProvider, useSettings, TabId } from './context/SettingsContext';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { applyThemePalette, applyThemeFromImageSrc, applyThemeModeFallback } from './services/palette';
 import { WallpaperView } from './views/WallpaperView';
+const QUICK_APP_CATALOGUE: Record<string, { label: string; icon: React.ReactNode; path: string }> = {
+  terminal: { label: 'Terminal', icon: <TerminalIcon className="w-3 h-3" />, path: 'wt.exe' },
+  explorer: { label: 'Files', icon: <FolderOpen className="w-3 h-3" />, path: 'explorer.exe' },
+  taskmgr: { label: 'TaskMgr', icon: <Cpu className="w-3 h-3" />, path: 'taskmgr.exe' },
+  browser: { label: 'Browser', icon: <Compass className="w-3 h-3" />, path: 'msedge.exe' },
+  msedge: { label: 'Browser', icon: <Compass className="w-3 h-3" />, path: 'msedge.exe' },
+  code: { label: 'VSCode', icon: <Code2 className="w-3 h-3" />, path: 'code' },
+  notepad: { label: 'Notepad', icon: <FileText className="w-3 h-3" />, path: 'notepad.exe' },
+  calc: { label: 'Calc', icon: <Calculator className="w-3 h-3" />, path: 'calc.exe' },
+  spotify: { label: 'Spotify', icon: <Music className="w-3 h-3" />, path: 'spotify.exe' },
+};
 import { MediaView } from './views/MediaView';
 import { PerformanceView } from './views/PerformanceView';
 import { SettingsView } from './views/SettingsView';
 import { AppsView } from './views/AppsView';
+import { PowerView } from './views/PowerView';
 
 interface TerminalEntry {
   id: string;
@@ -71,6 +106,53 @@ interface TerminalEntry {
   output: string;
   timestamp: string;
   isFastfetch?: boolean;
+}
+
+interface CommandPaletteItem {
+  id: string;
+  label: string;
+  hint: string;
+  icon: React.ReactNode;
+  run: () => void;
+}
+
+/**
+ * Structural equality for polled bridge payloads. State setters use it to return the previous
+ * object when a snapshot is unchanged, so React skips the render entirely.
+ */
+function samePayload(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) {
+    return true;
+  }
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) {
+    return false;
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+      return false;
+    }
+    return a.every((item, index) => samePayload(item, b[index]));
+  }
+  // Plain JSON payloads: structural view over keys only, no shape claim is made.
+  const aRecord = a as Record<string, unknown>;
+  const bRecord = b as Record<string, unknown>;
+  const aKeys = Object.keys(aRecord);
+  const bKeys = Object.keys(bRecord);
+  if (aKeys.length !== bKeys.length) {
+    return false;
+  }
+  return aKeys.every((key) => samePayload(aRecord[key], bRecord[key]));
+}
+
+function filterPaletteCommands(commands: CommandPaletteItem[], query: string): CommandPaletteItem[] {
+  const needle = query.trim().toLowerCase();
+  if (needle.length === 0) {
+    return commands;
+  }
+  return commands.filter(
+    (command) =>
+      command.label.toLowerCase().includes(needle) || command.hint.toLowerCase().includes(needle),
+  );
 }
 
 const WINDOWS_POWERSHELL_UPTIME_CMD =
@@ -126,8 +208,40 @@ function renderWeatherIcon(code: number, condition: string, sizeClass = 'w-7 h-7
   return <Sun className={`${sizeClass} text-[#f9e2af] drop-shadow-[0_0_10px_rgba(249,226,175,0.55)]`} strokeWidth={1.75} />;
 }
 
+const QUICK_LAUNCH_SLOTS = 6;
+
+/**
+ * Places an app into the fixed six-slot Quick Launch dock: the first empty slot when there is room,
+ * otherwise the last occupied slot so the other positions never renumber.
+ */
+function placeInQuickLaunch(pinnedApps: string[], appId: string): { slots: string[]; replacedId: string } {
+  const slots = Array.from({ length: QUICK_LAUNCH_SLOTS }, (_, index) => pinnedApps[index] ?? '');
+  const emptyIndex = slots.indexOf('');
+  if (emptyIndex !== -1) {
+    slots[emptyIndex] = appId;
+    return { slots, replacedId: '' };
+  }
+
+  const replacedId = slots[QUICK_LAUNCH_SLOTS - 1];
+  slots[QUICK_LAUNCH_SLOTS - 1] = appId;
+  return { slots, replacedId };
+}
+
 const CanopyShellContent: React.FC = () => {
-  const { settings } = useSettings();
+  const { settings, updateSettings } = useSettings();
+
+  // Panel visibility sourced straight from the host events so every poll can stand down.
+  const panelOpen = usePanelOpen();
+  const [pageVisible, setPageVisible] = useState<boolean>(
+    () => document.visibilityState !== 'hidden',
+  );
+  const shellActive = panelOpen && pageVisible;
+
+  useEffect(() => {
+    const onVisibilityChange = () => setPageVisible(document.visibilityState !== 'hidden');
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, []);
 
   const [isOpen, setIsOpen] = useState<boolean>(true);
   // Always initialize to 'dashboard' on startup and clear any legacy stored tab state
@@ -182,8 +296,6 @@ const CanopyShellContent: React.FC = () => {
     ],
   });
 
-  const [scrubPosition, setScrubPosition] = useState<number>(42);
-
   // Master Volume & Display Brightness state
   const [volume, setVolume] = useState<number>(68);
   const [brightness, setBrightnessState] = useState<number>(82);
@@ -209,8 +321,34 @@ const CanopyShellContent: React.FC = () => {
     },
   ]);
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
+  const [commandHistoryList, setCommandHistoryList] = useState<string[]>(['fastfetch']);
+  const [historyIndex, setHistoryIndex] = useState<number>(-1);
+  const [appPickerMode, setAppPickerMode] = useState<boolean>(false);
 
-  const visibleTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
+  // Microphone slider (host-backed) + battery chip state
+  const [micVolume, setMicVolume] = useState<number>(75);
+  const [micMuted, setMicMuted] = useState<boolean>(false);
+  const [battery, setBattery] = useState<BatteryStatus | null>(null);
+
+  // Command palette overlay
+  const [paletteOpen, setPaletteOpen] = useState<boolean>(false);
+  const [paletteQuery, setPaletteQuery] = useState<string>('');
+  const [paletteIndex, setPaletteIndex] = useState<number>(0);
+
+  useEffect(() => {
+    const handleNavigateTab = (e: Event) => {
+      const detail = (e as CustomEvent<unknown>).detail;
+      if (detail && typeof detail === 'object' && 'tab' in detail && typeof detail.tab === 'string') {
+        setActiveTab(detail.tab as TabId);
+      }
+    };
+    window.addEventListener('canopy:navigate_tab', handleNavigateTab);
+    return () => {
+      window.removeEventListener('canopy:navigate_tab', handleNavigateTab);
+    };
+  }, []);
+
+  const visibleTabs = useMemo<{ id: TabId; label: string; icon: React.ReactNode }[]>(() => [
     { id: 'dashboard', label: 'Dashboard', icon: <LayoutGrid className="w-3.5 h-3.5" strokeWidth={1.9} /> },
     { id: 'media', label: 'Media', icon: <Music className="w-3.5 h-3.5" strokeWidth={1.9} /> },
     { id: 'performance', label: 'Performance', icon: <Activity className="w-3.5 h-3.5" strokeWidth={1.9} /> },
@@ -219,16 +357,28 @@ const CanopyShellContent: React.FC = () => {
       : []),
     { id: 'wallpaper', label: 'Wallpaper', icon: <ImageIcon className="w-3.5 h-3.5" strokeWidth={1.9} /> },
     { id: 'weather', label: 'Weather', icon: <CloudSun className="w-3.5 h-3.5" strokeWidth={1.9} /> },
-    { id: 'terminal', label: 'Terminal', icon: <TerminalIcon className="w-3.5 h-3.5" strokeWidth={1.9} /> },
+    ...(settings.showTerminalTab
+      ? [{ id: 'terminal' as TabId, label: 'Terminal', icon: <TerminalIcon className="w-3.5 h-3.5" strokeWidth={1.9} /> }]
+      : []),
+    { id: 'power' as TabId, label: 'Power', icon: <PowerIcon className="w-3.5 h-3.5" strokeWidth={1.9} /> },
     { id: 'settings', label: 'Settings', icon: <SettingsIcon className="w-3.5 h-3.5" strokeWidth={1.9} /> },
-  ];
+  ], [settings.showAppsTab, settings.showTerminalTab]);
 
-  // If the Apps tab is toggled off in Settings while active, return to Dashboard
+  // If the Apps tab is toggled off in Settings while active, return to Dashboard.
+  // The Quick Launch "Add App" picker also lives on the Apps tab, so keep it mounted while
+  // appPickerMode is on — otherwise the picker closes the moment it opens for users with the
+  // Apps tab hidden.
   useEffect(() => {
-    if (!settings.showAppsTab && activeTab === 'apps') {
+    if (!settings.showAppsTab && activeTab === 'apps' && !appPickerMode) {
       setActiveTab('dashboard');
     }
-  }, [settings.showAppsTab, activeTab]);
+  }, [settings.showAppsTab, activeTab, appPickerMode]);
+  // If the Terminal tab is toggled off in Settings while active, return to Dashboard
+  useEffect(() => {
+    if (!settings.showTerminalTab && activeTab === 'terminal') {
+      setActiveTab('dashboard');
+    }
+  }, [settings.showTerminalTab, activeTab]);
 
   const handleToastNotification = useCallback((msg: string) => {
     setToastMessage(msg);
@@ -242,49 +392,45 @@ const CanopyShellContent: React.FC = () => {
     setTopHoverTrigger(settings.topHoverTrigger).catch(() => {});
   }, [settings.topHoverTrigger]);
 
-  // 1s clock ticker
+  // 1s clock ticker — runs only while the panel is expanded and the document is visible.
+  // Re-opening refetches immediately so the clock is never stale.
   useEffect(() => {
+    if (!shellActive) return;
+    setNow(new Date());
     const id = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(id);
-  }, []);
+  }, [shellActive]);
 
-  // Track when the dropdown was last closed so brief mouse-out/mouse-in or duplicate open events
-  // never reset the user's active tab while they are interacting with the shell.
-  const lastClosedTimestampRef = useRef<number>(0);
-
-  // Listen for native host events ('caelestia:set-open' / 'caelestia:toggle') and Escape key.
+  // Listen for native host open/close events ('canopy:set-open', 'caelestia:set-open',
+  // 'toggle-dropdown') plus the Escape and Ctrl/Alt/Meta-` hotkeys.
   useEffect(() => {
     const onSetOpen = (e: Event) => {
-      const custom = e as CustomEvent<{ open?: boolean }>;
-      const nextOpen =
-        typeof custom.detail?.open === 'boolean'
-          ? custom.detail.open
-          : typeof custom.detail === 'boolean'
-            ? custom.detail
-            : null;
-      if (nextOpen !== null) {
-        setIsOpen((prevOpen) => {
-          if (nextOpen && !prevOpen) {
-            setActiveTab('dashboard');
-          }
-          return nextOpen;
-        });
+      const detail = (e as CustomEvent<unknown>).detail;
+      let nextOpen: boolean | null = null;
+      if (typeof detail === 'boolean') {
+        nextOpen = detail;
+      } else if (detail && typeof detail === 'object' && 'open' in detail && typeof detail.open === 'boolean') {
+        nextOpen = detail.open;
       }
-    };
-
-    const onToggle = () => {
-      setIsOpen((prev) => {
-        const next = !prev;
-        if (next && !prev) {
+      if (nextOpen === null) {
+        return;
+      }
+      const resolvedOpen = nextOpen;
+      setIsOpen((prevOpen) => {
+        if (resolvedOpen && !prevOpen) {
           setActiveTab('dashboard');
         }
-        return next;
+        return resolvedOpen;
       });
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        lastClosedTimestampRef.current = Date.now();
+        // The palette owns Escape while it is on screen.
+        if (paletteOpen) {
+          setPaletteOpen(false);
+          return;
+        }
         setIsOpen(false);
         setDropdownOpen(false).catch(() => {});
       } else if (e.key === '`' && (e.ctrlKey || e.altKey || e.metaKey)) {
@@ -298,20 +444,18 @@ const CanopyShellContent: React.FC = () => {
         });
       }
     };
+    window.addEventListener('canopy:set-open', onSetOpen);
+    window.addEventListener('toggle-dropdown', onSetOpen);
     window.addEventListener('caelestia:set-open', onSetOpen);
-    window.addEventListener('caelestia:toggle', onToggle);
     window.addEventListener('keydown', handleKeyDown);
     return () => {
+      window.removeEventListener('canopy:set-open', onSetOpen);
+      window.removeEventListener('toggle-dropdown', onSetOpen);
       window.removeEventListener('caelestia:set-open', onSetOpen);
-      window.removeEventListener('caelestia:toggle', onToggle);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, []);
+  }, [paletteOpen]);
 
-  // Sync open/close state with native host
-  useEffect(() => {
-    setDropdownOpen(isOpen).catch(() => {});
-  }, [isOpen]);
 
   // Apply dynamic theme palette whenever wallpapers or settings.themeMode change
   const syncThemeWithActiveWallpaper = useCallback(
@@ -330,26 +474,28 @@ const CanopyShellContent: React.FC = () => {
     syncThemeWithActiveWallpaper(wallpapers, settings.themeMode);
   }, [settings.themeMode, wallpapers, syncThemeWithActiveWallpaper]);
 
-  // Poll system stats every 1500ms
+  // Poll system stats every 1500ms — only while the panel is open and visible; a fresh poll
+  // fires on re-open. Identical snapshots keep their previous identity so React skips the render.
   useEffect(() => {
+    if (!shellActive) return;
     let active = true;
     const pollStats = async () => {
       try {
         const res = await getSystemStats();
         if (!active) return;
-        setStats(res);
+        setStats((prev) => (samePayload(prev, res) ? prev : res));
       } catch {
         // Keep current snapshot
       }
     };
 
-    pollStats();
+    void pollStats();
     const id = window.setInterval(pollStats, 1500);
     return () => {
       active = false;
       window.clearInterval(id);
     };
-  }, []);
+  }, [shellActive]);
 
   // Lock window after user transport actions so background poll never overwrites optimistic toggle
   const mediaActionLockUntilRef = useRef<number>(0);
@@ -360,8 +506,10 @@ const CanopyShellContent: React.FC = () => {
     return promise;
   };
 
-  // Poll media info every 800ms
+  // Poll media info every 800ms — only while the panel is open and visible; a fresh poll fires
+  // on re-open. Identical snapshots keep their previous identity so React skips the render.
   useEffect(() => {
+    if (!shellActive) return;
     let active = true;
     const pollMedia = async () => {
       if (Date.now() < mediaActionLockUntilRef.current) {
@@ -370,45 +518,40 @@ const CanopyShellContent: React.FC = () => {
       try {
         const info = await getMediaInfo();
         if (!active || Date.now() < mediaActionLockUntilRef.current) return;
-        setMedia(info);
-        if (info.position_secs > 0) {
-          setScrubPosition(info.position_secs);
-        }
+        setMedia((prev) => (samePayload(prev, info) ? prev : info));
       } catch {
         // Keep current media state
       }
     };
 
-    pollMedia();
+    void pollMedia();
     const id = window.setInterval(pollMedia, 800);
     return () => {
       active = false;
       window.clearInterval(id);
     };
-  }, []);
+  }, [shellActive]);
 
-  // Smooth local scrub progression strictly when music is playing
-  useEffect(() => {
-    if (!media.is_playing) return;
-    const id = window.setInterval(() => {
-      setScrubPosition((prev) => {
-        const dur = media.duration_secs > 1 ? media.duration_secs : 219;
-        return prev + 1 >= dur ? 0 : prev + 1;
-      });
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, [media.is_playing, media.duration_secs]);
+  // One shared playhead for the whole panel: anchored on the host's reported position and advanced
+  // locally between the 800 ms polls (see usePlaybackClock). The synced lyrics read the same clock.
+  const mediaClock = usePlaybackClock(media, { enabled: shellActive });
+  const scrubPosition = mediaClock.position;
+  // Wallpaper lists arrive as fresh arrays on every fetch; keep the old identity when the
+  // contents are unchanged so the shell (and the theme sync) does not re-render for nothing.
+  const applyWallpapers = useCallback((next: WallpaperEntry[]) => {
+    setWallpapers((prev) => (samePayload(prev, next) ? prev : next));
+  }, []);
 
   const refreshWallpapersList = useCallback(async () => {
     try {
       const list = await getWallpapers();
       if (list && list.length > 0) {
-        setWallpapers(list);
+        applyWallpapers(list);
       }
     } catch {
       // Ignore
     }
-  }, []);
+  }, [applyWallpapers]);
 
   useEffect(() => {
     let active = true;
@@ -423,7 +566,7 @@ const CanopyShellContent: React.FC = () => {
           setBrightnessState(Math.round(bri));
         }
         if (wpList && wpList.length > 0) {
-          setWallpapers(wpList);
+          applyWallpapers(wpList);
         }
       } catch {
         // Defaults remain active
@@ -432,7 +575,202 @@ const CanopyShellContent: React.FC = () => {
     return () => {
       active = false;
     };
+  }, [applyWallpapers]);
+
+  // Microphone state (host-backed) — fetched while the slider is enabled and re-read on re-open.
+  useEffect(() => {
+    if (!settings.showMicSlider || !shellActive) return;
+    let active = true;
+    (async () => {
+      try {
+        const state = await getMicState();
+        if (!active) return;
+        setMicVolume(Math.max(0, Math.min(100, Math.round(state.volume))));
+        setMicMuted(Boolean(state.muted));
+      } catch {
+        // Keep current microphone snapshot
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [settings.showMicSlider, shellActive]);
+
+  const handleMicLevelChange = useCallback((level: number) => {
+    const clamped = Math.max(0, Math.min(100, Math.round(level)));
+    setMicVolume(clamped);
+    if (clamped > 0 && micMuted) {
+      setMicMuted(false);
+      writeMicMute(false).catch(() => {});
+    }
+    writeMicVolume(clamped).catch(() => {});
+  }, [micMuted]);
+
+  const handleMicMuteToggle = useCallback(() => {
+    setMicMuted((prev) => {
+      const next = !prev;
+      writeMicMute(next).catch(() => {});
+      return next;
+    });
   }, []);
+
+  // Host-pushed volume / microphone changes keep the sliders in sync without polling.
+  useEffect(() => {
+    const onVolumeChanged = (e: Event) => {
+      const detail = (e as CustomEvent<unknown>).detail;
+      if (!detail || typeof detail !== 'object') return;
+      if ('level' in detail && typeof detail.level === 'number' && !Number.isNaN(detail.level)) {
+        setVolume(Math.max(0, Math.min(100, Math.round(detail.level))));
+      }
+      if ('muted' in detail && detail.muted === true) {
+        setVolume(0);
+      }
+    };
+
+    const onMicChanged = (e: Event) => {
+      const detail = (e as CustomEvent<unknown>).detail;
+      if (!detail || typeof detail !== 'object') return;
+      if ('level' in detail && typeof detail.level === 'number' && !Number.isNaN(detail.level)) {
+        setMicVolume(Math.max(0, Math.min(100, Math.round(detail.level))));
+      }
+      if ('muted' in detail && typeof detail.muted === 'boolean') {
+        setMicMuted(detail.muted);
+      }
+    };
+
+    window.addEventListener('volume-changed', onVolumeChanged);
+    window.addEventListener('mic-changed', onMicChanged);
+    return () => {
+      window.removeEventListener('volume-changed', onVolumeChanged);
+      window.removeEventListener('mic-changed', onMicChanged);
+    };
+  }, []);
+
+  // The host cannot always register the configured global hotkey (another app may own it).
+  useEffect(() => {
+    const onHotkeyFailed = (e: Event) => {
+      const detail = (e as CustomEvent<unknown>).detail;
+      const hotkey =
+        detail && typeof detail === 'object' && 'hotkey' in detail && typeof detail.hotkey === 'string'
+          ? detail.hotkey
+          : 'the configured hotkey';
+      handleToastNotification(`Hotkey ${hotkey} is taken by another app`);
+    };
+    window.addEventListener('hotkey-failed', onHotkeyFailed);
+    return () => window.removeEventListener('hotkey-failed', onHotkeyFailed);
+  }, [handleToastNotification]);
+
+  // Battery chip: refreshed on panel open and whenever the host reports a change.
+  useEffect(() => {
+    if (!settings.showBatteryChip || !panelOpen) return;
+    let active = true;
+    const onBatteryChanged = (e: Event) => {
+      const detail = (e as CustomEvent<unknown>).detail;
+      if (!detail || typeof detail !== 'object' || !('has_battery' in detail) || typeof detail.has_battery !== 'boolean') {
+        return;
+      }
+      const next: BatteryStatus = {
+        has_battery: detail.has_battery,
+        percent: 'percent' in detail && typeof detail.percent === 'number' ? detail.percent : 0,
+        charging: 'charging' in detail && detail.charging === true,
+      };
+      setBattery((prev) => (samePayload(prev, next) ? prev : next));
+    };
+
+    (async () => {
+      try {
+        const status = await getBatteryStatus();
+        if (!active) return;
+        setBattery((prev) => (samePayload(prev, status) ? prev : status));
+      } catch {
+        // Keep current battery snapshot
+      }
+    })();
+
+    window.addEventListener('battery-changed', onBatteryChanged);
+    return () => {
+      active = false;
+      window.removeEventListener('battery-changed', onBatteryChanged);
+    };
+  }, [settings.showBatteryChip, panelOpen]);
+
+  // Command palette: jump to any visible tab, open Settings, open the wallpaper folder, reload UI.
+  const paletteCommands = useMemo<CommandPaletteItem[]>(() => {
+    const tabCommands: CommandPaletteItem[] = visibleTabs.map((tab) => ({
+      id: `tab:${tab.id}`,
+      label: `Go to ${tab.label}`,
+      hint: 'Tab',
+      icon: tab.icon,
+      run: () => {
+        setActiveTab(tab.id);
+        void notifyTabSwitched();
+      },
+    }));
+    return [
+      ...tabCommands,
+      {
+        id: 'action:settings',
+        label: 'Open Settings',
+        hint: 'Action',
+        icon: <SettingsIcon className="w-3.5 h-3.5" strokeWidth={1.9} />,
+        run: () => setActiveTab('settings'),
+      },
+      {
+        id: 'action:wallpaper-folder',
+        label: 'Open Wallpaper Folder',
+        hint: 'Action',
+        icon: <FolderOpen className="w-3.5 h-3.5" strokeWidth={1.9} />,
+        run: () => {
+          void pickWallpaperFolder()
+            .then((dir) => {
+              if (dir) {
+                void refreshWallpapersList();
+              }
+            })
+            .catch(() => {});
+        },
+      },
+      {
+        id: 'action:reload-ui',
+        label: 'Reload Canopy UI',
+        hint: 'Action',
+        icon: <RefreshCw className="w-3.5 h-3.5" strokeWidth={1.9} />,
+        run: () => {
+          void reloadUi().catch(() => window.location.reload());
+        },
+      },
+    ];
+  }, [visibleTabs, refreshWallpapersList]);
+
+  const paletteMatches = useMemo(
+    () => filterPaletteCommands(paletteCommands, paletteQuery),
+    [paletteCommands, paletteQuery],
+  );
+
+  // Typing a printable key while the panel is expanded summons the palette; collapsing the panel
+  // dismisses it. Escape / Ctrl-` handling stays in the host-event listener above.
+  useEffect(() => {
+    if (!panelOpen) {
+      setPaletteOpen(false);
+      return;
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey || e.key.length !== 1) return;
+      const target = e.target;
+      if (
+        target instanceof Element &&
+        target.closest('input, textarea, select, button, a, [contenteditable="true"], [role="button"]')
+      ) {
+        return;
+      }
+      e.preventDefault();
+      setPaletteQuery(e.key);
+      setPaletteIndex(0);
+      setPaletteOpen(true);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [panelOpen]);
 
   // Weather fetch (reactive to settings.temperatureUnit and settings.weatherLocationMode)
   const refreshWeather = useCallback(async () => {
@@ -488,7 +826,7 @@ const CanopyShellContent: React.FC = () => {
 
   const handlePrev = async () => {
     mediaActionLockUntilRef.current = Date.now() + 750;
-    setScrubPosition(0);
+    mediaClock.seek(0);
     try {
       await mediaPrev();
       await delayMs(240);
@@ -501,7 +839,7 @@ const CanopyShellContent: React.FC = () => {
 
   const handleNext = async () => {
     mediaActionLockUntilRef.current = Date.now() + 750;
-    setScrubPosition(0);
+    mediaClock.seek(0);
     try {
       await mediaNext();
       await delayMs(240);
@@ -514,7 +852,7 @@ const CanopyShellContent: React.FC = () => {
 
   const handleSeek = async (seconds: number) => {
     mediaActionLockUntilRef.current = Date.now() + 600;
-    setScrubPosition(seconds);
+    mediaClock.seek(seconds);
     setMedia((prev) => ({ ...prev, position_secs: seconds }));
     try {
       await mediaSeek(seconds);
@@ -592,8 +930,10 @@ const CanopyShellContent: React.FC = () => {
     const cmd = rawCmd.trim();
     if (!cmd) return;
 
-    const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    setCommandHistoryList((prev) => (prev[prev.length - 1] === cmd ? prev : [...prev, cmd]));
+    setHistoryIndex(-1);
 
+    const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     if (cmd.toLowerCase() === 'clear' || cmd.toLowerCase() === 'cls') {
       setTerminalHistory([]);
       setTerminalInput('');
@@ -672,11 +1012,10 @@ const CanopyShellContent: React.FC = () => {
   const trackArtist = hasLiveTrack ? media.artist || 'Alstroemeria Records' : 'Nomico • Touhou';
 
   const effectiveDuration = media.duration_secs > 2 ? media.duration_secs : 219;
-  const effectivePosition =
-    media.position_secs > 1.5 ? Math.min(media.position_secs, effectiveDuration) : Math.min(scrubPosition, effectiveDuration);
+  const effectivePosition = Math.min(effectiveDuration, Math.max(0, scrubPosition));
   const progressFraction = Math.max(0, Math.min(1, effectivePosition / effectiveDuration));
 
-  const vinylSize = 86;
+  const vinylSize = 76;
   const vinylStroke = 3.5;
   const vinylRadius = (vinylSize - vinylStroke * 2) / 2;
   const vinylCircumference = 2 * Math.PI * vinylRadius;
@@ -692,7 +1031,11 @@ const CanopyShellContent: React.FC = () => {
   const uvRiskLabel = uvValue >= 8 ? 'Very High' : uvValue >= 6 ? 'High' : uvValue >= 3 ? 'Moderate' : 'Low';
 
   return (
-    <div className="relative w-[850px] h-[430px] overflow-hidden bg-transparent select-none flex flex-col items-center">
+    <div
+      className={`relative w-[850px] h-[430px] overflow-hidden bg-transparent select-none flex flex-col items-center${
+        settings.animationsEnabled ? '' : ' no-motion'
+      }`}
+    >
       {/* Top-Screen 2px Transparent Trigger Strip (only active when closed so it never intercepts or resets open tabs) */}
       {!isOpen && settings.topHoverTrigger && (
         <div
@@ -717,16 +1060,32 @@ const CanopyShellContent: React.FC = () => {
       )}
 
       {/* Main 850x430 Canopy Glassmorphism Dropdown Container */}
+      {/* Main 850x430 Canopy Glassmorphism Dropdown Container — Always 100% visible inside window */}
       <div
-        className={`canopy-shell caelestia-shell caelestia-dropdown mt-0 rounded-t-none rounded-b-[24px] flex flex-col justify-between overflow-hidden ${
-          isOpen ? 'caelestia-dropdown-open' : 'caelestia-dropdown-closed'
-        }`}
+        data-tauri-drag-region="false"
+        className="canopy-shell canopy-dropdown canopy-dropdown-open mt-0 rounded-t-none rounded-b-[24px] flex flex-col justify-between overflow-hidden"
       >
         {/* Top Centered Navigation Bar */}
         <header
-          className="h-[44px] px-3 flex items-center justify-center shrink-0"
+          data-tauri-drag-region="false"
+          className="w-full shrink-0 flex items-center justify-center px-3 py-1.5 select-none relative"
           style={{ borderBottom: '1px solid var(--theme-border)' }}
         >
+          {settings.showBatteryChip && battery !== null && battery.has_battery && (
+            <div
+              data-tauri-drag-region="false"
+              className="canopy-pill absolute right-2.5 top-1/2 -translate-y-1/2 px-2 py-1 flex items-center gap-1 text-[10px] font-mono tabular-nums pointer-events-none"
+              style={{ color: battery.charging ? 'var(--theme-accent)' : 'var(--theme-text-secondary)' }}
+              title={battery.charging ? `Charging — ${Math.round(battery.percent)}%` : `On battery — ${Math.round(battery.percent)}%`}
+            >
+              {battery.charging ? (
+                <BatteryCharging className="w-3 h-3 shrink-0" />
+              ) : (
+                <Battery className="w-3 h-3 shrink-0" />
+              )}
+              <span>{Math.round(battery.percent)}%</span>
+            </div>
+          )}
           <nav
             data-tauri-drag-region="false"
             className="flex items-center gap-1 p-1 rounded-full pointer-events-auto"
@@ -742,7 +1101,10 @@ const CanopyShellContent: React.FC = () => {
                   key={tab.id}
                   type="button"
                   data-tauri-drag-region="false"
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => {
+                    setActiveTab(tab.id);
+                    void notifyTabSwitched();
+                  }}
                   className={`relative flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium tracking-tight transition-all duration-200 pointer-events-auto cursor-pointer ${
                     active ? 'font-semibold shadow-sm' : 'opacity-75 hover:opacity-100'
                   }`}
@@ -934,6 +1296,62 @@ const CanopyShellContent: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Pinned Quick-Launch App Dock */}
+                <div
+                  className="bento-card h-[34px] shrink-0 px-2.5 flex items-center justify-between gap-1"
+                  style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)' }}
+                >
+                  <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: 'var(--theme-text-secondary)' }}>
+                    Quick Launch
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {Array.from({ length: 6 }).map((_, slotIdx) => {
+                      const appId = (settings.pinnedApps || ['terminal', 'explorer', 'taskmgr', 'msedge', 'code'])[slotIdx];
+                      if (!appId || appId.trim().length === 0) {
+                        return (
+                          <button
+                            key={`empty-${slotIdx}`}
+                            type="button"
+                            data-tauri-drag-region="false"
+                            onClick={() => setActiveTab('settings')}
+                            className="w-6 h-6 rounded-md border border-dashed border-white/20 flex items-center justify-center text-white/30 hover:text-white/70 hover:border-white/40 transition-all pointer-events-auto cursor-pointer"
+                            title={`Slot ${slotIdx + 1} Empty — Click to configure in Settings`}
+                          >
+                            <Plus className="w-2.5 h-2.5" />
+                          </button>
+                        );
+                      }
+                      const custom = settings.customApps?.[appId];
+                      const app = QUICK_APP_CATALOGUE[appId] || {
+                        label: custom?.label || appId,
+                        icon: custom?.icon_data_url ? (
+                          <img src={custom.icon_data_url} alt={custom.label} className="w-3.5 h-3.5 object-contain" />
+                        ) : (
+                          <AppWindow className="w-3.5 h-3.5" />
+                        ),
+                        path: custom?.path || appId,
+                      };
+                      return (
+                        <button
+                          key={`${appId}-${slotIdx}`}
+                          type="button"
+                          data-tauri-drag-region="false"
+                          onClick={() => void launchApp(app.path)}
+                          className="w-6 h-6 rounded-md flex items-center justify-center transition-all duration-150 hover:scale-110 active:scale-95 pointer-events-auto cursor-pointer"
+                          style={{
+                            background: 'var(--theme-track)',
+                            border: '1px solid var(--theme-border)',
+                            color: 'var(--theme-text-primary)',
+                          }}
+                          title={`Launch ${app.label}`}
+                        >
+                          {app.icon}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 {/* Interactive Calendar with Reminders (Bottom) */}
                 <CalendarCard className="flex-1 min-h-0" onToastNotification={handleToastNotification} />
               </div>
@@ -950,12 +1368,17 @@ const CanopyShellContent: React.FC = () => {
                   brightness={brightness}
                   onBrightnessChange={handleBrightnessChange}
                   showBrightness={settings.enableBrightnessSlider}
+                  showMic={settings.showMicSlider}
+                  micLevel={settings.showMicSlider ? micVolume : undefined}
+                  onMicLevelChange={settings.showMicSlider ? handleMicLevelChange : undefined}
+                  micMuted={settings.showMicSlider ? micMuted : undefined}
+                  onMicMuteToggle={settings.showMicSlider ? handleMicMuteToggle : undefined}
                 />
               </div>
 
-              {/* ZONE 4: RIGHT COLUMN — Vinyl Ring Media Player + Music-Reactive Mascot */}
-              <div className="flex-1 min-w-[180px] h-full bento-card p-2.5 flex flex-col justify-between relative overflow-hidden">
-                <div className="flex items-center justify-between">
+              {/* ZONE 4: RIGHT COLUMN — Vinyl Ring Media Player + Small Music-Reactive Mascot */}
+              <div className="flex-1 min-w-[185px] h-full bento-card p-2.5 flex flex-col justify-between relative overflow-hidden">
+                <div className="flex items-center justify-between shrink-0">
                   <span
                     className="text-[9px] font-mono uppercase tracking-widest flex items-center gap-1"
                     style={{ color: 'var(--theme-accent)' }}
@@ -1000,7 +1423,7 @@ const CanopyShellContent: React.FC = () => {
                     <div
                       data-tauri-drag-region="false"
                       onClick={handlePlayPause}
-                      className={`absolute w-[68px] h-[68px] rounded-full overflow-hidden border border-white/15 shadow-lg flex items-center justify-center pointer-events-auto cursor-pointer ${
+                      className={`absolute w-[56px] h-[56px] rounded-full overflow-hidden border border-white/15 shadow-lg flex items-center justify-center pointer-events-auto cursor-pointer ${
                         isMusicPlaying ? 'animate-vinyl-spin' : ''
                       }`}
                       style={{
@@ -1015,7 +1438,7 @@ const CanopyShellContent: React.FC = () => {
                         <>
                           <div className="absolute inset-2 rounded-full border border-white/[0.07] pointer-events-none" />
                           <div
-                            className="w-5 h-5 rounded-full flex items-center justify-center"
+                            className="w-4 h-4 rounded-full flex items-center justify-center"
                             style={{ backgroundColor: 'var(--theme-accent)' }}
                           >
                             <div className="w-1.5 h-1.5 rounded-full bg-[#11111b]" />
@@ -1081,13 +1504,18 @@ const CanopyShellContent: React.FC = () => {
                   </button>
                 </div>
 
-                {/* Music-Reactive Mascot Widget at Bottom (hidden when mascotMode is none) */}
+                {/* Music-Reactive Mascot: Clean small companion size (max-h 66px, no zZ, lifted & fully visible) */}
                 {settings.mascotMode !== 'none' && (
                   <div
-                    className="pt-1 flex items-center justify-center h-[62px]"
+                    className="pt-1 pb-1 flex items-center justify-center h-[72px] shrink-0"
                     style={{ borderTop: '1px solid var(--theme-border)' }}
                   >
-                    <BongoCat isPlaying={isMusicPlaying} className="h-full" />
+                    <CanopyMascot
+                      isPlaying={isMusicPlaying}
+                      showSleepZzz={false}
+                      showAmbientGlow={false}
+                      className="h-full max-h-[66px] w-auto drop-shadow-sm"
+                    />
                   </div>
                 )}
               </div>
@@ -1098,18 +1526,20 @@ const CanopyShellContent: React.FC = () => {
           {/* TAB 2: MEDIA (Vinyl + Radial Visualizer | Transport or Lyrics | Mascot/GIF)       */}
           {/* ================================================================================= */}
           {activeTab === 'media' && (
-            <MediaView
-              media={{
-                ...media,
-                position_secs: effectivePosition,
-                duration_secs: effectiveDuration,
-              }}
-              onPlayPause={handlePlayPause}
-              onPrev={handlePrev}
-              onNext={handleNext}
-              onSeek={handleSeek}
-              onSelectSession={handleSelectSession}
-            />
+            <ErrorBoundary fallbackTitle="Media Player">
+              <MediaView
+                media={{
+                  ...media,
+                  position_secs: effectivePosition,
+                  duration_secs: effectiveDuration,
+                }}
+                onPlayPause={handlePlayPause}
+                onPrev={handlePrev}
+                onNext={handleNext}
+                onSeek={handleSeek}
+                onSelectSession={handleSelectSession}
+              />
+            </ErrorBoundary>
           )}
 
           {/* ================================================================================= */}
@@ -1120,8 +1550,71 @@ const CanopyShellContent: React.FC = () => {
           {/* ================================================================================= */}
           {/* TAB 4 (OPTIONAL): APPS (Searchable Installed Windows Applications & Shortcuts)    */}
           {/* ================================================================================= */}
-          {activeTab === 'apps' && settings.showAppsTab && (
-            <AppsView onAppLaunched={() => setIsOpen(false)} />
+          {activeTab === 'apps' && (settings.showAppsTab || appPickerMode) && (
+            <ErrorBoundary fallbackTitle="Apps View">
+              <AppsView
+                isPickerMode={appPickerMode}
+                onPickApp={(app) => {
+                  const current = settings.pinnedApps || [];
+                  const currentCustom = settings.customApps || {};
+
+                  if (current.includes(app.id)) {
+                    handleToastNotification(`${app.name} is already in Quick Launch!`);
+                    setAppPickerMode(false);
+                    setActiveTab('settings');
+                    return;
+                  }
+
+                  const { slots, replacedId } = placeInQuickLaunch(current, app.id);
+                  if (replacedId) {
+                    const replacedLabel = currentCustom[replacedId]?.label || replacedId;
+                    handleToastNotification(`Added ${app.name} (replaced ${replacedLabel})!`);
+                  } else {
+                    handleToastNotification(`Added ${app.name} to Dashboard Quick Launch!`);
+                  }
+
+                  updateSettings({
+                    pinnedApps: slots,
+                    customApps: {
+                      ...currentCustom,
+                      [app.id]: { label: app.name, path: app.path },
+                    },
+                  });
+                  setAppPickerMode(false);
+                  setActiveTab('settings');
+                }}
+                onPinApp={(app) => {
+                  const current = settings.pinnedApps || [];
+                  const currentCustom = settings.customApps || {};
+
+                  if (current.includes(app.id)) {
+                    handleToastNotification(`${app.name} is already pinned!`);
+                    return;
+                  }
+
+                  const { slots, replacedId } = placeInQuickLaunch(current, app.id);
+                  if (replacedId) {
+                    const replacedLabel = currentCustom[replacedId]?.label || replacedId;
+                    handleToastNotification(`Pinned ${app.name} (replaced ${replacedLabel})!`);
+                  } else {
+                    handleToastNotification(`Pinned ${app.name} to Dashboard Quick Launch!`);
+                  }
+
+                  updateSettings({
+                    pinnedApps: slots,
+                    customApps: {
+                      ...currentCustom,
+                      [app.id]: { label: app.name, path: app.path },
+                    },
+                  });
+                }}
+                onCancelPicker={() => {
+                  setAppPickerMode(false);
+                  setActiveTab('settings');
+                }}
+                onAppLaunched={() => setIsOpen(false)}
+              />
+            </ErrorBoundary>
           )}
 
           {/* ================================================================================= */}
@@ -1519,9 +2012,32 @@ const CanopyShellContent: React.FC = () => {
                   type="text"
                   data-tauri-drag-region="false"
                   value={terminalInput}
-                  onChange={(e) => setTerminalInput(e.target.value)}
+                  onChange={(e) => {
+                    setTerminalInput(e.target.value);
+                    setHistoryIndex(-1);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      if (commandHistoryList.length === 0) return;
+                      const nextIdx = historyIndex === -1 ? commandHistoryList.length - 1 : Math.max(0, historyIndex - 1);
+                      setHistoryIndex(nextIdx);
+                      setTerminalInput(commandHistoryList[nextIdx] || '');
+                    } else if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      if (historyIndex === -1) return;
+                      const nextIdx = historyIndex + 1;
+                      if (nextIdx >= commandHistoryList.length) {
+                        setHistoryIndex(-1);
+                        setTerminalInput('');
+                      } else {
+                        setHistoryIndex(nextIdx);
+                        setTerminalInput(commandHistoryList[nextIdx] || '');
+                      }
+                    }
+                  }}
                   disabled={terminalBusy}
-                  placeholder="Run PowerShell command (e.g., fastfetch, uptime, ipconfig, tasklist)..."
+                  placeholder="Run PowerShell command (↑/↓ for history, e.g., fastfetch, ipconfig, uptime)..."
                   className="flex-1 bg-transparent text-xs focus:outline-none font-mono pointer-events-auto"
                   style={{ color: 'var(--theme-text-primary)' }}
                 />
@@ -1543,6 +2059,20 @@ const CanopyShellContent: React.FC = () => {
           )}
 
           {/* ================================================================================= */}
+          {/* TAB 8: POWER (Sleep, Restart, Shut Down, Lock, Sign Out, Hibernate)               */}
+          {/* ================================================================================= */}
+          {activeTab === 'power' && (
+            <PowerView
+              stats={stats}
+              onActionTriggered={(act) => {
+                if (act !== 'lock') {
+                  setIsOpen(false);
+                }
+              }}
+            />
+          )}
+
+          {/* ================================================================================= */}
           {/* TAB 8: SETTINGS (Global Settings Engine & Bento Configuration Cards)              */}
           {/* ================================================================================= */}
           {activeTab === 'settings' && (
@@ -1557,10 +2087,131 @@ const CanopyShellContent: React.FC = () => {
               onThemeChanged={() => {
                 syncThemeWithActiveWallpaper(wallpapers, settings.themeMode);
               }}
+              onStartAddQuickLaunch={() => {
+                setAppPickerMode(true);
+                setActiveTab('apps');
+              }}
             />
           )}
         </main>
       </div>
+
+      {/* Search / Command Palette Overlay (printable key opens, Esc closes, Enter runs) */}
+      {paletteOpen && (
+        <div
+          data-tauri-drag-region="false"
+          className="absolute inset-0 z-[70] flex items-start justify-center pt-12 px-4 bg-[#0b0b12]/55 backdrop-blur-[3px] pointer-events-auto"
+          onMouseDown={() => setPaletteOpen(false)}
+        >
+          <div
+            data-tauri-drag-region="false"
+            className="w-[520px] rounded-2xl overflow-hidden pointer-events-auto"
+            style={{
+              background: 'var(--theme-bg)',
+              border: '1px solid var(--theme-border)',
+              boxShadow: '0 24px 60px rgba(0, 0, 0, 0.6)',
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div
+              className="flex items-center gap-2 px-3 py-2"
+              style={{ borderBottom: '1px solid var(--theme-border)' }}
+            >
+              <Search className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--theme-accent)' }} />
+              <input
+                autoFocus
+                type="text"
+                data-tauri-drag-region="false"
+                value={paletteQuery}
+                placeholder="Type a command…"
+                onChange={(e) => {
+                  setPaletteQuery(e.target.value);
+                  setPaletteIndex(0);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setPaletteOpen(false);
+                  } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setPaletteIndex((prev) =>
+                      paletteMatches.length === 0 ? 0 : (prev + 1) % paletteMatches.length,
+                    );
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setPaletteIndex((prev) =>
+                      paletteMatches.length === 0
+                        ? 0
+                        : (prev - 1 + paletteMatches.length) % paletteMatches.length,
+                    );
+                  } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const command = paletteMatches[paletteIndex];
+                    if (command) {
+                      setPaletteOpen(false);
+                      command.run();
+                    }
+                  }
+                }}
+                className="flex-1 bg-transparent text-xs focus:outline-none pointer-events-auto"
+                style={{ color: 'var(--theme-text-primary)' }}
+              />
+              <span
+                className="px-1.5 py-0.5 rounded-md text-[9px] font-mono shrink-0"
+                style={{ background: 'var(--theme-track)', color: 'var(--theme-text-secondary)' }}
+              >
+                Esc
+              </span>
+            </div>
+
+            <div className="max-h-[230px] overflow-y-auto py-1">
+              {paletteMatches.length === 0 ? (
+                <div className="px-3 py-3 text-[11px]" style={{ color: 'var(--theme-text-secondary)' }}>
+                  No matching commands
+                </div>
+              ) : (
+                paletteMatches.map((command, index) => {
+                  const highlighted = index === paletteIndex;
+                  return (
+                    <button
+                      key={command.id}
+                      type="button"
+                      data-tauri-drag-region="false"
+                      onMouseEnter={() => setPaletteIndex(index)}
+                      onClick={() => {
+                        setPaletteOpen(false);
+                        command.run();
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[11px] transition-colors duration-150 pointer-events-auto cursor-pointer"
+                      style={{
+                        background: highlighted ? 'var(--theme-track)' : 'transparent',
+                        color: 'var(--theme-text-primary)',
+                      }}
+                    >
+                      <span
+                        className="shrink-0"
+                        style={{
+                          color: highlighted ? 'var(--theme-accent)' : 'var(--theme-text-secondary)',
+                        }}
+                      >
+                        {command.icon}
+                      </span>
+                      <span className="flex-1 truncate">{command.label}</span>
+                      <span
+                        className="text-[9px] font-mono shrink-0"
+                        style={{ color: 'var(--theme-text-secondary)' }}
+                      >
+                        {command.hint}
+                      </span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -21,7 +21,11 @@ public sealed record SmtcMediaSnapshot(
     double DurationSecs,
     string? ArtworkUrl,
     string SourceApp,
-    IReadOnlyList<MediaSessionSnapshot> Sessions
+    IReadOnlyList<MediaSessionSnapshot> Sessions,
+    bool? IsShuffleActive = null,
+    int AutoRepeatMode = 0,
+    double PositionAnchorAgeSecs = 0,
+    double PlaybackRate = 1
 );
 
 /// <summary>
@@ -35,6 +39,11 @@ public sealed class SmtcMediaController
     private string? _selectedSessionId;
     private string? _lastArtworkKey;
     private string? _cachedArtworkDataUrl;
+
+    // Timeline anchoring state: SMTC reports snapshots, so the shell projects them forward.
+    private DateTimeOffset _timelineInstant = default;
+    private double _lastAnchorAgeSecs = 0.0;
+    private DateTimeOffset _lastAgeSampleUtc = default;
 
     private async Task<GlobalSystemMediaTransportControlsSessionManager?> GetManagerAsync()
     {
@@ -232,9 +241,11 @@ public sealed class SmtcMediaController
 
             var playback = session.GetPlaybackInfo();
             bool isPlaying = playback?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
-
+            bool? isShuffle = playback?.IsShuffleActive;
+            int repeatMode = playback?.AutoRepeatMode is Windows.Media.MediaPlaybackAutoRepeatMode arm ? (int)arm : 0;
             double positionSecs = 0.0;
             double durationSecs = 0.0;
+            double anchorAgeSecs = 0.0;
             try
             {
                 var timeline = session.GetTimelineProperties();
@@ -242,11 +253,16 @@ public sealed class SmtcMediaController
                 {
                     positionSecs = Math.Max(0.0, timeline.Position.TotalSeconds);
                     durationSecs = timeline.EndTime.TotalSeconds;
+                    anchorAgeSecs = ResolveAnchorAgeSecs(timeline.LastUpdatedTime, isPlaying, DateTimeOffset.UtcNow);
                 }
             }
             catch
             {
             }
+
+            double playbackRate = playback?.PlaybackRate ?? 1.0;
+            if (playbackRate <= 0 || double.IsNaN(playbackRate))
+                playbackRate = 1.0;
 
             string artworkKey = $"{sourceApp}|{title}|{artist}|{album}";
             string? artworkUrl = _cachedArtworkDataUrl;
@@ -258,12 +274,62 @@ public sealed class SmtcMediaController
                 _cachedArtworkDataUrl = artworkUrl;
             }
 
-            return new SmtcMediaSnapshot(title, artist, album, isPlaying, positionSecs, durationSecs, artworkUrl, sourceApp, sessions);
+            return new SmtcMediaSnapshot(title, artist, album, isPlaying, positionSecs, durationSecs, artworkUrl, sourceApp, sessions, isShuffle, repeatMode, anchorAgeSecs, playbackRate);
         }
         catch
         {
-            return new SmtcMediaSnapshot("No media", "Idle", string.Empty, false, 0.0, 1.0, null, "System Audio", []);
+            return new SmtcMediaSnapshot("No media", "Idle", string.Empty, false, 0.0, 1.0, null, "System Audio", [], false, 0);
         }
+    }
+
+    /// <summary>
+    /// Elapsed *playing* time since the app's timeline position was published.
+    ///
+    /// SMTC timelines are snapshots, not clocks: Chromium publishes a position state once at
+    /// playback start and then leaves both <c>Position</c> and <c>LastUpdatedTime</c> frozen, so
+    /// this age is the only thing that turns a dead snapshot into a live playhead. Ages are carried
+    /// forward between reads but only advance while the transport is playing, so a pause freezes the
+    /// playhead where it stopped instead of inflating it by the length of the pause.
+    /// </summary>
+    private double ResolveAnchorAgeSecs(DateTimeOffset instant, bool isPlaying, DateTimeOffset nowUtc)
+    {
+        if (instant == default)
+        {
+            _timelineInstant = default;
+            _lastAnchorAgeSecs = 0.0;
+            _lastAgeSampleUtc = nowUtc;
+            return 0.0;
+        }
+
+        double age;
+        if (instant != _timelineInstant)
+        {
+            // The app just re-published. A playing app has been running since that instant; a paused
+            // one is describing where it stopped, so nothing has elapsed yet.
+            _timelineInstant = instant;
+            age = isPlaying ? (nowUtc - instant).TotalSeconds : 0.0;
+        }
+        else
+        {
+            // Nothing new: carry the age forward, counting only the time the transport played.
+            age = _lastAnchorAgeSecs + (isPlaying ? (nowUtc - _lastAgeSampleUtc).TotalSeconds : 0.0);
+        }
+
+        // Reject anchors from the future or implausibly old ones (clock skew, corrupt payloads).
+        double clamped = age is > 0 and < 86_400 ? age : 0.0;
+        _lastAnchorAgeSecs = clamped;
+        _lastAgeSampleUtc = nowUtc;
+        return clamped;
+    }
+
+    /// <summary>
+    /// Live playhead for the Media Session convention <c>position + elapsed * rate</c>: the app's
+    /// last reported position advanced by the playing time that has elapsed since it was reported.
+    /// </summary>
+    public static double AnchorPosition(double positionSecs, double anchorAgeSecs, double playbackRate)
+    {
+        double rate = playbackRate > 0 ? playbackRate : 1.0;
+        return positionSecs + anchorAgeSecs * rate;
     }
 
     private static async Task<string?> TryReadThumbnailDataUrlAsync(IRandomAccessStreamReference? thumbRef)
@@ -439,5 +505,50 @@ public sealed class SmtcMediaController
             {
             }
         });
+    }
+
+    public async Task<bool?> ToggleShuffleAsync()
+    {
+        try
+        {
+            var manager = await GetManagerAsync();
+            var session = manager is not null ? ResolveTargetSession(manager) : null;
+            if (session is not null)
+            {
+                bool current = session.GetPlaybackInfo()?.IsShuffleActive ?? false;
+                bool next = !current;
+                bool ok = await session.TryChangeShuffleActiveAsync(next);
+                if (ok) return next;
+            }
+        }
+        catch
+        {
+        }
+        return null;
+    }
+
+    public async Task<int> CycleRepeatModeAsync()
+    {
+        try
+        {
+            var manager = await GetManagerAsync();
+            var session = manager is not null ? ResolveTargetSession(manager) : null;
+            if (session is not null)
+            {
+                var current = session.GetPlaybackInfo()?.AutoRepeatMode ?? Windows.Media.MediaPlaybackAutoRepeatMode.None;
+                var next = current switch
+                {
+                    Windows.Media.MediaPlaybackAutoRepeatMode.None => Windows.Media.MediaPlaybackAutoRepeatMode.List,
+                    Windows.Media.MediaPlaybackAutoRepeatMode.List => Windows.Media.MediaPlaybackAutoRepeatMode.Track,
+                    _ => Windows.Media.MediaPlaybackAutoRepeatMode.None
+                };
+                bool ok = await session.TryChangeAutoRepeatModeAsync(next);
+                if (ok) return (int)next;
+            }
+        }
+        catch
+        {
+        }
+        return 0;
     }
 }

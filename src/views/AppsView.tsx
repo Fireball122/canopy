@@ -26,6 +26,10 @@ import {
 
 export interface AppsViewProps {
   onAppLaunched?: () => void;
+  isPickerMode?: boolean;
+  onPickApp?: (app: InstalledAppItem) => void;
+  onPinApp?: (app: InstalledAppItem) => void;
+  onCancelPicker?: () => void;
 }
 
 const BASE_CATEGORIES = [
@@ -84,7 +88,13 @@ function renderAppIcon(app: InstalledAppItem): React.ReactNode {
   return <AppWindow className="w-4 h-4" strokeWidth={1.9} />;
 }
 
-export const AppsView: React.FC<AppsViewProps> = ({ onAppLaunched }) => {
+export const AppsView: React.FC<AppsViewProps> = ({
+  onAppLaunched,
+  isPickerMode = false,
+  onPickApp,
+  onPinApp,
+  onCancelPicker,
+}) => {
   const [apps, setApps] = useState<InstalledAppItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -93,7 +103,6 @@ export const AppsView: React.FC<AppsViewProps> = ({ onAppLaunched }) => {
   const [launchedId, setLaunchedId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [failedIconIds, setFailedIconIds] = useState<Record<string, boolean>>({});
-
   const loadApps = async () => {
     setLoading(true);
     try {
@@ -325,6 +334,36 @@ export const AppsView: React.FC<AppsViewProps> = ({ onAppLaunched }) => {
           })}
         </div>
       </div>
+      {/* Top Banner when picking for Dashboard Quick Launch Dock */}
+      {isPickerMode && (
+        <div
+          className="w-full px-3.5 py-2 rounded-xl border flex items-center justify-between gap-3 shrink-0 mb-1"
+          style={{
+            background: 'var(--theme-track, rgba(255, 255, 255, 0.08))',
+            borderColor: 'var(--theme-accent, #cba6f7)',
+            boxShadow: '0 0 16px -4px var(--theme-accent, rgba(203, 166, 247, 0.35))',
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-sm">🎯</span>
+            <span className="text-xs font-semibold" style={{ color: 'var(--theme-text-primary)' }}>
+              Click any application below to assign it to your Dashboard Quick Launch Dock
+            </span>
+          </div>
+          <button
+            type="button"
+            data-tauri-drag-region="false"
+            onClick={onCancelPicker}
+            className="px-2.5 py-1 rounded-lg text-xs font-semibold border hover:bg-white/10 active:scale-95 pointer-events-auto cursor-pointer"
+            style={{
+              borderColor: 'var(--theme-border)',
+              color: 'var(--theme-text-secondary)',
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
 
       {/* Scrollable 4-Column App Cards Grid */}
       <div
@@ -384,17 +423,29 @@ export const AppsView: React.FC<AppsViewProps> = ({ onAppLaunched }) => {
                   key={app.id}
                   type="button"
                   data-tauri-drag-region="false"
-                  onClick={() => handleLaunch(app)}
-                  className="bento-card bento-card-interactive p-2.5 text-left flex flex-col justify-between gap-2 group transition-all hover:-translate-y-0.5 active:scale-[0.98] pointer-events-auto cursor-pointer"
+                  onClick={() => {
+                    if (isPickerMode && onPickApp) {
+                      onPickApp(app);
+                      return;
+                    }
+                    handleLaunch(app);
+                  }}
+                  className={`bento-card bento-card-interactive p-2.5 text-left flex flex-col justify-between gap-2 group transition-all hover:-translate-y-0.5 active:scale-[0.98] pointer-events-auto cursor-pointer ${
+                    isPickerMode ? 'ring-1 ring-[var(--theme-accent)] shadow-md' : ''
+                  }`}
                   style={{
-                    background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
+                    background: isPickerMode
+                      ? 'var(--theme-track, rgba(255, 255, 255, 0.07))'
+                      : 'var(--theme-card, rgba(255, 255, 255, 0.04))',
                     borderColor: isLaunched
                       ? '#a6e3a1'
-                      : isLaunching
+                      : isPickerMode
                         ? 'var(--theme-accent, #cba6f7)'
-                        : 'var(--theme-border, rgba(255, 255, 255, 0.08))',
+                        : isLaunching
+                          ? 'var(--theme-accent, #cba6f7)'
+                          : 'var(--theme-border, rgba(255, 255, 255, 0.08))',
                   }}
-                  title={`Launch ${app.name} (${app.path})`}
+                  title={isPickerMode ? `Click to pin ${app.name} to Dashboard` : `Launch ${app.name} (${app.path})`}
                 >
                   <div className="flex items-start justify-between gap-2 w-full">
                     {/* App Icon Badge */}
@@ -428,22 +479,55 @@ export const AppsView: React.FC<AppsViewProps> = ({ onAppLaunched }) => {
                       )}
                     </div>
 
-                    {/* Category Badge & Launch Indicator */}
-                    <span
-                      className="px-1.5 py-0.5 rounded-md border text-[9px] font-mono uppercase tracking-wider flex items-center gap-1"
-                      style={{
-                        background: 'var(--theme-track, rgba(255, 255, 255, 0.04))',
-                        borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
-                        color: isLaunched
-                          ? '#a6e3a1'
-                          : 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))',
-                      }}
-                    >
-                      <span>{isLaunched ? 'Launched' : isLaunching ? 'Starting' : app.category}</span>
-                      <ExternalLink className="w-2.5 h-2.5 opacity-70 group-hover:opacity-100" />
-                    </span>
+                    {/* Category Badge / Pin to Quick Launch Button */}
+                    <div className="flex items-center gap-1">
+                      {isPickerMode ? (
+                        <span
+                          className="px-1.5 py-0.5 rounded-md text-[9px] font-mono font-bold tracking-wider"
+                          style={{
+                            background: 'var(--theme-accent, #cba6f7)',
+                            color: '#11111b',
+                          }}
+                        >
+                          + PIN
+                        </span>
+                      ) : (
+                        <>
+                          <span
+                            className="px-1.5 py-0.5 rounded-md border text-[9px] font-mono uppercase tracking-wider flex items-center gap-1"
+                            style={{
+                              background: 'var(--theme-track, rgba(255, 255, 255, 0.04))',
+                              borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
+                              color: isLaunched
+                                ? '#a6e3a1'
+                                : 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))',
+                            }}
+                          >
+                            <span>{isLaunched ? 'Launched' : isLaunching ? 'Starting' : app.category}</span>
+                            <ExternalLink className="w-2.5 h-2.5 opacity-70 group-hover:opacity-100" />
+                          </span>
+                          {onPinApp && (
+                            <button
+                              type="button"
+                              data-tauri-drag-region="false"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onPinApp(app);
+                              }}
+                              className="px-1.5 py-0.5 rounded-md border text-[9px] font-mono hover:bg-white/10 active:scale-90 transition-all pointer-events-auto cursor-pointer"
+                              style={{
+                                borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.12))',
+                                color: 'var(--theme-accent, #cba6f7)',
+                              }}
+                              title={`Pin ${app.name} to Dashboard Quick Launch`}
+                            >
+                              +Pin
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </div>
-
                   {/* App Name & Description / Target Path Subtitle */}
                   <div className="w-full min-w-0">
                     <div

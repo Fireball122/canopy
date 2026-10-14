@@ -855,3 +855,53 @@ pub fn launch_app(target: String) -> Result<bool, String> {
         .map_err(|e| format!("Failed to launch '{}': {}", trimmed, e))?;
     Ok(true)
 }
+
+#[tauri::command]
+pub fn execute_power_action(action: String) -> Result<bool, String> {
+    let clean = action.trim().to_ascii_lowercase();
+    match clean.as_str() {
+        "lock" => {
+            std::process::Command::new("rundll32.exe")
+                .args(["user32.dll,LockWorkStation"])
+                .spawn()
+                .map_err(|e| format!("Failed to lock: {}", e))?;
+            Ok(true)
+        }
+        "sleep" => {
+            std::process::Command::new("rundll32.exe")
+                .args(["powrprof.dll,SetSuspendState", "0,1,0"])
+                .spawn()
+                .map_err(|e| format!("Failed to sleep: {}", e))?;
+            Ok(true)
+        }
+        "hibernate" => {
+            std::process::Command::new("shutdown.exe")
+                .args(["/h"])
+                .spawn()
+                .map_err(|e| format!("Failed to hibernate: {}", e))?;
+            Ok(true)
+        }
+        "restart" => {
+            std::process::Command::new("shutdown.exe")
+                .args(["/r", "/t", "0"])
+                .spawn()
+                .map_err(|e| format!("Failed to restart: {}", e))?;
+            Ok(true)
+        }
+        "shutdown" | "poweroff" => {
+            std::process::Command::new("shutdown.exe")
+                .args(["/s", "/t", "0"])
+                .spawn()
+                .map_err(|e| format!("Failed to shutdown: {}", e))?;
+            Ok(true)
+        }
+        "signout" | "logoff" => {
+            std::process::Command::new("shutdown.exe")
+                .args(["/l"])
+                .spawn()
+                .map_err(|e| format!("Failed to log off: {}", e))?;
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}

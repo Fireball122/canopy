@@ -1,5 +1,18 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { FolderOpen, RefreshCw } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronRight,
+  FolderOpen,
+  Heart,
+  Monitor as MonitorIcon,
+  Pause,
+  Play,
+  RefreshCw,
+  Search,
+  Shuffle,
+  X,
+} from 'lucide-react';
 import { useSettings } from '../context/SettingsContext';
 import {
   applyThemeFromImageSrc,
@@ -7,9 +20,13 @@ import {
   applyThemePalette,
 } from '../services/palette';
 import {
+  DesktopWallpaperState,
   WallpaperEntry,
+  getDesktopWallpaperState,
   pickWallpaperFolder,
   setDesktopWallpaper,
+  setDesktopWallpaperState,
+  setMonitorWallpaper,
   setWallpaperDirectory,
 } from '../services/tauriBridge';
 
@@ -128,10 +145,13 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
   onApplyWallpaper,
   onRefreshWallpapers,
   onDirectoryChanged,
+  statusText,
 }) => {
   const { settings, updateSettings } = useSettings();
   const imgRefs = useRef<Record<string, HTMLImageElement | null>>({});
   const transitionTimerRef = useRef<number | null>(null);
+  // Monotonic token guarding async palette extraction against superseded selections.
+  const themeRequestRef = useRef<number>(0);
 
   const activeWallpaper = wallpapers.find((w) => w.active) || wallpapers[0] || null;
   const [transitioningPath, setTransitioningPath] = useState<string | null>(null);
@@ -142,6 +162,45 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
     accent: '#89DCEB',
     surface: 'var(--theme-bg, #181824)',
   });
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [filterFavoritesOnly, setFilterFavoritesOnly] = useState<boolean>(false);
+  const [showPerMonitor, setShowPerMonitor] = useState<boolean>(false);
+  const [desktopState, setDesktopState] = useState<DesktopWallpaperState | null>(null);
+  const [busyMonitorId, setBusyMonitorId] = useState<string | null>(null);
+  const [slideshowMinutes, setSlideshowMinutes] = useState<number>(30);
+
+  const isFavorite = (path: string) => settings.wallpaperFavorites?.includes(path) ?? false;
+
+  const toggleFavorite = (e: React.MouseEvent, path: string) => {
+    e.stopPropagation();
+    const current = settings.wallpaperFavorites || [];
+    const next = current.includes(path) ? current.filter((p) => p !== path) : [...current, path];
+    updateSettings({ wallpaperFavorites: next });
+  };
+
+  const filteredWallpapers = useMemo(() => {
+    let list = wallpapers.filter((w) =>
+      w.name.toLowerCase().includes(searchQuery.trim().toLowerCase())
+    );
+    if (filterFavoritesOnly) {
+      list = list.filter((w) => isFavorite(w.path));
+    } else {
+      list = [...list].sort((a, b) => {
+        const aFav = isFavorite(a.path) ? 1 : 0;
+        const bFav = isFavorite(b.path) ? 1 : 0;
+        return bFav - aFav;
+      });
+    }
+    return list;
+  }, [wallpapers, searchQuery, filterFavoritesOnly, settings.wallpaperFavorites]);
+
+  const getResolutionBadge = (res?: string): string => {
+    if (!res) return 'FHD';
+    if (res.includes('3840') || res.includes('4096') || res.includes('7680')) return '4K';
+    if (res.includes('3440') || res.includes('5120')) return 'UW';
+    if (res.includes('2560')) return 'QHD';
+    return 'FHD';
+  };
 
   useEffect(() => {
     if (!activeWallpaper) return;
@@ -159,18 +218,62 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
     };
   }, []);
 
+  // Load the host's per-monitor wallpaper/slideshow state once, then keep it fresh
+  // whenever the user changes something here.
+  useEffect(() => {
+    let cancelled = false;
+    getDesktopWallpaperState().then((state) => {
+      if (cancelled) return;
+      setDesktopState(state);
+      setSlideshowMinutes(state.slideshow_minutes > 0 ? state.slideshow_minutes : 30);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const refreshDesktopState = async (): Promise<void> => {
+    const state = await getDesktopWallpaperState();
+    setDesktopState(state);
+  };
+
   const handleSelectWallpaper = async (entry: WallpaperEntry) => {
     if (transitionTimerRef.current) {
       window.clearTimeout(transitionTimerRef.current);
     }
     setTransitioningPath(entry.path);
 
+    // Monotonic token: a slower decode from an earlier click must never stamp its palette
+    // (or its wallpaper) over a newer selection.
+    const token = ++themeRequestRef.current;
+
     const imgEl = imgRefs.current[entry.path] ?? null;
     if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
       applyThemePalette(imgEl, settings.themeMode);
       setSwatches(extractImageSwatches(imgEl));
     } else if (entry.data_url) {
-      await applyThemeFromImageSrc(entry.data_url, settings.themeMode);
+      try {
+        const decoded = new Image();
+        decoded.crossOrigin = 'anonymous';
+        decoded.src = entry.data_url;
+        await decoded.decode();
+
+        if (themeRequestRef.current !== token) {
+          return; // Superseded while decoding; the newest selection owns the theme.
+        }
+
+        applyThemePalette(decoded, settings.themeMode);
+        setSwatches(extractImageSwatches(decoded));
+      } catch {
+        if (themeRequestRef.current !== token) {
+          return;
+        }
+        applyThemeModeFallback(
+          settings.themeMode,
+          settings.glassOpacity,
+          settings.glassBlurStrength
+        );
+      }
     } else {
       applyThemeModeFallback(
         settings.themeMode,
@@ -183,6 +286,10 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
       await setDesktopWallpaper(entry.path);
     } catch {
       // Handled gracefully
+    }
+
+    if (themeRequestRef.current !== token) {
+      return; // A newer selection took over while the host applied this one.
     }
 
     onApplyWallpaper(entry, imgEl);
@@ -231,6 +338,41 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
     setRescanning(true);
     onRefreshWallpapers();
     window.setTimeout(() => setRescanning(false), 450);
+  };
+
+  const fileNameFromPath = (path: string): string => {
+    const parts = path.split(/[\\/]/);
+    return parts[parts.length - 1] || path;
+  };
+
+  const entryForPath = (path: string): WallpaperEntry | null => {
+    if (!path) return null;
+    const normalized = path.replace(/\//g, '\\').toLowerCase();
+    return wallpapers.find((w) => w.path.replace(/\//g, '\\').toLowerCase() === normalized) ?? null;
+  };
+
+  const handleAssignMonitor = async (monitorId: string) => {
+    if (!activeWallpaper) return;
+    setBusyMonitorId(monitorId);
+    await setMonitorWallpaper(monitorId, activeWallpaper.path);
+    await refreshDesktopState();
+    setBusyMonitorId(null);
+  };
+
+  const handleToggleSlideshow = async (enabled: boolean) => {
+    await setDesktopWallpaperState({ slideshow_enabled: enabled });
+    await refreshDesktopState();
+  };
+
+  const handleToggleShuffle = async () => {
+    await setDesktopWallpaperState({ shuffle: !(desktopState?.shuffle ?? false) });
+    await refreshDesktopState();
+  };
+
+  const commitSlideshowMinutes = async () => {
+    const minutes = Math.max(1, Math.min(1440, Math.round(slideshowMinutes || 1)));
+    setSlideshowMinutes(minutes);
+    await setDesktopWallpaperState({ slideshow_minutes: minutes });
   };
 
   const palettePills: {
@@ -301,8 +443,67 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
           })}
         </div>
 
+        {/* Center: Search Box & Favorites Filter */}
+        <div className="flex items-center gap-1.5 flex-1 max-w-[280px] mx-2">
+          <div
+            className="flex-1 flex items-center gap-1.5 px-2.5 py-1 rounded-full border"
+            style={{
+              background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
+              borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
+            }}
+          >
+            <Search className="w-3 h-3 opacity-60 shrink-0" />
+            <input
+              type="text"
+              data-tauri-drag-region="false"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search wallpapers..."
+              className="w-full bg-transparent text-[11px] focus:outline-none pointer-events-auto"
+              style={{ color: 'var(--theme-text-primary, #F1F2F6)' }}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                data-tauri-drag-region="false"
+                onClick={() => setSearchQuery('')}
+                className="opacity-60 hover:opacity-100 pointer-events-auto cursor-pointer"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+
+          <button
+            type="button"
+            data-tauri-drag-region="false"
+            onClick={() => setFilterFavoritesOnly((prev) => !prev)}
+            className={`p-1.5 rounded-full border transition-all active:scale-95 pointer-events-auto cursor-pointer ${
+              filterFavoritesOnly ? 'shadow-sm' : 'opacity-70 hover:opacity-100'
+            }`}
+            style={{
+              background: filterFavoritesOnly ? 'var(--theme-track)' : 'var(--theme-card)',
+              borderColor: filterFavoritesOnly ? 'var(--theme-accent)' : 'var(--theme-border)',
+              color: filterFavoritesOnly ? 'var(--theme-accent)' : 'var(--theme-text-secondary)',
+            }}
+            title={filterFavoritesOnly ? 'Showing Favorites Only' : 'Show Favorites Only'}
+          >
+            <Heart className={`w-3.5 h-3.5 ${filterFavoritesOnly ? 'fill-current' : ''}`} />
+          </button>
+        </div>
+
         {/* Minimal Folder & Rescan Controls */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 shrink-0">
+          {statusText && (
+            <span
+              className="text-[11px] truncate max-w-[180px] text-right"
+              style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }}
+              title={statusText}
+            >
+              {statusText}
+            </span>
+          )}
+
           <button
             type="button"
             data-tauri-drag-region="false"
@@ -346,12 +547,13 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
         className="flex-1 overflow-y-auto overflow-x-hidden px-1 py-1 pointer-events-auto"
       >
         <div className="grid grid-cols-3 gap-3">
-          {wallpapers.map((entry, idx) => {
+          {filteredWallpapers.map((entry, idx) => {
             const isActive = Boolean(entry.active);
+            const isFav = isFavorite(entry.path);
             const isApplying = transitioningPath === entry.path;
             const friendlyTitle = formatFriendlyName(entry.name);
+            const resBadge = getResolutionBadge(entry.resolution);
             const fallbackBg = FALLBACK_GRADIENTS[idx % FALLBACK_GRADIENTS.length];
-
             return (
               <button
                 key={entry.path}
@@ -405,6 +607,35 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
                     }}
                   />
                 )}
+                {/* Resolution Badge (Top Left) */}
+                <div
+                  className="absolute top-2 left-2 px-1.5 py-0.5 rounded-md text-[9px] font-mono font-bold tracking-wider backdrop-blur-md shadow-sm z-10 pointer-events-none"
+                  style={{
+                    background: 'rgba(0, 0, 0, 0.65)',
+                    color: 'var(--theme-accent, #A29BFE)',
+                    border: '1px solid rgba(255, 255, 255, 0.15)',
+                  }}
+                >
+                  {resBadge}
+                </div>
+
+                {/* Favorite Heart Button (Top Right) */}
+                <button
+                  type="button"
+                  data-tauri-drag-region="false"
+                  onClick={(e) => toggleFavorite(e, entry.path)}
+                  className={`absolute top-2 right-2 p-1.5 rounded-full backdrop-blur-md transition-all duration-200 z-10 pointer-events-auto cursor-pointer ${
+                    isFav ? 'opacity-100 scale-105' : 'opacity-0 group-hover:opacity-100'
+                  }`}
+                  style={{
+                    background: isFav ? 'var(--theme-accent, #A29BFE)' : 'rgba(0, 0, 0, 0.55)',
+                    color: isFav ? '#11111b' : '#ffffff',
+                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                  }}
+                  title={isFav ? 'Remove from favorites' : 'Add to favorites'}
+                >
+                  <Heart className={`w-3 h-3 ${isFav ? 'fill-current' : ''}`} />
+                </button>
                 {/* Subtle bottom scrim & friendly wallpaper name (only shown on hover or when active) */}
                 <div
                   className={`absolute inset-x-0 bottom-0 px-3 py-2 bg-gradient-to-t from-black/75 via-black/35 to-transparent flex items-end justify-between transition-opacity duration-200 pointer-events-none ${
@@ -421,6 +652,223 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
             );
           })}
         </div>
+      </div>
+
+      {/* EXPERIMENTAL: per-monitor wallpaper + slideshow, backed by the host's IDesktopWallpaper controller */}
+      <div
+        data-tauri-drag-region="false"
+        className="shrink-0 rounded-[13px] overflow-hidden pointer-events-auto"
+        style={{
+          background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
+          border: '1px solid var(--theme-border, rgba(255, 255, 255, 0.07))',
+        }}
+      >
+        <button
+          type="button"
+          data-tauri-drag-region="false"
+          onClick={() => setShowPerMonitor((prev) => !prev)}
+          className="w-full flex items-center justify-between px-3 py-2 pointer-events-auto cursor-pointer"
+        >
+          <span className="flex items-center gap-2">
+            <MonitorIcon
+              className="w-3.5 h-3.5"
+              strokeWidth={1.9}
+              style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }}
+            />
+            <span
+              className="text-[11px] font-semibold tracking-tight"
+              style={{ color: 'var(--theme-text-primary, #F1F2F6)' }}
+            >
+              Per-Monitor Wallpaper
+            </span>
+            <span
+              className="px-1.5 py-0.5 rounded-full text-[9px] font-mono font-bold tracking-wider"
+              style={{
+                background: 'var(--theme-track, rgba(255, 255, 255, 0.12))',
+                color: 'var(--theme-accent, #A29BFE)',
+              }}
+            >
+              EXPERIMENTAL
+            </span>
+          </span>
+          {showPerMonitor ? (
+            <ChevronDown className="w-3.5 h-3.5" style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }} />
+          ) : (
+            <ChevronRight className="w-3.5 h-3.5" style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }} />
+          )}
+        </button>
+
+        {showPerMonitor && (
+          <div className="px-3 pb-3 flex flex-col gap-2">
+            {!desktopState ? (
+              <span className="text-[11px]" style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }}>
+                Reading display configuration…
+              </span>
+            ) : !desktopState.per_monitor_supported ? (
+              <div
+                className="flex items-start gap-2 rounded-lg px-2.5 py-2"
+                style={{
+                  background: 'var(--theme-track, rgba(255, 255, 255, 0.08))',
+                  color: 'var(--theme-text-secondary, #9E9EA7)',
+                }}
+              >
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-[1px]" />
+                <span className="text-[11px]">
+                  Per-monitor wallpaper is not supported on this Windows build.
+                </span>
+              </div>
+            ) : (
+              <>
+                <div className="flex flex-col gap-1.5">
+                  {desktopState.monitors.map((monitor) => {
+                    const preview = entryForPath(monitor.path);
+                    const busy = busyMonitorId === monitor.id;
+                    return (
+                      <div
+                        key={monitor.id}
+                        className="flex items-center gap-2 rounded-lg px-2 py-1.5"
+                        style={{
+                          background: 'var(--theme-card, rgba(255, 255, 255, 0.03))',
+                          border: '1px solid var(--theme-border, rgba(255, 255, 255, 0.07))',
+                        }}
+                      >
+                        <div
+                          className="w-12 h-7 rounded-md overflow-hidden shrink-0 flex items-center justify-center"
+                          style={{
+                            background: preview?.data_url
+                              ? undefined
+                              : 'var(--theme-track, rgba(255, 255, 255, 0.1))',
+                            border: '1px solid var(--theme-border, rgba(255, 255, 255, 0.08))',
+                          }}
+                        >
+                          {preview?.data_url ? (
+                            <img
+                              src={preview.data_url}
+                              alt={monitor.label}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <MonitorIcon className="w-3.5 h-3.5 opacity-50" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0 flex flex-col">
+                          <span
+                            className="text-[11px] font-medium truncate"
+                            style={{ color: 'var(--theme-text-primary, #F1F2F6)' }}
+                          >
+                            {monitor.label}
+                          </span>
+                          <span
+                            className="text-[10px] truncate"
+                            style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }}
+                          >
+                            {preview
+                              ? `Current: ${preview.name}`
+                              : monitor.path
+                                ? `Current: ${fileNameFromPath(monitor.path)}`
+                                : 'No wallpaper set'}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          data-tauri-drag-region="false"
+                          disabled={!activeWallpaper || busy}
+                          onClick={() => handleAssignMonitor(monitor.id)}
+                          title={
+                            activeWallpaper
+                              ? `Apply "${activeWallpaper.name}" to this display`
+                              : 'Select a wallpaper first'
+                          }
+                          className="px-2 py-1 rounded-full text-[10px] font-medium transition-all active:scale-95 pointer-events-auto cursor-pointer disabled:opacity-40 disabled:cursor-default"
+                          style={{
+                            background: 'var(--theme-track, rgba(255, 255, 255, 0.12))',
+                            color: 'var(--theme-text-primary, #F1F2F6)',
+                          }}
+                        >
+                          {busy ? 'Applying…' : 'Set from selection'}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap pt-0.5">
+                  <button
+                    type="button"
+                    data-tauri-drag-region="false"
+                    onClick={() => handleToggleSlideshow(!desktopState.slideshow_enabled)}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium transition-all active:scale-95 pointer-events-auto cursor-pointer"
+                    style={{
+                      background: desktopState.slideshow_enabled
+                        ? 'var(--theme-accent, #A29BFE)'
+                        : 'var(--theme-card, rgba(255, 255, 255, 0.06))',
+                      color: desktopState.slideshow_enabled
+                        ? '#11111B'
+                        : 'var(--theme-text-secondary, #9E9EA7)',
+                      border: '1px solid var(--theme-border, rgba(255, 255, 255, 0.07))',
+                    }}
+                  >
+                    {desktopState.slideshow_enabled ? (
+                      <Pause className="w-3 h-3" />
+                    ) : (
+                      <Play className="w-3 h-3" />
+                    )}
+                    <span>{desktopState.slideshow_enabled ? 'Stop' : 'Start'} slideshow</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    data-tauri-drag-region="false"
+                    onClick={handleToggleShuffle}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium transition-all active:scale-95 pointer-events-auto cursor-pointer"
+                    style={{
+                      background: desktopState.shuffle
+                        ? 'var(--theme-track, rgba(255, 255, 255, 0.12))'
+                        : 'var(--theme-card, rgba(255, 255, 255, 0.06))',
+                      color: desktopState.shuffle
+                        ? 'var(--theme-accent, #A29BFE)'
+                        : 'var(--theme-text-secondary, #9E9EA7)',
+                      border: `1px solid ${
+                        desktopState.shuffle
+                          ? 'var(--theme-accent, #A29BFE)'
+                          : 'var(--theme-border, rgba(255, 255, 255, 0.07))'
+                      }`,
+                    }}
+                  >
+                    <Shuffle className="w-3 h-3" />
+                    <span>Shuffle</span>
+                  </button>
+
+                  <label
+                    className="flex items-center gap-1.5 text-[10px]"
+                    style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }}
+                  >
+                    <span>Every</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={1440}
+                      data-tauri-drag-region="false"
+                      value={slideshowMinutes}
+                      onChange={(e) => {
+                        const parsed = Number(e.target.value);
+                        setSlideshowMinutes(Number.isFinite(parsed) ? parsed : 1);
+                      }}
+                      onBlur={commitSlideshowMinutes}
+                      className="w-14 px-1.5 py-0.5 rounded-md text-[10px] text-center focus:outline-none pointer-events-auto"
+                      style={{
+                        background: 'transparent',
+                        border: '1px solid var(--theme-border, rgba(255, 255, 255, 0.12))',
+                        color: 'var(--theme-text-primary, #F1F2F6)',
+                      }}
+                    />
+                    <span>min</span>
+                  </label>
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
