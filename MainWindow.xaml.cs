@@ -46,6 +46,7 @@ public partial class MainWindow : Window
     private bool _isExpanded;
     private bool _webViewReady;
     private readonly bool _startExpanded;
+    private volatile bool _isSuspending;
     private DateTime _ignoreAutoHideUntilUtc = DateTime.MinValue;
     private int _currentBrightness = 80;
     private bool _topHoverTriggerEnabled = true;
@@ -66,13 +67,14 @@ public partial class MainWindow : Window
     private bool _showPanelOnLaunch = true;
     private string _hotkey = "Win+`";
 
-    // Slide animation state.
-    private readonly DispatcherTimer _slideTimer;
-    private double _slideFromTop;
-    private double _slideToTop;
+    // VSync-locked physical pixel slide animation state
+    private readonly Stopwatch _slideStopwatch = new();
+    private int _slidePhysicalX;
+    private int _slideFromPhysicalY;
+    private int _slideToPhysicalY;
     private int _slideDurationMs;
-    private DateTime _slideStartedUtc;
     private bool _slideTargetExpanded;
+    private bool _isSlideRenderingHooked;
 
     public MainWindow(bool startExpanded = true)
     {
@@ -100,11 +102,6 @@ public partial class MainWindow : Window
         };
         _hideDebounceTimer.Tick += OnHideDebounceTimerTick;
 
-        _slideTimer = new DispatcherTimer(DispatcherPriority.Render)
-        {
-            Interval = TimeSpan.FromMilliseconds(15)
-        };
-        _slideTimer.Tick += OnSlideTimerTick;
 
         _log.Write("MainWindow constructed");
         _ = Task.Run(() => _currentBrightness = QueryHardwareBrightness());
@@ -135,7 +132,6 @@ public partial class MainWindow : Window
     /// <summary>
     /// SetWindowRgn works in physical pixels, so the DIP window size must be scaled first or the
     /// panel's right/bottom edge is clipped on any monitor that is not at 100%.
-    /// </summary>
     private void ApplyRoundedRegionForCurrentDpi()
     {
         if (_hwnd == IntPtr.Zero)
@@ -146,12 +142,11 @@ public partial class MainWindow : Window
         DpiScale dpi = VisualTreeHelper.GetDpi(this);
         double scaleX = dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1.0;
         double scaleY = dpi.DpiScaleY > 0 ? dpi.DpiScaleY : 1.0;
+        int physicalWidth = (int)Math.Round(Width * scaleX);
+        int physicalHeight = (int)Math.Round(Height * scaleY);
         int cornerRadius = (int)Math.Round(24 * scaleY);
-        Win32.ApplyWindowRoundedRegion(
-            _hwnd,
-            (int)Math.Round(Width * scaleX),
-            (int)Math.Round(Height * scaleY),
-            cornerRadius);
+
+        Win32.ApplyWindowRoundedRegion(_hwnd, physicalWidth, physicalHeight, cornerRadius);
     }
 
     private async void OnWindowLoaded(object sender, RoutedEventArgs e)
@@ -162,6 +157,14 @@ public partial class MainWindow : Window
         if (_startExpanded)
         {
             ExpandWithPreviewGrace();
+        }
+        else
+        {
+            // Initial state is parked/collapsed: pause background polling and suspend webview
+            _audioController.PauseCapture();
+            _audioSessions.Pause();
+            _systemMonitorService.Pause();
+            await SuspendWebViewAsync();
         }
     }
 
@@ -180,11 +183,19 @@ public partial class MainWindow : Window
             ShellWebView.DefaultBackgroundColor = System.Drawing.Color.FromArgb(0, 0, 0, 0);
 
             CoreWebView2 core = ShellWebView.CoreWebView2;
+#if !DEBUG
+            core.Settings.AreDevToolsEnabled = false;
             core.Settings.AreDefaultContextMenusEnabled = false;
-            core.Settings.AreDevToolsEnabled = true;
-            core.Settings.IsStatusBarEnabled = false;
+            core.Settings.AreBrowserAcceleratorKeysEnabled = false;
             core.Settings.IsZoomControlEnabled = false;
-
+            core.Settings.IsStatusBarEnabled = false;
+#else
+            core.Settings.AreDevToolsEnabled = true;
+            core.Settings.AreDefaultContextMenusEnabled = false;
+            core.Settings.AreBrowserAcceleratorKeysEnabled = true;
+            core.Settings.IsZoomControlEnabled = false;
+            core.Settings.IsStatusBarEnabled = false;
+#endif
             // Inject native bridge before React bundle executes
             const string bridgeInitScript = """
                 (() => {
@@ -791,6 +802,8 @@ public partial class MainWindow : Window
         if (!_webViewReady || ShellWebView.CoreWebView2 is null || id == 0)
             return;
 
+        if (_isSuspending)
+            return;
         string json = JsonSerializer.Serialize(new
         {
             type = "rpc-response",
@@ -807,6 +820,16 @@ public partial class MainWindow : Window
         if (!_webViewReady || ShellWebView.CoreWebView2 is null)
             return;
 
+        // Gate emissions while collapsed or suspending so we never wake the renderer or fail TrySuspendAsync
+        if (_isSuspending)
+            return;
+
+        if (!_isExpanded && !_slideTargetExpanded)
+        {
+            bool isLifecycleEvent = eventName is "canopy:set-open" or "caelestia:set-open" or "toggle-dropdown" or "top-hover-trigger-changed";
+            if (!isLifecycleEvent)
+                return;
+        }
         string json = JsonSerializer.Serialize(new
         {
             type = "event",
@@ -948,7 +971,7 @@ public partial class MainWindow : Window
             _animationsEnabled = animations;
             if (!_animationsEnabled)
             {
-                _slideTimer.Stop();
+                StopSlideAnimation();
             }
         }
 
@@ -964,7 +987,7 @@ public partial class MainWindow : Window
             {
                 if (_suspendWhenClosed)
                 {
-                    SuspendWebView();
+                    _ = SuspendWebViewAsync();
                 }
                 else
                 {
@@ -1139,90 +1162,129 @@ public partial class MainWindow : Window
     /// Target Y for a monitor in device-independent units: on-screen (flush to the top edge) or
     /// parked far enough above it that the panel cannot be seen or hovered.
     /// </summary>
-    private double ComputeTargetTop(Win32.RECT monitor, bool expanded)
-    {
-        DpiScale dpi = VisualTreeHelper.GetDpi(this);
-        double scaleY = dpi.DpiScaleY > 0 ? dpi.DpiScaleY : 1.0;
-        double monitorTopDip = monitor.Top / scaleY;
-        return expanded
-            ? Math.Round(monitorTopDip)
-            : Math.Round(monitorTopDip - Height - 100);
-    }
-
     private void PositionWindowAtTopCenter(Win32.RECT monitor, bool offscreen)
     {
         DpiScale dpi = VisualTreeHelper.GetDpi(this);
         double scaleX = dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1.0;
-        double monitorLeftDip = monitor.Left / scaleX;
-        double monitorWidthDip = monitor.Width / scaleX;
+        double scaleY = dpi.DpiScaleY > 0 ? dpi.DpiScaleY : 1.0;
+        int physicalWidth = (int)Math.Round(Width * scaleX);
+        int physicalHeight = (int)Math.Round(Height * scaleY);
 
-        Left = Math.Round(monitorLeftDip + ((monitorWidthDip - Width) / 2.0));
-        Top = ComputeTargetTop(monitor, expanded: !offscreen);
+        int physicalX = monitor.Left + ((monitor.Width - physicalWidth) / 2);
+        int physicalY = offscreen
+            ? monitor.Top - physicalHeight - (int)Math.Round(100 * scaleY)
+            : monitor.Top;
+
+        if (_hwnd != IntPtr.Zero)
+        {
+            Win32.SetWindowPos(_hwnd, IntPtr.Zero, physicalX, physicalY, 0, 0,
+                Win32.SWP_NOSIZE | Win32.SWP_NOZORDER | Win32.SWP_NOACTIVATE);
+        }
+
+        Left = Math.Round(physicalX / scaleX);
+        Top = Math.Round(physicalY / scaleY);
     }
 
     /// <summary>
-    /// Slides the window to its expanded or collapsed Y position with an ease-out curve, or snaps
-    /// when animations are disabled (or disallowed by the system accessibility setting).
+    /// Slides the window to its expanded or collapsed Y position with a VSync-locked ease-out curve,
+    /// moving the window using native SetWindowPos to eliminate WPF layout passes and micro-stutter.
     /// </summary>
     private void SlideTo(bool expanded, Win32.RECT monitor)
     {
-        PositionWindowHorizontally(monitor);
+        DpiScale dpi = VisualTreeHelper.GetDpi(this);
+        double scaleX = dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1.0;
+        double scaleY = dpi.DpiScaleY > 0 ? dpi.DpiScaleY : 1.0;
+        int physicalWidth = (int)Math.Round(Width * scaleX);
+        int physicalHeight = (int)Math.Round(Height * scaleY);
 
-        double target = ComputeTargetTop(monitor, expanded);
+        int physicalX = monitor.Left + ((monitor.Width - physicalWidth) / 2);
+        int physicalTargetY = expanded
+            ? monitor.Top
+            : monitor.Top - physicalHeight - (int)Math.Round(100 * scaleY);
+
+        int currentPhysicalY = physicalTargetY;
+        if (_hwnd != IntPtr.Zero && Win32.GetWindowRect(_hwnd, out var currentRect))
+        {
+            currentPhysicalY = currentRect.Top;
+        }
+
         int duration = _animationDurationMs > 0 ? _animationDurationMs : 280;
-        bool animate = _animationsEnabled && duration > 0 && Win32.AreSystemAnimationsEnabled() && Math.Abs(Top - target) > 0.5;
+        bool animate = _animationsEnabled && duration > 0 && Win32.AreSystemAnimationsEnabled() && Math.Abs(currentPhysicalY - physicalTargetY) > 2;
 
-        _slideTimer.Stop();
+        StopSlideAnimation();
+
         _slideTargetExpanded = expanded;
-        _slideToTop = target;
+        _slidePhysicalX = physicalX;
+        _slideToPhysicalY = physicalTargetY;
 
         if (!animate)
         {
-            Top = target;
+            if (_hwnd != IntPtr.Zero)
+            {
+                Win32.SetWindowPos(_hwnd, IntPtr.Zero, physicalX, physicalTargetY, 0, 0,
+                    Win32.SWP_NOSIZE | Win32.SWP_NOZORDER | Win32.SWP_NOACTIVATE);
+            }
+            Left = Math.Round(physicalX / scaleX);
+            Top = Math.Round(physicalTargetY / scaleY);
             OnSlideFinished();
             return;
         }
 
-        // If the panel is currently parked, re-anchor the animation at its true start so it always
-        // slides in from off-screen rather than from a stale Top value.
-        _slideFromTop = Top;
-        if (expanded && _slideFromTop > target)
+        _slideFromPhysicalY = currentPhysicalY;
+        if (expanded && _slideFromPhysicalY >= physicalTargetY)
         {
-            _slideFromTop = target - Height - 100;
-            Top = _slideFromTop;
+            _slideFromPhysicalY = physicalTargetY - physicalHeight - (int)Math.Round(100 * scaleY);
+            if (_hwnd != IntPtr.Zero)
+            {
+                Win32.SetWindowPos(_hwnd, IntPtr.Zero, physicalX, _slideFromPhysicalY, 0, 0,
+                    Win32.SWP_NOSIZE | Win32.SWP_NOZORDER | Win32.SWP_NOACTIVATE);
+            }
         }
 
         _slideDurationMs = duration;
-        _slideStartedUtc = DateTime.UtcNow;
-        _slideTimer.Start();
+        _slideStopwatch.Restart();
+        CompositionTarget.Rendering += OnCompositionRendering;
+        _isSlideRenderingHooked = true;
     }
 
-    private void PositionWindowHorizontally(Win32.RECT monitor)
+    private void OnCompositionRendering(object? sender, EventArgs e)
     {
-        DpiScale dpi = VisualTreeHelper.GetDpi(this);
-        double scaleX = dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1.0;
-        double monitorLeftDip = monitor.Left / scaleX;
-        double monitorWidthDip = monitor.Width / scaleX;
-        Left = Math.Round(monitorLeftDip + ((monitorWidthDip - Width) / 2.0));
-    }
-
-    private void OnSlideTimerTick(object? sender, EventArgs e)
-    {
-        double elapsed = (DateTime.UtcNow - _slideStartedUtc).TotalMilliseconds;
+        double elapsed = _slideStopwatch.Elapsed.TotalMilliseconds;
         double progress = _slideDurationMs <= 0 ? 1.0 : Math.Clamp(elapsed / _slideDurationMs, 0.0, 1.0);
         double eased = 1.0 - Math.Pow(1.0 - progress, 3.0);
 
-        Top = _slideFromTop + ((_slideToTop - _slideFromTop) * eased);
+        int currentY = (int)Math.Round(_slideFromPhysicalY + ((_slideToPhysicalY - _slideFromPhysicalY) * eased));
+        if (_hwnd != IntPtr.Zero)
+        {
+            Win32.SetWindowPos(_hwnd, IntPtr.Zero, _slidePhysicalX, currentY, 0, 0,
+                Win32.SWP_NOSIZE | Win32.SWP_NOZORDER | Win32.SWP_NOACTIVATE);
+        }
 
         if (progress >= 1.0)
         {
-            _slideTimer.Stop();
-            Top = _slideToTop;
+            StopSlideAnimation();
+
+            DpiScale dpi = VisualTreeHelper.GetDpi(this);
+            double scaleX = dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1.0;
+            double scaleY = dpi.DpiScaleY > 0 ? dpi.DpiScaleY : 1.0;
+            Left = Math.Round(_slidePhysicalX / scaleX);
+            Top = Math.Round(_slideToPhysicalY / scaleY);
+
             OnSlideFinished();
         }
     }
 
-    private void OnSlideFinished()
+    private void StopSlideAnimation()
+    {
+        if (_isSlideRenderingHooked)
+        {
+            CompositionTarget.Rendering -= OnCompositionRendering;
+            _isSlideRenderingHooked = false;
+        }
+        _slideStopwatch.Stop();
+    }
+
+    private async void OnSlideFinished()
     {
         if (_slideTargetExpanded)
         {
@@ -1233,26 +1295,46 @@ public partial class MainWindow : Window
         }
 
         Win32.SetClickThrough(_hwnd, clickThrough: true);
-        SuspendWebView();
+        _audioController.PauseCapture();
+        _audioSessions.Pause();
+        _systemMonitorService.Pause();
+        await SuspendWebViewAsync();
     }
 
     /// <summary>
     /// WebView2 only suspends while it is hidden, so the control has to be collapsed first;
     /// otherwise every JS timer and animation keeps burning CPU behind the parked panel.
     /// </summary>
-    private void SuspendWebView()
+    private async Task SuspendWebViewAsync()
     {
         if (!_suspendWhenClosed || ShellWebView.CoreWebView2 is null)
         {
             return;
         }
 
-        ShellWebView.Visibility = Visibility.Collapsed;
-        _ = ShellWebView.CoreWebView2.TrySuspendAsync();
+        _isSuspending = true;
+        try
+        {
+            ShellWebView.Visibility = Visibility.Collapsed;
+            await Task.Delay(100);
+            if (!_isExpanded && !_slideTargetExpanded && ShellWebView.CoreWebView2 is not null)
+            {
+                await ShellWebView.CoreWebView2.TrySuspendAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.WriteException("suspend webview", ex);
+        }
+        finally
+        {
+            _isSuspending = false;
+        }
     }
 
     private void ResumeWebView()
     {
+        _isSuspending = false;
         if (ShellWebView.CoreWebView2 is null)
         {
             ShellWebView.Visibility = Visibility.Visible;
@@ -1260,16 +1342,80 @@ public partial class MainWindow : Window
         }
 
         ShellWebView.Visibility = Visibility.Visible;
-        ShellWebView.CoreWebView2.Resume();
+        try
+        {
+            ShellWebView.CoreWebView2.Resume();
+        }
+        catch (Exception ex)
+        {
+            _log.WriteException("resume webview", ex);
+        }
+    }
+
+    /// <summary>
+    /// Checks whether the foreground window is a borderless fullscreen application (such as a DXGI Flip Model
+    /// game or fullscreen video player) covering the entire physical display bounds rather than just rcWork.
+    /// </summary>
+    private bool IsForegroundWindowFullscreen(Win32.RECT monitor)
+    {
+        IntPtr fg = Win32.GetForegroundWindow();
+        if (fg == IntPtr.Zero || fg == _hwnd)
+        {
+            return false;
+        }
+
+        string className = Win32.GetWindowClassName(fg);
+        if (string.Equals(className, "Progman", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(className, "WorkerW", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(className, "Shell_TrayWnd", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(className, "Shell_SecondaryTrayWnd", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!Win32.GetWindowRect(fg, out Win32.RECT fgRect))
+        {
+            return false;
+        }
+
+        IntPtr hMon = Win32.MonitorFromWindow(fg, Win32.MONITOR_DEFAULTTONEAREST);
+        Win32.MONITORINFO mi = new() { cbSize = Marshal.SizeOf<Win32.MONITORINFO>() };
+        if (!Win32.GetMonitorInfo(hMon, ref mi))
+        {
+            mi.rcMonitor = monitor;
+        }
+
+        // True borderless fullscreen game or video covers or exceeds the entire rcMonitor bounds
+        return fgRect.Left <= mi.rcMonitor.Left &&
+               fgRect.Top <= mi.rcMonitor.Top &&
+               fgRect.Right >= mi.rcMonitor.Right &&
+               fgRect.Bottom >= mi.rcMonitor.Bottom;
+    }
+
+    /// <summary>
+    /// Checks if another physical monitor is stacked directly above this monitor at the cursor X position.
+    /// If so, the top boundary is an internal screen transition rather than a physical screen bezel.
+    /// </summary>
+    private static bool HasStackedMonitorAbove(int cursorX, int monitorTop)
+    {
+        var pointAbove = new Win32.POINT { X = cursorX, Y = monitorTop - 2 };
+        IntPtr hMonAbove = Win32.MonitorFromPoint(pointAbove, Win32.MONITOR_DEFAULTTONULL);
+        return hMonAbove != IntPtr.Zero;
     }
 
     /// <summary>
     /// True while the automatic hover trigger must stay silent: quiet hours, a full-screen game
-    /// (when allowed by the setting) or a presentation.
+    /// (borderless or exclusive fullscreen), or a presentation.
     /// </summary>
-    private bool ShouldSuppressTrigger()
+    private bool ShouldSuppressTrigger(Win32.RECT currentMonitor)
     {
         if (_quietHoursEnabled && IsWithinQuietHours())
+        {
+            return true;
+        }
+
+        // Direct borderless fullscreen detection (DXGI Flip Model games, fullscreen video)
+        if (_pauseInFullscreen && IsForegroundWindowFullscreen(currentMonitor))
         {
             return true;
         }
@@ -1278,8 +1424,9 @@ public partial class MainWindow : Window
         return state switch
         {
             Win32.QUNS_RUNNING_D3D_FULL_SCREEN => _pauseInFullscreen,
-            Win32.QUNS_BUSY => _pauseInFullscreen,
             Win32.QUNS_PRESENTATION_MODE => _pauseInPresentation,
+            // For QUNS_BUSY, only suppress if the foreground window is truly covering rcMonitor
+            Win32.QUNS_BUSY => _pauseInFullscreen && IsForegroundWindowFullscreen(currentMonitor),
             _ => false,
         };
     }
@@ -1315,12 +1462,20 @@ public partial class MainWindow : Window
         int effectiveTriggerWidth = Math.Clamp(_topTriggerWidthPx, 100, cursorMonitor.Width);
         int centerX = cursorMonitor.Left + (cursorMonitor.Width / 2);
         int triggerHeight = Math.Max(26, _topTriggerHeightPx);
-        bool inTopTriggerZone =
-            scopeAllows &&
-            cursor.Y >= (cursorMonitor.Top - 12) &&
-            cursor.Y <= (cursorMonitor.Top + triggerHeight) &&
-            Math.Abs(cursor.X - centerX) <= (effectiveTriggerWidth / 2);
-
+        bool inTopTriggerZone;
+        if (!_isExpanded)
+        {
+            // Collapsed: tight bezel catch zone (within 2 physical pixels of top) to prevent collisions with maximized browser tabs
+            bool atBezelEdge = cursor.Y >= (cursorMonitor.Top - 10) && cursor.Y <= (cursorMonitor.Top + 2);
+            bool notStackedAbove = !HasStackedMonitorAbove(cursor.X, cursorMonitor.Top);
+            inTopTriggerZone = scopeAllows && atBezelEdge && notStackedAbove && Math.Abs(cursor.X - centerX) <= (effectiveTriggerWidth / 2);
+        }
+        else
+        {
+            // Expanded: keep open while hovering inside the card (plus margin) or the trigger band
+            bool inTriggerBand = cursor.Y >= (cursorMonitor.Top - 10) && cursor.Y <= (cursorMonitor.Top + triggerHeight);
+            inTopTriggerZone = scopeAllows && inTriggerBand && Math.Abs(cursor.X - centerX) <= (effectiveTriggerWidth / 2);
+        }
         Win32.RECT panelTarget = string.Equals(_panelMonitorMode, "primary", StringComparison.OrdinalIgnoreCase)
             ? primaryMonitor
             : cursorMonitor;
@@ -1330,7 +1485,7 @@ public partial class MainWindow : Window
             // Re-probe a few times per second rather than on every tick.
             if (_fullscreenProbeCounter++ % 8 == 0)
             {
-                _fullscreenAppActive = ShouldSuppressTrigger();
+                _fullscreenAppActive = ShouldSuppressTrigger(cursorMonitor);
             }
 
             // Never drop the panel over a game, during quiet hours, or out of scope — the hotkey and
@@ -1341,22 +1496,15 @@ public partial class MainWindow : Window
                 return;
             }
 
-            if (_topTriggerDelayMs <= 0)
-            {
-                _hoverEnteredTriggerUtc = DateTime.MinValue;
-                _hideDebounceTimer.Stop();
-                ExpandPanel(panelTarget);
-                return;
-            }
-
-            // Dwell continuously inside the zone before opening so a cursor merely passing by never triggers it.
+            // Require ~120ms hover dwell time before expanding to avoid accidental triggers
+            int dwellMs = Math.Max(120, _topTriggerDelayMs);
             if (_hoverEnteredTriggerUtc == DateTime.MinValue)
             {
                 _hoverEnteredTriggerUtc = DateTime.UtcNow;
                 return;
             }
 
-            if ((DateTime.UtcNow - _hoverEnteredTriggerUtc).TotalMilliseconds >= _topTriggerDelayMs)
+            if ((DateTime.UtcNow - _hoverEnteredTriggerUtc).TotalMilliseconds >= dwellMs)
             {
                 _hoverEnteredTriggerUtc = DateTime.MinValue;
                 _hideDebounceTimer.Stop();
@@ -1401,10 +1549,10 @@ public partial class MainWindow : Window
         if (_hwnd == IntPtr.Zero || !Win32.GetWindowRect(_hwnd, out Win32.RECT rect))
             return false;
 
-        return screenCursor.X >= (rect.Left - 2) &&
-               screenCursor.X <= (rect.Right + 2) &&
-               screenCursor.Y >= (rect.Top - 2) &&
-               screenCursor.Y <= (rect.Bottom + 2);
+        return screenCursor.X >= (rect.Left - 6) &&
+               screenCursor.X <= (rect.Right + 6) &&
+               screenCursor.Y >= (rect.Top - 6) &&
+               screenCursor.Y <= (rect.Bottom + 10);
     }
 
     private void OnHideDebounceTimerTick(object? sender, EventArgs e)
@@ -1426,11 +1574,13 @@ public partial class MainWindow : Window
     }
     public void ExpandPanel(Win32.RECT monitor)
     {
-        _slideTimer.Stop();
+        StopSlideAnimation();
         _cursorPollTimer.Interval = TimeSpan.FromMilliseconds(25);
         Win32.SetClickThrough(_hwnd, clickThrough: false);
         ResumeWebView();
-
+        _audioController.ResumeCapture();
+        _audioSessions.Resume();
+        _systemMonitorService.Resume();
         bool wasExpanded = _isExpanded;
         _isExpanded = true;
 
@@ -1471,7 +1621,7 @@ public partial class MainWindow : Window
     {
         _cursorPollTimer.Stop();
         _hideDebounceTimer.Stop();
-        _slideTimer.Stop();
+        StopSlideAnimation();
         _audioController.VolumeStateChanged -= OnMasterVolumeChanged;
 
         if (_hwnd != IntPtr.Zero)
@@ -1564,24 +1714,65 @@ public partial class MainWindow : Window
 
     private void ShowTrayContextMenu()
     {
-        var menu = new ContextMenu();
+        // To ensure the context menu disappears when clicking outside, MSDN requires
+        // the associated window to be in the foreground before showing the popup.
+        long exStyle = Win32.GetWindowLongPtr(_hwnd, Win32.GWL_EXSTYLE).ToInt64();
+        exStyle &= ~Win32.WS_EX_NOACTIVATE;
+        Win32.SetWindowLongPtr(_hwnd, Win32.GWL_EXSTYLE, new IntPtr(exStyle));
+        Win32.SetForegroundWindow(_hwnd);
 
-        var toggleItem = new MenuItem { Header = _isExpanded ? "Collapse Canopy" : "Open Canopy" };
+        var menu = new ContextMenu
+        {
+            Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint,
+            StaysOpen = false
+        };
+
+        // When the menu closes (whether an item was clicked or clicked outside), restore click-through
+        // if the panel is collapsed, and post WM_NULL so Windows cleans up tray menu state.
+        menu.Closed += (_, _) =>
+        {
+            if (!_isExpanded)
+            {
+                Win32.SetClickThrough(_hwnd, clickThrough: true);
+            }
+            Win32.PostMessage(_hwnd, (uint)Win32.WM_NULL, IntPtr.Zero, IntPtr.Zero);
+        };
+
+        var toggleItem = new MenuItem { Header = _isExpanded ? "Collapse Panel" : "Open Panel" };
         toggleItem.Click += (_, _) => ToggleDropdown();
         menu.Items.Add(toggleItem);
+
+        // Top hover trigger pause/resume: prevents panel from dropping down when cursor touches top edge
+        var hoverTriggerItem = new MenuItem
+        {
+            Header = _topHoverTriggerEnabled ? "Top-Edge Hover: Active (Click to Pause)" : "Top-Edge Hover: Paused (Click to Enable)",
+            IsCheckable = true,
+            IsChecked = _topHoverTriggerEnabled
+        };
+        hoverTriggerItem.Click += (_, _) =>
+        {
+            _topHoverTriggerEnabled = !_topHoverTriggerEnabled;
+            _log.Write($"top hover trigger {(_topHoverTriggerEnabled ? "enabled" : "disabled")} via tray menu");
+            EmitFrontendEvent("top-hover-trigger-changed", new { enabled = _topHoverTriggerEnabled });
+            if (!_topHoverTriggerEnabled && _isExpanded)
+            {
+                CollapsePanel();
+            }
+        };
+        menu.Items.Add(hoverTriggerItem);
 
         menu.Items.Add(new Separator());
 
         var dashItem = new MenuItem { Header = "Dashboard" };
-        dashItem.Click += (_, _) => { ExpandWithPreviewGrace(); EmitFrontendEvent("navigate_tab", new { tab = "dashboard" }); };
+        dashItem.Click += (_, _) => { ExpandWithPreviewGrace(); EmitFrontendEvent("canopy:navigate_tab", new { tab = "dashboard" }); };
         menu.Items.Add(dashItem);
 
         var wallItem = new MenuItem { Header = "Wallpapers" };
-        wallItem.Click += (_, _) => { ExpandWithPreviewGrace(); EmitFrontendEvent("navigate_tab", new { tab = "wallpaper" }); };
+        wallItem.Click += (_, _) => { ExpandWithPreviewGrace(); EmitFrontendEvent("canopy:navigate_tab", new { tab = "wallpaper" }); };
         menu.Items.Add(wallItem);
 
         var settItem = new MenuItem { Header = "Settings" };
-        settItem.Click += (_, _) => { ExpandWithPreviewGrace(); EmitFrontendEvent("navigate_tab", new { tab = "settings" }); };
+        settItem.Click += (_, _) => { ExpandWithPreviewGrace(); EmitFrontendEvent("canopy:navigate_tab", new { tab = "settings" }); };
         menu.Items.Add(settItem);
 
         menu.Items.Add(new Separator());
@@ -1615,7 +1806,6 @@ public partial class MainWindow : Window
 
         menu.IsOpen = true;
     }
-
     private void OpenLogFolder()
     {
         try

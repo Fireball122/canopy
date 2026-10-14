@@ -36,9 +36,11 @@ import {
   selectMediaSession,
   mediaToggleShuffle,
   mediaCycleRepeat,
-} from '../services/tauriBridge';
+} from '../services/hostBridge';
 import { usePanelOpen } from '../hooks/usePanelOpen';
 import { usePlaybackClock } from '../hooks/usePlaybackClock';
+import { useAlbumArt } from '../hooks/useAlbumArt';
+
 export interface MediaViewProps {
   media: MediaInfo;
   onPlayPause: () => void;
@@ -317,6 +319,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
   const [visualizerTick, setVisualizerTick] = useState<number>(0);
   // Live 40-band WASAPI Loopback FFT spectrum amplitudes in [0.0, 1.0]
   const [spectrumBands, setSpectrumBands] = useState<number[]>(() => new Array(40).fill(0));
+  const resolvedArtwork = useAlbumArt(media.title, media.artist, media.artwork_url);
   // Interactive Lyrics Toggle & Synced Lyrics state
   const [showLyrics, setShowLyrics] = useState<boolean>(false);
   const [lyricsLines, setLyricsLines] = useState<LyricLine[]>([]);
@@ -775,14 +778,13 @@ export const MediaView: React.FC<MediaViewProps> = ({
             }}
             title={isPlaying ? 'Click to pause' : 'Click to play'}
           >
-            {media.artwork_url ? (
+            {resolvedArtwork ? (
               <>
                 <img
-                  src={media.artwork_url}
+                  src={resolvedArtwork}
                   alt={trackTitle}
                   className="w-full h-full object-cover"
                 />
-                {/* Subtle vinyl center spindle hole */}
                 <div className="absolute w-5 h-5 rounded-full bg-[#11111b]/90 border border-white/25 shadow-inner flex items-center justify-center">
                   <div
                     className="w-2 h-2 rounded-full"
@@ -903,7 +905,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
           {/* STAGE A: Transport Controls, Scrub Bar & Session Switcher */}
           <div
             className={`w-full h-full flex flex-col items-center justify-center gap-3 transition-all duration-300 ease-out ${
-              showLyrics
+              showLyrics || showMixer
                 ? 'opacity-0 translate-y-2 pointer-events-none hidden'
                 : 'opacity-100 translate-y-0 pointer-events-auto relative z-10'
             }`}
@@ -1193,14 +1195,14 @@ export const MediaView: React.FC<MediaViewProps> = ({
 
           {/* STAGE B: Scrollable Time-Synced Lyrics View */}
           <div
-            className={`w-full h-full rounded-xl border px-3 py-2 flex flex-col justify-between transition-all duration-300 ease-out ${
+            className={`w-full h-full rounded-xl border px-3 py-2 flex flex-col justify-between transition-all duration-300 ease-out bg-[#18171c]/95 backdrop-blur-xl z-20 ${
               showLyrics
-                ? 'opacity-100 translate-y-0 pointer-events-auto relative z-10'
+                ? 'opacity-100 translate-y-0 pointer-events-auto relative'
                 : 'opacity-0 translate-y-2 pointer-events-none hidden'
             }`}
             style={{
-              background: 'var(--theme-track, rgba(255, 255, 255, 0.03))',
-              borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
+              background: 'rgba(24, 23, 28, 0.95)',
+              borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.12))',
             }}
           >
             <div
@@ -1301,9 +1303,9 @@ export const MediaView: React.FC<MediaViewProps> = ({
           {showMixer && (
             <div
               data-tauri-drag-region="false"
-              className="absolute inset-0 z-30 rounded-xl border px-2.5 py-2 flex flex-col pointer-events-auto"
+              className="absolute inset-0 z-30 rounded-xl border px-3 py-2.5 flex flex-col pointer-events-auto bg-[#18171c]/95 backdrop-blur-xl shadow-2xl"
               style={{
-                background: 'var(--theme-surface, rgba(20, 20, 28, 0.96))',
+                background: 'rgba(24, 23, 28, 0.95)',
                 borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.12))',
               }}
             >

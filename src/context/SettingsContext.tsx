@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { setHostConfig } from '../services/tauriBridge';
+import { setHostConfig } from '../services/hostBridge';
 
 export type TabId =
   | 'dashboard'
@@ -26,7 +26,8 @@ export interface CanopySettings {
 
   // Wallpaper & Theming Settings
   wallpaperDirectory: string;
-  themeMode: 'auto' | 'dark' | 'light';
+  themeMode: 'canopy' | 'adaptive' | 'dark' | 'light' | 'auto';
+  activeWallpaperPath?: string;
   glassBlurStrength: number; // 16 to 32 (default 24)
   glassOpacity: number; // 0.70 to 0.95 (default 0.86)
 
@@ -103,7 +104,8 @@ export const DEFAULT_SETTINGS: CanopySettings = {
   manualLatitude: 37.7749,
   manualLongitude: -122.4194,
   wallpaperDirectory: 'C:\\Users\\CEO\\Pictures\\Wallpapers',
-  themeMode: 'auto',
+  themeMode: 'canopy',
+  activeWallpaperPath: '',
   glassBlurStrength: 24,
   glassOpacity: 0.86,
   enableBrightnessSlider: false,

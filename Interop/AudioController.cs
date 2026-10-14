@@ -36,7 +36,7 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
     private readonly object _spectrumLock = new();
     private int _decimateCounter;
     private bool _disposed;
-
+    private volatile bool _isCapturePaused;
     // Diagnostics: last failure surfaced to the host instead of being swallowed by catch {}.
     private volatile string? _lastError;
     private long _lastRestartTick;
@@ -128,9 +128,8 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
 
     private void StartCaptureInternal()
     {
-        if (_disposed)
+        if (_disposed || _isCapturePaused)
             return;
-
         try
         {
             WasapiLoopbackCapture? previous;
@@ -186,9 +185,8 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
 
     private void ScheduleCaptureRestart()
     {
-        if (_disposed)
+        if (_disposed || _isCapturePaused)
             return;
-
         long now = Environment.TickCount64;
         if (now - Interlocked.Read(ref _lastRestartTick) < 750)
             return;
@@ -204,6 +202,46 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
         });
     }
 
+    /// <summary>
+    /// Pauses WASAPI loopback capture and spectrum calculation while the panel is collapsed,
+    /// stopping audio processing and dropping CPU wakeups.
+    /// </summary>
+    public void PauseCapture()
+    {
+        _isCapturePaused = true;
+        WasapiLoopbackCapture? captureToStop;
+        lock (_syncLock)
+        {
+            captureToStop = _loopbackCapture;
+            _loopbackCapture = null;
+        }
+
+        if (captureToStop is not null)
+        {
+            captureToStop.DataAvailable -= OnLoopbackDataAvailable;
+            captureToStop.RecordingStopped -= OnLoopbackRecordingStopped;
+            try { captureToStop.StopRecording(); } catch { }
+            try { captureToStop.Dispose(); } catch { }
+        }
+
+        lock (_spectrumLock)
+        {
+            Array.Clear(_spectrumBands, 0, _spectrumBands.Length);
+            _lastFrameRms = 0;
+        }
+    }
+
+    /// <summary>
+    /// Resumes WASAPI loopback capture when the panel expands.
+    /// </summary>
+    public void ResumeCapture()
+    {
+        if (_disposed)
+            return;
+
+        _isCapturePaused = false;
+        StartWasapiLoopbackSpectrum();
+    }
     private void OnLoopbackDataAvailable(object? sender, WaveInEventArgs e)
     {
         try

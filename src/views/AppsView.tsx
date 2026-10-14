@@ -22,7 +22,7 @@ import {
   InstalledAppItem,
   getInstalledApps,
   launchApp,
-} from '../services/tauriBridge';
+} from '../services/hostBridge';
 
 export interface AppsViewProps {
   onAppLaunched?: () => void;

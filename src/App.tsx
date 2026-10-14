@@ -40,6 +40,10 @@ import {
   Battery,
   BatteryCharging,
   Search,
+  Sliders,
+  Mic2,
+  Lock,
+  Moon,
 } from 'lucide-react';
 import {
   SystemStats,
@@ -47,6 +51,7 @@ import {
   WallpaperEntry,
   getSystemStats,
   getMediaInfo,
+  getAudioSpectrum,
   mediaPlayPause,
   mediaNext,
   mediaPrev,
@@ -72,9 +77,13 @@ import {
   pickWallpaperFolder,
   reloadUi,
   BatteryStatus,
-} from './services/tauriBridge';
+  InstalledAppItem,
+  getInstalledApps,
+  executePowerAction,
+} from './services/hostBridge';
 import { usePanelOpen } from './hooks/usePanelOpen';
 import { usePlaybackClock } from './hooks/usePlaybackClock';
+import { useAlbumArt } from './hooks/useAlbumArt';
 import { WeatherData, fetchWeather } from './services/weather';
 import { CanopyMascot } from './components/CanopyMascot';
 import { CalendarCard } from './components/CalendarCard';
@@ -329,8 +338,22 @@ const CanopyShellContent: React.FC = () => {
   const [micVolume, setMicVolume] = useState<number>(75);
   const [micMuted, setMicMuted] = useState<boolean>(false);
   const [battery, setBattery] = useState<BatteryStatus | null>(null);
+  const [installedApps, setInstalledApps] = useState<InstalledAppItem[]>([]);
 
-  // Command palette overlay
+  // Load installed apps for Command Palette launching
+  useEffect(() => {
+    let mounted = true;
+    getInstalledApps()
+      .then((apps) => {
+        if (mounted && Array.isArray(apps)) setInstalledApps(apps);
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, []);
+  const isMusicPlaying = Boolean(media.is_playing);
+  const resolvedArtwork = useAlbumArt(media.title, media.artist, media.artwork_url);
   const [paletteOpen, setPaletteOpen] = useState<boolean>(false);
   const [paletteQuery, setPaletteQuery] = useState<string>('');
   const [paletteIndex, setPaletteIndex] = useState<number>(0);
@@ -460,11 +483,23 @@ const CanopyShellContent: React.FC = () => {
   // Apply dynamic theme palette whenever wallpapers or settings.themeMode change
   const syncThemeWithActiveWallpaper = useCallback(
     async (entries: WallpaperEntry[], mode = settings.themeMode) => {
+      if (mode === 'canopy') {
+        applyThemeModeFallback('canopy', settings.glassOpacity, settings.glassBlurStrength);
+        return;
+      }
+      if (mode === 'dark' || (mode as string) === 'obsidian') {
+        applyThemeModeFallback('dark', settings.glassOpacity, settings.glassBlurStrength);
+        return;
+      }
+      if (mode === 'light' || (mode as string) === 'alabaster') {
+        applyThemeModeFallback('light', settings.glassOpacity, settings.glassBlurStrength);
+        return;
+      }
       const activeEntry = entries.find((w) => w.active) || entries[0];
       if (activeEntry?.data_url) {
         await applyThemeFromImageSrc(activeEntry.data_url, mode);
       } else {
-        applyThemeModeFallback(mode, settings.glassOpacity, settings.glassBlurStrength);
+        applyThemeModeFallback('canopy', settings.glassOpacity, settings.glassBlurStrength);
       }
     },
     [settings.themeMode, settings.glassOpacity, settings.glassBlurStrength],
@@ -660,6 +695,17 @@ const CanopyShellContent: React.FC = () => {
     return () => window.removeEventListener('hotkey-failed', onHotkeyFailed);
   }, [handleToastNotification]);
 
+  // Synchronize top hover trigger when toggled from the notification tray context menu
+  useEffect(() => {
+    const onTopTriggerChanged = (e: Event) => {
+      const detail = (e as CustomEvent<{ enabled?: boolean }>).detail;
+      if (typeof detail?.enabled === 'boolean') {
+        updateSettings({ topHoverTrigger: detail.enabled });
+      }
+    };
+    window.addEventListener('top-hover-trigger-changed', onTopTriggerChanged);
+    return () => window.removeEventListener('top-hover-trigger-changed', onTopTriggerChanged);
+  }, [updateSettings]);
   // Battery chip: refreshed on panel open and whenever the host reports a change.
   useEffect(() => {
     if (!settings.showBatteryChip || !panelOpen) return;
@@ -709,16 +755,39 @@ const CanopyShellContent: React.FC = () => {
     return [
       ...tabCommands,
       {
-        id: 'action:settings',
-        label: 'Open Settings',
-        hint: 'Action',
-        icon: <SettingsIcon className="w-3.5 h-3.5" strokeWidth={1.9} />,
-        run: () => setActiveTab('settings'),
+        id: 'subview:lyrics',
+        label: 'View Synced Lyrics',
+        hint: 'Media',
+        icon: <Mic2 className="w-3.5 h-3.5" strokeWidth={1.9} />,
+        run: () => {
+          setActiveTab('media');
+          void notifyTabSwitched();
+        },
+      },
+      {
+        id: 'subview:mixer',
+        label: 'Open Volume Mixer',
+        hint: 'Media',
+        icon: <Sliders className="w-3.5 h-3.5" strokeWidth={1.9} />,
+        run: () => {
+          setActiveTab('media');
+          void notifyTabSwitched();
+        },
+      },
+      {
+        id: 'subview:cores',
+        label: 'View Cores & System Details',
+        hint: 'Performance',
+        icon: <Cpu className="w-3.5 h-3.5" strokeWidth={1.9} />,
+        run: () => {
+          setActiveTab('performance');
+          void notifyTabSwitched();
+        },
       },
       {
         id: 'action:wallpaper-folder',
         label: 'Open Wallpaper Folder',
-        hint: 'Action',
+        hint: 'Wallpaper',
         icon: <FolderOpen className="w-3.5 h-3.5" strokeWidth={1.9} />,
         run: () => {
           void pickWallpaperFolder()
@@ -731,6 +800,24 @@ const CanopyShellContent: React.FC = () => {
         },
       },
       {
+        id: 'action:lock',
+        label: 'Lock Workstation',
+        hint: 'Power',
+        icon: <Lock className="w-3.5 h-3.5" strokeWidth={1.9} />,
+        run: () => {
+          void executePowerAction('lock');
+        },
+      },
+      {
+        id: 'action:sleep',
+        label: 'Sleep PC',
+        hint: 'Power',
+        icon: <Moon className="w-3.5 h-3.5" strokeWidth={1.9} />,
+        run: () => {
+          void executePowerAction('sleep');
+        },
+      },
+      {
         id: 'action:reload-ui',
         label: 'Reload Canopy UI',
         hint: 'Action',
@@ -739,8 +826,17 @@ const CanopyShellContent: React.FC = () => {
           void reloadUi().catch(() => window.location.reload());
         },
       },
+      ...installedApps.slice(0, 25).map((app) => ({
+        id: `app:${app.id || app.name}`,
+        label: `Launch ${app.name}`,
+        hint: app.category || 'App',
+        icon: <Play className="w-3.5 h-3.5 text-emerald-400" strokeWidth={2} />,
+        run: () => {
+          void launchApp(app.path || app.name);
+        },
+      })),
     ];
-  }, [visibleTabs, refreshWallpapersList]);
+  }, [visibleTabs, installedApps, refreshWallpapersList]);
 
   const paletteMatches = useMemo(
     () => filterPaletteCommands(paletteCommands, paletteQuery),
@@ -1001,7 +1097,6 @@ const CanopyShellContent: React.FC = () => {
   const tempUnit = settings.temperatureUnit === 'fahrenheit' ? '°F' : '°C';
 
   // Media display helpers (strictly music-reactive)
-  const isMusicPlaying = Boolean(media.is_playing);
   const hasLiveTrack = Boolean(
     media.title &&
       media.title.trim() !== '' &&
@@ -1032,7 +1127,7 @@ const CanopyShellContent: React.FC = () => {
 
   return (
     <div
-      className={`relative w-[850px] h-[430px] overflow-hidden bg-transparent select-none flex flex-col items-center${
+      className={`relative w-full h-full overflow-hidden bg-transparent select-none flex flex-col items-center${
         settings.animationsEnabled ? '' : ' no-motion'
       }`}
     >
@@ -1063,7 +1158,7 @@ const CanopyShellContent: React.FC = () => {
       {/* Main 850x430 Canopy Glassmorphism Dropdown Container — Always 100% visible inside window */}
       <div
         data-tauri-drag-region="false"
-        className="canopy-shell canopy-dropdown canopy-dropdown-open mt-0 rounded-t-none rounded-b-[24px] flex flex-col justify-between overflow-hidden"
+        className="canopy-shell canopy-dropdown canopy-dropdown-open w-full h-full mt-0 rounded-t-none rounded-b-[24px] flex flex-col justify-between overflow-hidden"
       >
         {/* Top Centered Navigation Bar */}
         <header
@@ -1432,8 +1527,8 @@ const CanopyShellContent: React.FC = () => {
                       }}
                       title="Click vinyl to Play / Pause"
                     >
-                      {media.artwork_url ? (
-                        <img src={media.artwork_url} alt={trackTitle} className="w-full h-full object-cover" />
+                      {resolvedArtwork ? (
+                        <img src={resolvedArtwork} alt={trackTitle} className="w-full h-full object-cover" />
                       ) : (
                         <>
                           <div className="absolute inset-2 rounded-full border border-white/[0.07] pointer-events-none" />
@@ -1504,17 +1599,14 @@ const CanopyShellContent: React.FC = () => {
                   </button>
                 </div>
 
-                {/* Music-Reactive Mascot: Clean small companion size (max-h 66px, no zZ, lifted & fully visible) */}
+                {/* Mascot */}
                 {settings.mascotMode !== 'none' && (
-                  <div
-                    className="pt-1 pb-1 flex items-center justify-center h-[72px] shrink-0"
-                    style={{ borderTop: '1px solid var(--theme-border)' }}
-                  >
+                  <div className="pt-1 pb-1 flex items-center justify-center h-[72px] shrink-0">
                     <CanopyMascot
                       isPlaying={isMusicPlaying}
                       showSleepZzz={false}
                       showAmbientGlow={false}
-                      className="h-full max-h-[66px] w-auto drop-shadow-sm"
+                      className="h-full max-h-[66px] w-auto drop-shadow-sm select-none"
                     />
                   </div>
                 )}
@@ -1530,6 +1622,7 @@ const CanopyShellContent: React.FC = () => {
               <MediaView
                 media={{
                   ...media,
+                  artwork_url: resolvedArtwork ?? media.artwork_url,
                   position_secs: effectivePosition,
                   duration_secs: effectiveDuration,
                 }}

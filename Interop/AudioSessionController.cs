@@ -40,7 +40,10 @@ public sealed class AudioSessionController : IDisposable
 
     private readonly object _lock = new();
     private bool _disposed;
+    private volatile bool _isPaused;
 
+    public void Pause() => _isPaused = true;
+    public void Resume() => _isPaused = false;
     /// <summary>Most recent session-enumeration failure, or null when healthy.</summary>
     public string? LastError { get; private set; }
 
@@ -49,9 +52,8 @@ public sealed class AudioSessionController : IDisposable
 
     public List<AudioSessionInfo> GetSessions()
     {
-        if (_disposed)
+        if (_disposed || _isPaused)
             return new List<AudioSessionInfo>();
-
         var results = new List<AudioSessionInfo>();
 
         lock (_lock)
@@ -201,8 +203,6 @@ public sealed class AudioSessionController : IDisposable
     {
         var control2 = control as IAudioSessionControl2;
         string identifier = GetSessionIdentifier(control);
-        if (string.IsNullOrEmpty(identifier))
-            return null;
 
         AudioSessionState state = AudioSessionState.Inactive;
         if (control.GetState(out state) < 0)
@@ -214,6 +214,11 @@ public sealed class AudioSessionController : IDisposable
         uint pid = 0;
         control2?.GetProcessId(out pid);
 
+        if (string.IsNullOrEmpty(identifier))
+        {
+            identifier = pid > 0 ? $"pid_{pid}" : $"session_{control.GetHashCode()}";
+        }
+
         float volumeScalar = 1f;
         bool muted = false;
         if (control is ISimpleAudioVolume volume)
@@ -224,7 +229,7 @@ public sealed class AudioSessionController : IDisposable
                 muted = m;
         }
 
-        string name = ResolveProcessDisplayName(pid, identifier);
+        string name = ResolveProcessDisplayName(control, pid, identifier);
 
         return new AudioSessionInfo
         {
@@ -240,11 +245,24 @@ public sealed class AudioSessionController : IDisposable
     {
         try
         {
-            if (control is IAudioSessionControl2 control2 &&
-                control2.GetSessionIdentifier(out string identifier) >= 0 &&
-                !string.IsNullOrEmpty(identifier))
+            if (control is IAudioSessionControl2 control2)
             {
-                return identifier;
+                if (control2.GetSessionInstanceIdentifier(out string instanceId) >= 0 &&
+                    !string.IsNullOrWhiteSpace(instanceId))
+                {
+                    return instanceId;
+                }
+
+                if (control2.GetSessionIdentifier(out string identifier) >= 0 &&
+                    !string.IsNullOrWhiteSpace(identifier))
+                {
+                    return identifier;
+                }
+            }
+
+            if (control.GetDisplayName(out string dn) >= 0 && !string.IsNullOrWhiteSpace(dn))
+            {
+                return dn.Trim();
             }
         }
         catch
@@ -253,11 +271,37 @@ public sealed class AudioSessionController : IDisposable
         return string.Empty;
     }
 
-    private static string ResolveProcessDisplayName(uint pid, string fallback)
+    private static string ResolveProcessDisplayName(IAudioSessionControl control, uint pid, string identifier)
     {
+        // 1. Explicit display name set on the session
+        try
+        {
+            if (control.GetDisplayName(out string dn) >= 0 && !string.IsNullOrWhiteSpace(dn))
+            {
+                if (!dn.StartsWith("@"))
+                    return dn.Trim();
+            }
+        }
+        catch
+        {
+        }
+
+        // 2. System sounds session
+        try
+        {
+            if (control is IAudioSessionControl2 control2 && control2.IsSystemSoundsSession() == 0)
+            {
+                return "System Sounds";
+            }
+        }
+        catch
+        {
+        }
+
         if (pid == 0)
             return "System Sounds";
 
+        // 3. Query process name and description with fallback for sandboxed/child processes
         try
         {
             using var process = Process.GetProcessById((int)pid);
@@ -270,19 +314,44 @@ public sealed class AudioSessionController : IDisposable
             }
             catch
             {
-                // Access to another process's module info may be denied; fall through.
+                // AccessDenied is expected for sandboxed/child processes; fall through
             }
 
             if (!string.IsNullOrWhiteSpace(process.ProcessName))
-                return process.ProcessName;
+            {
+                string pName = process.ProcessName;
+                if (char.IsLower(pName[0]))
+                    pName = char.ToUpper(pName[0]) + pName.Substring(1);
+                return pName;
+            }
         }
         catch
         {
-            // Process already exited.
+            // Process might be sandboxed or already exited
         }
 
-        return fallback;
+        // 4. Extract executable name from identifier string (e.g. "...\\Spotify.exe%b...")
+        if (!string.IsNullOrWhiteSpace(identifier))
+        {
+            int exeIdx = identifier.IndexOf(".exe", StringComparison.OrdinalIgnoreCase);
+            if (exeIdx > 0)
+            {
+                int startIdx = identifier.LastIndexOf('\\', exeIdx);
+                if (startIdx < 0) startIdx = identifier.LastIndexOf('/', exeIdx);
+                int begin = startIdx >= 0 ? startIdx + 1 : 0;
+                string extracted = identifier.Substring(begin, exeIdx - begin);
+                if (!string.IsNullOrWhiteSpace(extracted))
+                {
+                    if (char.IsLower(extracted[0]))
+                        extracted = char.ToUpper(extracted[0]) + extracted.Substring(1);
+                    return extracted;
+                }
+            }
+        }
+
+        return pid > 0 ? $"Process ({pid})" : "Audio Stream";
     }
+
 
     private IAudioSessionManager2? CreateSessionManager()
     {

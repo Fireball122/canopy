@@ -34,7 +34,7 @@ import {
   getInstalledApps,
   openLogFolder,
   InstalledAppItem,
-} from '../services/tauriBridge';
+} from '../services/hostBridge';
 
 const DEFAULT_PINNED_APPS = ['terminal', 'explorer', 'taskmgr', 'msedge', 'code'];
 
@@ -105,16 +105,16 @@ const ToggleSwitch: React.FC<{
     aria-label={label}
     data-tauri-drag-region="false"
     onClick={onToggle}
-    className="w-10 h-5 rounded-full p-0.5 transition-all flex items-center pointer-events-auto cursor-pointer shrink-0"
+    className="w-9 h-5 rounded-full p-0.5 transition-all flex items-center pointer-events-auto cursor-pointer shrink-0"
     style={{
       background: checked
-        ? 'var(--theme-accent, #cba6f7)'
+        ? 'var(--theme-accent, #74a86c)'
         : 'var(--theme-track, rgba(255, 255, 255, 0.14))',
     }}
   >
     <span
       className={`w-4 h-4 rounded-full transition-transform ${
-        checked ? 'translate-x-5 bg-[#11111b]' : 'translate-x-0 bg-white/80'
+        checked ? 'translate-x-4 bg-[#11111b]' : 'translate-x-0 bg-white/80'
       }`}
     />
   </button>
@@ -126,14 +126,14 @@ const SettingToggleRow: React.FC<{
   checked: boolean;
   onToggle: () => void;
 }> = ({ title, description, checked, onToggle }) => (
-  <div className="flex items-center justify-between">
-    <div>
-      <div className="text-xs font-medium" style={{ color: 'var(--theme-text-primary, #cdd6f4)' }}>
+  <div className="flex items-center justify-between gap-3 py-1">
+    <div className="min-w-0 pr-1">
+      <div className="text-xs font-medium truncate" style={{ color: 'var(--theme-text-primary, #f5efe6)' }}>
         {title}
       </div>
       <div
-        className="text-[10px]"
-        style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.65))' }}
+        className="text-[10px] leading-tight"
+        style={{ color: 'var(--theme-text-secondary, #9eb09a)' }}
       >
         {description}
       </div>
@@ -148,15 +148,15 @@ const SegmentedChoice: React.FC<{
   options: { id: string; label: string }[];
   onSelect: (id: string) => void;
 }> = ({ label, value, options, onSelect }) => (
-  <div className="space-y-1">
-    <label
-      className="text-[11px] font-medium block"
-      style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.78))' }}
+  <div className="flex items-center justify-between gap-2 py-1">
+    <span
+      className="text-xs font-medium shrink-0"
+      style={{ color: 'var(--theme-text-primary, #f5efe6)' }}
     >
       {label}
-    </label>
+    </span>
     <div
-      className="grid grid-cols-2 p-0.5 rounded-xl border"
+      className="inline-flex p-0.5 rounded-lg border shrink-0"
       style={{
         background: 'var(--theme-track, rgba(0, 0, 0, 0.22))',
         borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
@@ -170,11 +170,11 @@ const SegmentedChoice: React.FC<{
             type="button"
             data-tauri-drag-region="false"
             onClick={() => onSelect(item.id)}
-            className="py-1 px-2 rounded-lg text-[10px] font-semibold transition-all pointer-events-auto cursor-pointer"
+            className="py-0.5 px-2.5 rounded-md text-[10px] font-semibold transition-all pointer-events-auto cursor-pointer"
             style={
               active
-                ? { background: 'var(--theme-accent, #cba6f7)', color: '#11111b' }
-                : { color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))' }
+                ? { background: 'var(--theme-accent, #74a86c)', color: '#11111b' }
+                : { color: 'var(--theme-text-secondary, #9eb09a)' }
             }
           >
             {item.label}
@@ -261,7 +261,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     message: string;
   } | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
-
+  const [activeCategory, setActiveCategory] = useState<'all' | 'general' | 'appearance' | 'controls' | 'audio' | 'advanced'>('all');
   // Local text mirrors of host-facing values. These fields commit on blur/Enter only, so a
   // half-typed path, coordinate or hotkey never reaches the host.
   useEffect(() => {
@@ -379,7 +379,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
-  const handleThemeModeSelect = (mode: 'auto' | 'dark' | 'light') => {
+  const handleThemeModeSelect = (mode: 'canopy' | 'adaptive' | 'dark' | 'light') => {
     updateSettings({ themeMode: mode });
     applyThemeModeFallback(mode, settings.glassOpacity, settings.glassBlurStrength);
     onThemeChanged?.();
@@ -565,16 +565,52 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   return (
     <div
       data-tauri-drag-region="false"
-      className="w-full h-full overflow-y-auto pr-1 pointer-events-auto select-none"
+      className="w-full h-full overflow-y-auto pr-1 pointer-events-auto select-none flex flex-col"
     >
-      <div className="grid grid-cols-2 gap-2.5 pb-1">
+      {/* Category Navigation Pills */}
+      <div className="flex items-center gap-1.5 pb-2.5 shrink-0 overflow-x-auto">
+        {(
+          [
+            { id: 'all', label: 'All Settings' },
+            { id: 'general', label: 'General & Time' },
+            { id: 'appearance', label: 'Appearance & Theme' },
+            { id: 'controls', label: 'Panel & Controls' },
+            { id: 'audio', label: 'Audio & Media' },
+            { id: 'advanced', label: 'Advanced & Experimental' },
+          ] as const
+        ).map((cat) => {
+          const isSelected = activeCategory === cat.id;
+          return (
+            <button
+              key={cat.id}
+              type="button"
+              data-tauri-drag-region="false"
+              onClick={() => setActiveCategory(cat.id)}
+              className="px-3 py-1 rounded-full text-[10px] font-semibold transition-all duration-150 cursor-pointer pointer-events-auto shrink-0"
+              style={{
+                background: isSelected
+                  ? 'var(--theme-accent, #74a86c)'
+                  : 'var(--theme-card, rgba(255, 255, 255, 0.04))',
+                color: isSelected ? '#11111b' : 'var(--theme-text-secondary, #9eb09a)',
+                border: isSelected
+                  ? '1px solid var(--theme-accent, #74a86c)'
+                  : '1px solid var(--theme-border, rgba(255, 255, 255, 0.08))',
+              }}
+            >
+              {cat.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2.5 pb-1 items-start flex-1">
         {/* ===================================================================== */}
         {/* CARD 1: TIME & REGIONAL                                               */}
         {/* ===================================================================== */}
+        {(activeCategory === 'all' || activeCategory === 'general') && (
         <div
-          className="bento-card p-3.5 flex flex-col justify-between gap-2.5"
+          className="bento-card p-3.5 flex flex-col gap-2.5"
           style={{
-            background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
             borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
           }}
         >
@@ -594,148 +630,42 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </span>
           </div>
 
-          {/* Clock Format Segmented Pill Toggle */}
-          <div className="space-y-1">
-            <label
-              className="text-[11px] font-medium block"
-              style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.78))' }}
-            >
-              Clock Format
-            </label>
-            <div
-              className="grid grid-cols-2 p-0.5 rounded-xl border"
-              style={{
-                background: 'var(--theme-track, rgba(0, 0, 0, 0.22))',
-                borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
-              }}
-            >
-              {(
-                [
-                  { id: '12h', label: '12-Hour (07:20 PM)' },
-                  { id: '24h', label: '24-Hour (19:20)' },
-                ] as const
-              ).map((item) => {
-                const active = settings.clockFormat === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    data-tauri-drag-region="false"
-                    onClick={() => updateSettings({ clockFormat: item.id })}
-                    className="py-1 px-2 rounded-lg text-[10px] font-semibold transition-all pointer-events-auto cursor-pointer"
-                    style={
-                      active
-                        ? {
-                            background: 'var(--theme-accent, #cba6f7)',
-                            color: '#11111b',
-                          }
-                        : {
-                            color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))',
-                          }
-                    }
-                  >
-                    {item.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          <SegmentedChoice
+            label="Clock Format"
+            value={settings.clockFormat}
+            options={[
+              { id: '12h', label: '12-Hour (07:20 PM)' },
+              { id: '24h', label: '24-Hour (19:20)' },
+            ]}
+            onSelect={(id) => updateSettings({ clockFormat: id as '12h' | '24h' })}
+          />
 
-          {/* Show Seconds Toggle Switch */}
-          <div className="flex items-center justify-between py-0.5">
-            <div>
-              <div
-                className="text-xs font-medium"
-                style={{ color: 'var(--theme-text-primary, #cdd6f4)' }}
-              >
-                Show Seconds
-              </div>
-              <div
-                className="text-[10px]"
-                style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.65))' }}
-              >
-                Display live seconds ticker on Dashboard clock
-              </div>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={settings.showSeconds}
-              data-tauri-drag-region="false"
-              onClick={() => updateSettings({ showSeconds: !settings.showSeconds })}
-              className="w-10 h-5 rounded-full p-0.5 transition-all flex items-center pointer-events-auto cursor-pointer shrink-0"
-              style={{
-                background: settings.showSeconds
-                  ? 'var(--theme-accent, #cba6f7)'
-                  : 'var(--theme-track, rgba(255, 255, 255, 0.14))',
-              }}
-            >
-              <span
-                className={`w-4 h-4 rounded-full transition-transform ${
-                  settings.showSeconds
-                    ? 'translate-x-5 bg-[#11111b]'
-                    : 'translate-x-0 bg-white/80'
-                }`}
-              />
-            </button>
-          </div>
+          <SettingToggleRow
+            title="Show Seconds"
+            description="Display live seconds ticker on Dashboard clock"
+            checked={settings.showSeconds}
+            onToggle={() => updateSettings({ showSeconds: !settings.showSeconds })}
+          />
 
-          {/* Calendar Start Segmented Pill Toggle */}
-          <div className="space-y-1">
-            <label
-              className="text-[11px] font-medium flex items-center gap-1"
-              style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.78))' }}
-            >
-              <Calendar className="w-3 h-3" strokeWidth={2} />
-              <span>Calendar First Day of Week</span>
-            </label>
-            <div
-              className="grid grid-cols-2 p-0.5 rounded-xl border"
-              style={{
-                background: 'var(--theme-track, rgba(0, 0, 0, 0.22))',
-                borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
-              }}
-            >
-              {(
-                [
-                  { id: 'sunday', label: 'Sunday' },
-                  { id: 'monday', label: 'Monday' },
-                ] as const
-              ).map((item) => {
-                const active = settings.calendarFirstDay === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    data-tauri-drag-region="false"
-                    onClick={() => updateSettings({ calendarFirstDay: item.id })}
-                    className="py-1 px-2 rounded-lg text-[10px] font-semibold transition-all pointer-events-auto cursor-pointer"
-                    style={
-                      active
-                        ? {
-                            background: 'var(--theme-accent, #cba6f7)',
-                            color: '#11111b',
-                          }
-                        : {
-                            color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))',
-                          }
-                    }
-                  >
-                    {item.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          <SegmentedChoice
+            label="Calendar First Day of Week"
+            value={settings.calendarFirstDay}
+            options={[
+              { id: 'sunday', label: 'Sunday' },
+              { id: 'monday', label: 'Monday' },
+            ]}
+            onSelect={(id) => updateSettings({ calendarFirstDay: id as 'sunday' | 'monday' })}
+          />
         </div>
+        )}
 
         {/* ===================================================================== */}
         {/* CARD 2: WEATHER CONFIGURATION                                         */}
         {/* ===================================================================== */}
+        {(activeCategory === 'all' || activeCategory === 'general') && (
         <div
-          className="bento-card p-3.5 flex flex-col justify-between gap-2.5"
+          className="bento-card p-3.5 flex flex-col gap-2.5"
           style={{
-            background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
             borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
           }}
         >
@@ -755,101 +685,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </span>
           </div>
 
-          {/* Temperature Unit Segmented Pill Toggle */}
-          <div className="space-y-1">
-            <label
-              className="text-[11px] font-medium block"
-              style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.78))' }}
-            >
-              Temperature Unit
-            </label>
-            <div
-              className="grid grid-cols-2 p-0.5 rounded-xl border"
-              style={{
-                background: 'var(--theme-track, rgba(0, 0, 0, 0.22))',
-                borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
-              }}
-            >
-              {(
-                [
-                  { id: 'fahrenheit', label: 'Fahrenheit (°F)' },
-                  { id: 'celsius', label: 'Celsius (°C)' },
-                ] as const
-              ).map((item) => {
-                const active = settings.temperatureUnit === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    data-tauri-drag-region="false"
-                    onClick={() => updateSettings({ temperatureUnit: item.id })}
-                    className="py-1 px-2 rounded-lg text-[10px] font-semibold transition-all pointer-events-auto cursor-pointer"
-                    style={
-                      active
-                        ? {
-                            background: 'var(--theme-accent, #cba6f7)',
-                            color: '#11111b',
-                          }
-                        : {
-                            color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))',
-                          }
-                    }
-                  >
-                    {item.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          <SegmentedChoice
+            label="Temperature Unit"
+            value={settings.temperatureUnit}
+            options={[
+              { id: 'fahrenheit', label: 'Fahrenheit (°F)' },
+              { id: 'celsius', label: 'Celsius (°C)' },
+            ]}
+            onSelect={(id) => updateSettings({ temperatureUnit: id as 'fahrenheit' | 'celsius' })}
+          />
 
-          {/* Location Detection Mode Toggle */}
-          <div className="space-y-1">
-            <label
-              className="text-[11px] font-medium flex items-center gap-1"
-              style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.78))' }}
-            >
-              <MapPin className="w-3 h-3" strokeWidth={2} />
-              <span>Location Detection</span>
-            </label>
-            <div
-              className="grid grid-cols-2 p-0.5 rounded-xl border"
-              style={{
-                background: 'var(--theme-track, rgba(0, 0, 0, 0.22))',
-                borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
-              }}
-            >
-              {(
-                [
-                  { id: 'auto', label: 'Auto IP Detection' },
-                  { id: 'manual', label: 'Manual Coordinates/City' },
-                ] as const
-              ).map((item) => {
-                const active = settings.weatherLocationMode === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    data-tauri-drag-region="false"
-                    onClick={() => updateSettings({ weatherLocationMode: item.id })}
-                    className="py-1 px-2 rounded-lg text-[10px] font-semibold transition-all pointer-events-auto cursor-pointer"
-                    style={
-                      active
-                        ? {
-                            background: 'var(--theme-accent, #cba6f7)',
-                            color: '#11111b',
-                          }
-                        : {
-                            color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))',
-                          }
-                    }
-                  >
-                    {item.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
+          <SegmentedChoice
+            label="Location Detection"
+            value={settings.weatherLocationMode}
+            options={[
+              { id: 'auto', label: 'Auto IP Detection' },
+              { id: 'manual', label: 'Manual Coordinates/City' },
+            ]}
+            onSelect={(id) => updateSettings({ weatherLocationMode: id as 'auto' | 'manual' })}
+          />
           {/* Conditional Manual Coordinates / City Inputs */}
           {settings.weatherLocationMode === 'manual' ? (
             <div className="grid grid-cols-12 gap-1.5 pt-0.5">
@@ -956,14 +810,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           )}
         </div>
+        )}
 
         {/* ===================================================================== */}
         {/* CARD 3: WALLPAPER & APPEARANCE                                        */}
         {/* ===================================================================== */}
+        {(activeCategory === 'all' || activeCategory === 'appearance') && (
         <div
-          className="bento-card p-3.5 flex flex-col justify-between gap-2.5"
+          className="bento-card p-3.5 flex flex-col gap-2.5"
           style={{
-            background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
             borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
           }}
         >
@@ -1036,7 +891,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               Theme Mode Override
             </label>
             <div
-              className="grid grid-cols-3 p-0.5 rounded-xl border"
+              className="grid grid-cols-4 p-0.5 rounded-xl border"
               style={{
                 background: 'var(--theme-track, rgba(0, 0, 0, 0.22))',
                 borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
@@ -1045,18 +900,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               {(
                 [
                   {
-                    id: 'auto',
-                    label: 'Auto (Adaptive)',
+                    id: 'canopy',
+                    label: 'Canopy',
                     icon: <Sparkles className="w-3 h-3" strokeWidth={2} />,
                   },
                   {
+                    id: 'adaptive',
+                    label: 'Adaptive',
+                    icon: <ImageIcon className="w-3 h-3" strokeWidth={2} />,
+                  },
+                  {
                     id: 'dark',
-                    label: 'Force Dark',
+                    label: 'Dark',
                     icon: <Moon className="w-3 h-3" strokeWidth={2} />,
                   },
                   {
                     id: 'light',
-                    label: 'Force Light',
+                    label: 'Light',
                     icon: <Sun className="w-3 h-3" strokeWidth={2} />,
                   },
                 ] as const
@@ -1275,14 +1135,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             )}
           </div>
         </div>
+        )}
 
         {/* ===================================================================== */}
         {/* CARD 4: SYSTEM & INTEGRATION                                          */}
         {/* ===================================================================== */}
+        {(activeCategory === 'all' || activeCategory === 'controls') && (
         <div
-          className="bento-card p-3.5 flex flex-col justify-between gap-2.5"
+          className="bento-card p-3.5 flex flex-col gap-2.5"
           style={{
-            background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
             borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
           }}
         >
@@ -1920,14 +1781,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </button>
           </div>
         </div>
+        )}
 
         {/* ===================================================================== */}
         {/* CARD 5: PANEL BEHAVIOUR                                               */}
         {/* ===================================================================== */}
+        {(activeCategory === 'all' || activeCategory === 'controls') && (
         <div
-          className="bento-card p-3.5 flex flex-col justify-between gap-2.5"
+          className="bento-card p-3.5 flex flex-col gap-2.5"
           style={{
-            background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
             borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
           }}
         >
@@ -2077,14 +1939,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             }
           />
         </div>
+        )}
 
         {/* ===================================================================== */}
         {/* CARD 6: AUDIO                                                         */}
         {/* ===================================================================== */}
+        {(activeCategory === 'all' || activeCategory === 'audio') && (
         <div
-          className="bento-card p-3.5 flex flex-col justify-between gap-2.5"
+          className="bento-card p-3.5 flex flex-col gap-2.5"
           style={{
-            background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
             borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
           }}
         >
@@ -2156,14 +2019,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </div>
         </div>
+        )}
 
         {/* ===================================================================== */}
         {/* CARD 7: DIAGNOSTICS                                                   */}
         {/* ===================================================================== */}
+        {(activeCategory === 'all' || activeCategory === 'advanced') && (
         <div
-          className="bento-card p-3.5 flex flex-col justify-between gap-2.5"
+          className="bento-card p-3.5 flex flex-col gap-2.5"
           style={{
-            background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
             borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
           }}
         >
@@ -2289,14 +2153,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </div>
         </div>
+        )}
 
         {/* ===================================================================== */}
         {/* CARD 8: WALLPAPER (EXPERIMENTAL)                                      */}
         {/* ===================================================================== */}
+        {(activeCategory === 'all' || activeCategory === 'advanced') && (
         <div
-          className="bento-card p-3.5 flex flex-col justify-between gap-2.5"
+          className="bento-card p-3.5 flex flex-col gap-2.5"
           style={{
-            background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
             borderColor: 'rgba(249, 226, 175, 0.28)',
           }}
         >
@@ -2354,6 +2219,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             onToggle={() => updateSettings({ wallpaperShuffle: !settings.wallpaperShuffle })}
           />
         </div>
+        )}
       </div>
     </div>
   );

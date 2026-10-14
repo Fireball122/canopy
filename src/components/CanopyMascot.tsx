@@ -16,18 +16,20 @@ const CAPI_FRAMES = [
   '/capi_4.png',
   '/capi_5.png',
   '/capi_6.png',
+  '/capi_7.png',
 ];
 
 /**
  * "Capi" — The Mushroom Spirit Mascot for Canopy
- * - Adorable headphone-wearing mushroom spirit with 6 dancing animation frames:
+ * - Adorable headphone-wearing mushroom spirit with 7 dancing animation frames:
  *   Frame 1: Preparation (Idle)
  *   Frame 2: Sway Left
- *   Frame 3: Bounce Up
- *   Frame 4: Sway Right (Wink)
- *   Frame 5: Squish / Beat Drop
- *   Frame 6: Return
- * - Music-Reactive: Cycles through all 6 frames rhythmically when music plays.
+ *   Frame 3: Jump
+ *   Frame 4: Bounce Up
+ *   Frame 5: Sway Right (Wink)
+ *   Frame 6: Squish / Beat Drop
+ *   Frame 7: Return
+ * - Music-Reactive: Cycles through all 7 frames rhythmically when music plays.
  * - Idle Mode: Rests on Frame 1 with gentle breathing when paused.
  * - Supports custom user GIF uploads via settings.
  */
@@ -130,8 +132,8 @@ export const CanopyMascot: React.FC<CanopyMascotProps> = ({
       className={`relative flex flex-col items-center justify-center select-none pointer-events-auto cursor-pointer group h-full max-h-full overflow-hidden ${className}`}
       title={
         isPlaying
-          ? 'Capi is grooving to your music! (Frame ' + (frameIndex + 1) + '/6)'
-          : 'Capi is resting on Frame 1 (click to bounce!)'
+          ? 'Capi is dancing to your music!'
+          : 'Capi is resting (click to bounce!)'
       }
     >
       {/* Ambient soft circular glow behind Capi (strictly circular, never clips) */}

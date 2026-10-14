@@ -1,111 +1,192 @@
 <p align="center">
-  <img src="assets/banner.jpg" alt="Canopy Drop-Down Info Center Banner" width="100%" />
+  <img src="assets/banner.jpg" alt="Canopy — Drop-Down Info Center Banner" width="100%" />
 </p>
 
 <p align="center">
-  <img src="assets/logo.jpg" alt="Canopy Mascot Logo" width="140" style="border-radius: 50%;" />
+  <img src="assets/logo.jpg" alt="Canopy Logo" width="130" style="border-radius: 50%;" />
 </p>
 
-<h1 align="center">🌿 Canopy — Drop-Down Info Center</h1>
+# Canopy
 
-<p align="center">
-  <b>A dynamic wallpaper-adaptive Windows 11 desktop bar and expandable Bento command center.</b><br/>
-  Featuring real-time hardware telemetry, live WASAPI audio spectrum, time-synced lyrics, SMTC playback control, wallpaper transitions, Start Menu app launcher, power controls, and an animated Capi mascot.
-</p>
+<div align="center">
 
-<p align="center">
-  <img src="https://img.shields.io/badge/.NET-8.0%20WPF%20%2B%20WebView2-512BD4?logo=dotnet&logoColor=white" alt=".NET 8" />
-  <img src="https://img.shields.io/badge/Rust-Tauri%20v2-orange?logo=rust&logoColor=white" alt="Rust" />
-  <img src="https://img.shields.io/badge/React-18%20%2B%20TypeScript-61DAFB?logo=react&logoColor=black" alt="React" />
-  <img src="https://img.shields.io/badge/Tailwind-CSS%203-38B2AC?logo=tailwindcss&logoColor=white" alt="Tailwind CSS" />
-  <img src="https://img.shields.io/badge/Platform-Windows%2011-0078D6?logo=windows&logoColor=white" alt="Windows 11" />
-</p>
+[![Release](https://img.shields.io/github/v/release/canopy-shell/canopy?style=for-the-badge&color=8A2BE2)](https://github.com/canopy-shell/canopy/releases)
+[![Platform](https://img.shields.io/badge/Platform-Windows_11_%7C_10-0078D4?style=for-the-badge&logo=windows)](https://github.com/canopy-shell/canopy)
+[![Runtime](https://img.shields.io/badge/.NET-8.0_WPF-512BD4?style=for-the-badge&logo=dotnet)](https://dotnet.microsoft.com/)
+[![Frontend](https://img.shields.io/badge/React-18.3_%2B_Vite-61DAFB?style=for-the-badge&logo=react)](https://react.dev/)
+[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
+
+**Fluid Zero-Notch Top Hover Desktop Control Center & Wallpaper Switcher for Windows 11.**
+
+*Inspired by Caelestia Shell (Wayland/Hyprland) and Hitodama.*
+
+</div>
 
 ---
 
-## 🌟 Major Features & Architecture
+## Showcase
 
-### 1. 🎨 Dynamic Wallpaper-Adaptive Theming (WCAG Contrast Engine)
-- **Automatic Palette Extraction:** Continuously samples vibrant accent and dominant background colors from active wallpapers (`Services/WallpaperService.cs` & `src/services/palette.ts`).
-- **Mathematical WCAG Ratio:** Enforces a minimum **4.5:1 text-to-background contrast ratio** using W3C luminance formulas across Dark, Light, and Auto modes.
-- **Dynamic CSS Cascading:** All capsule sliders, glow rings, radial gauges, and icons update dynamically upon wallpaper rotation without static hardcoded tints.
+<div align="center">
 
-### 2. 🖥️ Multi-Monitor Independent Circular Expand (Iris Wipe)
-- Smooth hardware-accelerated **Iris Wipe (centered circular expand)** transitions rendered independently per display on dual- or multi-monitor setups.
-- Supported by native Windows COM `IDesktopWallpaper` (`Interop/DesktopWallpaper.cs`) with per-monitor assignment and timed rotation.
+```
+             Top Edge of Screen (Y = 0)
++---------------------------------------------------+
+|               [ Top Hover Zone ]                  |
++---------------------------------------------------+
+                         |
+                 (Move mouse to top)
+                         v
+   +---------------------------------------------+
+   |  Canopy Floating Frosted Glass Control Hub  |
+   |                                             |
+   |  * Digital Clock & Weather Widget           |
+   |  * Live CPU / RAM / GPU Hardware Gauges     |
+   |  * Master Volume & Microphone Controls      |
+   |  * 40-Band WASAPI Spectrum Visualizer       |
+   |  * Synced Lyrics (LRCLIB Monotonic Clock)   |
+   |  * Per-App Volume Mixer                     |
+   |  * 6-Slot Quick Launch Dock                 |
+   |  * Per-Monitor Wallpaper Carousel           |
+   +---------------------------------------------+
+```
 
-### 3. 🎵 High-Fidelity Audio Spectrum & Synchronized Media
-- **Real Logarithmic dB Visualizer:** WASAPI loopback audio spectrum capture with real decibel scaling ($-80\text{ dB} \dots -10\text{ dB}$) and attack/decay smoothing. Zero-level baseline in silence; zero artificial sine waves.
-- **Anchored Playhead & Unified Monotonic Clock (`usePlaybackClock.ts`):** Eliminates SMTC drift across Chromium, Brave, YouTube, and Jellyfin streams, maintaining $<0.11\text{ s}$ accuracy.
-- **Interactive Inline LRCLIB Lyrics:** Click `[ Lyrics ]` to crossfade transport controls into auto-scrolling synced lyrics with custom timing offset adjustment (`-2000ms` to `+2000ms`).
-- **Per-App Volume Mixer:** Integrated `AudioSessionController.cs` for individual volume control of active Windows audio sessions.
+> *Add `assets/demo.gif` or a video here demonstrating hover slide-down, media playback, and wallpaper switching.*
 
-### 4. 🚀 Zero-Margin Dropdown Shell & Low-Power Park
-- **True Cubic Ease-Out Slide:** Smooth $Y$-axis sliding transition on top-edge hover or `Win + \`` global hotkey.
-- **WebView2 Low-Power Suspension:** Suspends WebView2 rendering (`TrySuspendAsync`) while collapsed, delivering a **~26× CPU reduction (0.063s vs 1.62s)** while parked.
-- **Fullscreen & Quiet Hours Suppression:** Automatically pauses hover drop-down triggers while playing fullscreen games or presentations.
-
-### 5. 🍄 Capi Mascot & Interactive Bento Tabs
-- **Dashboard (`src/App.tsx`):** Profile snapshot, uptime counter, media mini-card, vertical capsule sliders (Volume, Microphone, Brightness), 6-slot customizable Quick Launch dock, and animated Capi mascot.
-- **Media (`src/views/MediaView.tsx`):** SMTC media player with dancing vinyl platter, radial visualizer spokes, and lyrics toggle.
-- **Performance (`src/views/PerformanceView.tsx`):** Dual-arc concentric gauges for GPU, CPU, and RAM, plus real-time download and upload network throughput (KB/s & MB/s).
-- **Apps (`src/views/AppsView.tsx`):** Fast Windows Start Menu application scanner with native shortcut icon extraction.
-- **Wallpaper (`src/views/WallpaperView.tsx`):** Hero active preview card with 16:9 thumbnail gallery and 35 bundled high-res wallpapers (`Wallpapers/`).
-- **Power (`src/views/PowerView.tsx`):** Themed sleep, restart, lock, and shutdown controls.
-- **Settings (`src/views/SettingsView.tsx`):** Granular configuration with JSON backup export & import.
+</div>
 
 ---
 
-## 📁 Repository Structure
+## Quick Install
 
-```text
-Canopy/
-├── assets/
-│   ├── banner.jpg                    # Official Canopy Drop-Down Info Center Banner
-│   ├── github logo.jpg               # Hero Banner (High-Res)
-│   └── logo.jpg                      # Mascot Logo (Circular Avatar)
-├── Wallpapers/                       # Bundled collection of 35 curated 4K & Ultrawide wallpapers
-├── App.xaml / App.xaml.cs            # .NET 8 WPF application entry point
-├── MainWindow.xaml / .cs             # Borderless WebView2 overlay window & Win32 IPC bridge
-├── Canopy.csproj                     # .NET 8 Windows WPF project configuration
-├── Interop/
-│   ├── AudioController.cs            # Real WASAPI loopback audio spectrum capture
-│   ├── AudioSessionController.cs     # Per-application audio session volume mixer
-│   ├── DesktopWallpaper.cs           # Native Windows IDesktopWallpaper COM controller
-│   ├── SmtcMediaController.cs        # Windows SMTC session manager & key event fallbacks
-│   └── Win32.cs                      # Win32 API interop (Hotkeys, DWM, window bounds)
-├── Services/
-│   ├── DiagnosticsLog.cs             # Auto-rotating diagnostics logger
-│   ├── SystemMonitorService.cs       # Hardware telemetry (CPU/GPU/RAM/Network/Apps)
-│   └── WallpaperService.cs           # Wallpaper scanner & Iris Wipe transition engine
-├── src/                              # React 18 + TypeScript + Tailwind CSS frontend
-│   ├── components/                   # CalendarCard, CanopyMascot, RadialGauge, VerticalSliders
-│   ├── hooks/                        # usePlaybackClock (monotonic SMTC clock), usePanelOpen
-│   ├── services/                     # tauriBridge, palette (WCAG engine), weather (Open-Meteo)
-│   └── views/                        # MediaView, PerformanceView, AppsView, WallpaperView, PowerView, SettingsView
-├── src-tauri/                        # Rust / Tauri backend crate
-├── dist/                             # Pre-built Vite production frontend bundle
-├── release/                          # Pre-built Canopy.exe & Canopy.dll native host binaries
-└── Start Canopy.bat                  # Desktop launcher script
+### Option A: One-Line PowerShell Command (Recommended)
+
+Open **PowerShell** and run:
+
+```powershell
+irm https://raw.githubusercontent.com/canopy-shell/canopy/main/install.ps1 | iex
+```
+
+* **No Administrator / UAC prompt required:** Installs per-user to `%LOCALAPPDATA%\Programs\Canopy`.
+* Creates Start Menu and Desktop shortcuts.
+* Automatically strips Windows SmartScreen marks (`Unblock-File`).
+
+To cleanly uninstall:
+```powershell
+$env:CANOPY_UNINSTALL=1; irm https://raw.githubusercontent.com/canopy-shell/canopy/main/install.ps1 | iex
 ```
 
 ---
 
-## 🛠️ Building & Running
+### Option B: Windows Package Manager (`winget`)
 
-### Frontend
-```bash
-npm install
-npm run build
+```cmd
+winget install CanopyShell.Canopy
 ```
 
-### Native Host (.NET 8 WPF)
+---
+
+### Option C: Standalone Downloads
+
+Grab the latest binaries directly from [**GitHub Releases**](https://github.com/canopy-shell/canopy/releases/latest):
+* **`Canopy-v1.0.0-x64.msi`** (~8.2 MB): Native Windows Installer. Registers in *Settings $\to$ Installed Apps*.
+* **`Canopy-v1.0.0-win-x64-portable.zip`** (~72 MB): Single-file self-contained executable. Unzip and run anywhere.
+
+---
+
+## Core Features
+
+### 1. Zero-Notch & Zero Idle Footprint
+When collapsed, Canopy occupies **0 visible pixels**. There is no island, notch, status bar, or overlay line on screen. The window is parked off-screen with `WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_NOACTIVATE` so standard desktop clicks, window dragging, and browser tabs work with zero interference.
+
+### 2. 0% CPU Deep Sleep (WebView2 Suspension)
+When the panel slides off-screen:
+* The WebView2 Chromium engine is immediately suspended (`TrySuspendAsync()`).
+* Real-time WASAPI loopback audio capture and 40-band FFT calculations pause.
+* Per-app audio session enumeration and hardware telemetry timers sleep.
+* **Idle resource usage drops to ~0% CPU (< 0.03s per 5s).**
+
+### 3. VSync-Locked Motion & Anti-Aliased Glass
+* Slides smoothly along the Y-axis using an ease-out cubic curve ($1 - (1-t)^3$) synced to your monitor's native refresh rate (60Hz, 120Hz, 144Hz, 240Hz+) via `CompositionTarget.Rendering`.
+* Bottom corners curve at $24\text{px}$ using DWM GPU hardware alpha compositing without jagged GDI staircasing at any DPI scale.
+
+### 4. Game & Presentation Suppression
+* Automatically detects full-screen 3D games (DirectX / Vulkan) and presentation displays via `SHQueryUserNotificationState`.
+* Analyzes foreground window bounds (`rcMonitor` vs `rcWork`) to suppress hover activation over borderless windowed games (DXGI Flip Model) and full-screen video players while keeping standard maximized windows interactive.
+* Multi-monitor safe: ignores top boundaries shared with stacked upper monitors.
+
+### 5. High-Resolution Audio Visualizer
+* Real-time 40-band audio spectrum analyzer powered by NAudio WASAPI loopback capture and complex 512-point FFT.
+* Calibrated $-80\text{ dB} \dots -10\text{ dB}$ logarithmic mapping with asymmetric temporal smoothing.
+* Includes radial spoke visualizer, linear bars, and wave modes.
+
+### 6. Synchronized Lyrics & Anchored Playhead
+* Real-time synchronized lyrics fetched automatically from the **LRCLIB** database.
+* Anchored monotonic playback clock resolves the frozen SMTC playhead bug in Chromium and Spotify.
+* Adjustable lyric sync offset ($\pm 2000\text{ms}$) with auto-scrolling line highlighting.
+
+### 7. Per-App Volume Mixer
+* Integrated Windows Volume Mixer powered by CoreAudio COM interfaces (`IAudioSessionManager2`).
+* Adjust volume or mute individual running applications (Discord, Spotify, games, browser tabs).
+
+### 8. Visual Wallpaper Engine & Per-Monitor Carousel
+* Asynchronously decodes wallpaper images from `%USERPROFILE%\Pictures\Wallpapers` into $160\text{px}$ cached thumbnails.
+* Instant wallpaper switching via Win32 `SystemParametersInfo` with no-op deduplication to prevent screen flicker.
+* Adaptive theming: extracts dominant colors from the current wallpaper and updates UI glass accent colors dynamically.
+* Experimental per-monitor assignment and desktop slideshow support via `IDesktopWallpaper`.
+
+---
+
+## Default Controls & Hotkeys
+
+| Action | Control / Hotkey | Description |
+|---|---|---|
+| **Toggle Panel** | `Win + ` ` | Slides the control center down or collapses it immediately. Configurable in Settings. |
+| **Hover Summon** | Move mouse to top bezel edge | Dwell for 120ms at screen top ($Y \le 2\text{px}$) to slide down the panel. |
+| **Auto-Hide** | Move mouse outside panel | Automatically slides off-screen after a 200ms debounce. |
+| **Click Outside** | Left click desktop | Immediately collapses the panel without triggering background clicks. |
+| **Pause Top Hover** | Right-click tray icon $\to$ `Top-Edge Hover: Active` | Temporarily disables the top-edge hover trigger. |
+| **Quick Launcher** | Click dock icon or press slot key | Launches assigned applications or custom command paths. |
+| **Command Palette** | Press any letter on Dashboard | Opens search overlay to switch tabs, launch apps, or execute power actions. |
+
+---
+
+## Building from Source
+
+### Prerequisites
+* Windows 10 (version 19041+) or Windows 11
+* [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+* [Node.js 20+](https://nodejs.org/) & npm
+* [WiX Toolset v4](https://wixtoolset.org/) (optional, for `.msi` packaging: `dotnet tool install --global wix --version 4.0.5`)
+
+### Quick Build
 ```bash
-dotnet publish -c Release -o "%LOCALAPPDATA%\Canopy"
+# 1. Clone repository
+git clone https://github.com/canopy-shell/canopy.git
+cd canopy
+
+# 2. Install frontend dependencies
+npm ci
+
+# 3. Build & run (Release mode)
+dotnet build -c Release
+dotnet run -c Release --no-build
 ```
 
-### Launching
-Run `Start Canopy.bat` on your Desktop or execute:
-```bash
-"%LOCALAPPDATA%\Canopy\Canopy.exe" --expand
+### Packaging Installers Locally
+```powershell
+# Build native WiX v4 MSI installer (dist-installer/Canopy-v1.0.0-x64.msi)
+.\installer\build-msi.ps1 -Version "1.0.0"
+
+# Build portable self-contained ZIP (dist-installer/Canopy-v1.0.0-win-x64-portable.zip)
+.\build-portable.ps1 -Version "1.0.0"
 ```
+
+For release distribution instructions and CI/CD details, see [**`RELEASE_GUIDE.md`**](RELEASE_GUIDE.md).
+
+For deep architectural and subsystem details, see [**`docs/ARCHITECTURE.md`**](docs/ARCHITECTURE.md).
+
+---
+
+## License
+
+Distributed under the **MIT License**. See `LICENSE` for details.

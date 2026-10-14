@@ -55,7 +55,11 @@ public sealed class SystemMonitorService : IDisposable
     private PerformanceCounter[]? _coreCounters;
     private volatile bool _countersReady;
     private bool _disposed;
+    private volatile bool _isPaused;
+    private SystemTelemetrySnapshot? _lastSnapshot;
 
+    public void Pause() => _isPaused = true;
+    public void Resume() => _isPaused = false;
     private ulong _prevIdleTime;
     private ulong _prevKernelTime;
     private ulong _prevUserTime;
@@ -199,6 +203,9 @@ public sealed class SystemMonitorService : IDisposable
 
     public SystemTelemetrySnapshot Sample()
     {
+        if (_isPaused && _lastSnapshot.HasValue)
+            return _lastSnapshot.Value;
+
         double cpuPercent = Math.Clamp(SampleCpuPercent(), 0.0, 100.0);
         (double usedGb, double totalGb, double ramPercent) = SampleMemory();
         (double diskUsedGb, double diskTotalGb, double diskPercent) = SampleDisk();
@@ -234,7 +241,7 @@ public sealed class SystemMonitorService : IDisposable
         string hostname = Environment.MachineName;
         string username = Environment.UserName;
 
-        return new SystemTelemetrySnapshot(
+        var snapshot = new SystemTelemetrySnapshot(
             CpuUsagePercent: cpuPercent,
             CpuTempC: Math.Round(cpuTemp, 1),
             GpuUsagePercent: Math.Round(gpuUsage, 1),
@@ -253,6 +260,8 @@ public sealed class SystemMonitorService : IDisposable
             Hostname: hostname,
             OsName: "Windows 11",
             Username: username);
+        _lastSnapshot = snapshot;
+        return snapshot;
     }
 
     private double[] SampleCoreUsages(double overallCpu)
@@ -287,6 +296,9 @@ public sealed class SystemMonitorService : IDisposable
 
     private void RefreshHeavyTelemetry()
     {
+        if (_disposed || _isPaused)
+            return;
+
         try
         {
             var procs = Process.GetProcesses();

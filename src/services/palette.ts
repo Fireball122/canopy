@@ -1,5 +1,7 @@
 export type RGBTuple = [number, number, number];
 
+export type ThemePreset = 'canopy' | 'adaptive' | 'dark' | 'light' | 'auto';
+
 /**
  * Calculates relative luminance of an sRGB color according to W3C WCAG 2.1 standards.
  */
@@ -24,95 +26,142 @@ export function getContrastRatio(rgb1: RGBTuple, rgb2: RGBTuple): number {
   return (brightest + 0.05) / (darkest + 0.05);
 }
 
-function rgbToHex([r, g, b]: RGBTuple): string {
+export function rgbToHex([r, g, b]: RGBTuple): string {
   const toHex = (n: number) =>
     Math.max(0, Math.min(255, Math.round(n)))
       .toString(16)
       .padStart(2, '0');
-  return `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase();
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
 
-function enforceWcagTextColors(
-  bgRgb: RGBTuple,
-  isLight: boolean,
-  candidatePrimary: RGBTuple,
-  candidateSecondary: RGBTuple
-): { primaryHex: string; secondaryHex: string } {
-  const primaryContrast = getContrastRatio(bgRgb, candidatePrimary);
-  let finalPrimary: RGBTuple = candidatePrimary;
+export function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  const rf = r / 255;
+  const gf = g / 255;
+  const bf = b / 255;
+  const max = Math.max(rf, gf, bf);
+  const min = Math.min(rf, gf, bf);
+  const delta = max - min;
+  let h = 0;
+  let s = 0;
+  const l = (max + min) / 2;
 
-  // Enforce strict WCAG AA >= 4.5:1 contrast ratio for primary text
-  if (primaryContrast < 4.5) {
-    finalPrimary = isLight ? [18, 18, 22] : [255, 255, 255];
-  }
-
-  const secondaryContrast = getContrastRatio(bgRgb, candidateSecondary);
-  let finalSecondary: RGBTuple = candidateSecondary;
-
-  // Enforce >= 4.5:1 contrast ratio for secondary text so subtitles/labels never wash out
-  if (secondaryContrast < 4.5) {
-    finalSecondary = isLight ? [68, 62, 58] : [203, 213, 225];
-    if (getContrastRatio(bgRgb, finalSecondary) < 4.5) {
-      finalSecondary = isLight ? [32, 30, 28] : [241, 245, 249];
+  if (delta > 0.00001) {
+    s = l > 0.5 ? delta / (2 - max - min) : delta / (max + min);
+    if (max === rf) {
+      h = ((gf - bf) / delta + (gf < bf ? 6 : 0)) * 60;
+    } else if (max === gf) {
+      h = ((bf - rf) / delta + 2) * 60;
+    } else {
+      h = ((rf - gf) / delta + 4) * 60;
     }
   }
 
-  return {
-    primaryHex: rgbToHex(finalPrimary),
-    secondaryHex: rgbToHex(finalSecondary),
-  };
+  return [h, s, l];
 }
 
-function applyComputedRootVariables(
-  bgRgb: RGBTuple,
-  accentRgb: RGBTuple,
-  isLight: boolean,
-  candidatePrimary: RGBTuple,
-  candidateSecondary: RGBTuple
-): void {
-  if (typeof document === 'undefined') return;
-  const root = document.documentElement;
-  root.dataset.theme = isLight ? 'light' : 'dark';
+export function hslToRgb(h: number, s: number, l: number): RGBTuple {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  let r = 0;
+  let g = 0;
+  let b = 0;
 
-  const { primaryHex, secondaryHex } = enforceWcagTextColors(
-    bgRgb,
-    isLight,
-    candidatePrimary,
-    candidateSecondary
-  );
-
-  // Ensure accent color also maintains legible contrast against the surface
-  let safeAccent: RGBTuple = accentRgb;
-  if (getContrastRatio(bgRgb, safeAccent) < 3.0) {
-    safeAccent = isLight ? [168, 74, 58] : [162, 155, 254];
+  if (h < 60) {
+    r = c; g = x; b = 0;
+  } else if (h < 120) {
+    r = x; g = c; b = 0;
+  } else if (h < 180) {
+    r = 0; g = c; b = x;
+  } else if (h < 240) {
+    r = 0; g = x; b = c;
+  } else if (h < 300) {
+    r = x; g = 0; b = c;
+  } else {
+    r = c; g = 0; b = x;
   }
 
-  const [bgR, bgG, bgB] = bgRgb;
-  const defaultOpacity = isLight ? 0.9 : 0.86;
+  return [
+    Math.round((r + m) * 255),
+    Math.round((g + m) * 255),
+    Math.round((b + m) * 255),
+  ];
+}
 
-  root.style.setProperty(
-    '--theme-bg',
-    `rgba(${bgR}, ${bgG}, ${bgB}, var(--glass-opacity, ${defaultOpacity}))`
-  );
-  root.style.setProperty(
-    '--theme-card',
-    isLight ? 'rgba(0, 0, 0, 0.045)' : 'rgba(255, 255, 255, 0.04)'
-  );
-  root.style.setProperty(
-    '--theme-border',
-    isLight ? 'rgba(0, 0, 0, 0.09)' : 'rgba(255, 255, 255, 0.08)'
-  );
-  root.style.setProperty('--theme-text-primary', primaryHex);
-  root.style.setProperty('--theme-text-secondary', secondaryHex);
-  root.style.setProperty('--theme-accent', rgbToHex(safeAccent));
-  root.style.setProperty(
-    '--theme-track',
-    isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)'
-  );
+// ---------------------------------------------------------------------------
+// Signature Preset Definitions
+// ---------------------------------------------------------------------------
+
+export const CANOPY_FOREST_THEME = {
+  bg: 'rgba(17, 25, 19, 0.92)',
+  card: 'rgba(26, 38, 29, 0.78)',
+  border: 'rgba(116, 168, 108, 0.22)',
+  accent: '#74a86c',
+  accentSoft: 'rgba(116, 168, 108, 0.18)',
+  accentWarm: '#e07a5f',
+  textPrimary: '#f5efe6',
+  textSecondary: '#9eb09a',
+  track: 'rgba(116, 168, 108, 0.12)',
+  isLight: false,
+};
+
+export const OBSIDIAN_DARK_THEME = {
+  bg: 'rgba(18, 18, 24, 0.92)',
+  card: 'rgba(255, 255, 255, 0.04)',
+  border: 'rgba(255, 255, 255, 0.08)',
+  accent: '#a29bfe',
+  accentSoft: 'rgba(162, 155, 254, 0.18)',
+  accentWarm: '#fab387',
+  textPrimary: '#f1f2f6',
+  textSecondary: '#9e9ea7',
+  track: 'rgba(255, 255, 255, 0.08)',
+  isLight: false,
+};
+
+export const ALABASTER_LIGHT_THEME = {
+  bg: 'rgba(248, 250, 248, 0.94)',
+  card: 'rgba(255, 255, 255, 0.85)',
+  border: 'rgba(45, 65, 50, 0.14)',
+  accent: '#447a40',
+  accentSoft: 'rgba(68, 122, 64, 0.14)',
+  accentWarm: '#d9684c',
+  textPrimary: '#1a261d',
+  textSecondary: '#4a6350',
+  track: 'rgba(45, 65, 50, 0.10)',
+  isLight: true,
+};
+
+function applyThemeVariables(vars: {
+  bg: string;
+  card: string;
+  border: string;
+  accent: string;
+  accentSoft: string;
+  accentWarm: string;
+  textPrimary: string;
+  textSecondary: string;
+  track: string;
+  isLight: boolean;
+}): void {
+  if (typeof document === 'undefined') return;
+  const root = document.documentElement;
+  root.dataset.theme = vars.isLight ? 'light' : 'dark';
+
+  root.style.setProperty('--theme-bg', vars.bg);
+  root.style.setProperty('--theme-card', vars.card);
+  root.style.setProperty('--theme-border', vars.border);
+  root.style.setProperty('--theme-accent', vars.accent);
+  root.style.setProperty('--theme-accent-soft', vars.accentSoft);
+  root.style.setProperty('--theme-accent-warm', vars.accentWarm);
+  root.style.setProperty('--theme-text', vars.textPrimary);
+  root.style.setProperty('--theme-text-primary', vars.textPrimary);
+  root.style.setProperty('--theme-text-muted', vars.textSecondary);
+  root.style.setProperty('--theme-text-secondary', vars.textSecondary);
+  root.style.setProperty('--theme-track', vars.track);
 }
 
 export function applyThemeModeFallback(
-  themeMode: 'auto' | 'dark' | 'light' = 'auto',
+  themeMode: string = 'canopy',
   glassOpacity?: number,
   glassBlurStrength?: number
 ): void {
@@ -126,31 +175,40 @@ export function applyThemeModeFallback(
     root.style.setProperty('--glass-blur', `${glassBlurStrength}px`);
   }
 
-  const isLight = themeMode === 'light';
-  if (isLight) {
-    applyComputedRootVariables(
-      [244, 239, 234],
-      [184, 92, 75],
-      true,
-      [34, 30, 28],
-      [92, 83, 78]
-    );
+  const mode = themeMode.toLowerCase();
+  if (mode === 'light' || mode === 'alabaster') {
+    applyThemeVariables(ALABASTER_LIGHT_THEME);
+  } else if (mode === 'dark' || mode === 'obsidian') {
+    applyThemeVariables(OBSIDIAN_DARK_THEME);
   } else {
-    applyComputedRootVariables(
-      [18, 18, 24],
-      [162, 155, 254],
-      false,
-      [241, 242, 246],
-      [158, 158, 167]
-    );
+    // Default signature: Canopy Forest
+    applyThemeVariables(CANOPY_FOREST_THEME);
   }
 }
 
+/**
+ * Extracts a vibrant, full-gamut dominant color from a wallpaper and computes
+ * balanced UI glass tokens without blue-floor clamping (orange remains orange, red remains red).
+ */
 export function applyThemePalette(
   imgElement: HTMLImageElement,
-  themeMode: 'auto' | 'dark' | 'light' = 'auto'
+  themeMode: string = 'adaptive'
 ): void {
   if (typeof document === 'undefined') return;
+
+  const mode = themeMode.toLowerCase();
+  if (mode === 'canopy') {
+    applyThemeVariables(CANOPY_FOREST_THEME);
+    return;
+  }
+  if (mode === 'dark' || mode === 'obsidian') {
+    applyThemeVariables(OBSIDIAN_DARK_THEME);
+    return;
+  }
+  if (mode === 'light' || mode === 'alabaster') {
+    applyThemeVariables(ALABASTER_LIGHT_THEME);
+    return;
+  }
 
   try {
     const canvas = document.createElement('canvas');
@@ -159,7 +217,7 @@ export function applyThemePalette(
     canvas.height = 64;
 
     if (!ctx) {
-      applyThemeModeFallback(themeMode);
+      applyThemeModeFallback('canopy');
       return;
     }
 
@@ -169,12 +227,15 @@ export function applyThemePalette(
     let rSum = 0;
     let gSum = 0;
     let bSum = 0;
-    let count = 0;
+    let totalPixels = 0;
 
-    let vibrantR = 162;
-    let vibrantG = 155;
-    let vibrantB = 254;
-    let maxSat = -1;
+    // 12 Hue Buckets (30 deg each: 0=Red, 1=Orange, 2=Yellow, 3=Lime, 4=Green, 5=Cyan,
+    // 6=Sky, 7=Blue, 8=Violet, 9=Purple, 10=Magenta, 11=Pink)
+    const HUE_BUCKET_COUNT = 12;
+    const bucketWeights = new Float32Array(HUE_BUCKET_COUNT);
+    const bucketHues = new Float32Array(HUE_BUCKET_COUNT);
+    const bucketSats = new Float32Array(HUE_BUCKET_COUNT);
+    const bucketCounts = new Uint32Array(HUE_BUCKET_COUNT);
 
     for (let i = 0; i < data.length; i += 16) {
       const r = data[i];
@@ -183,92 +244,110 @@ export function applyThemePalette(
       rSum += r;
       gSum += g;
       bSum += b;
-      count++;
+      totalPixels++;
 
-      const maxC = Math.max(r, g, b);
-      const minC = Math.min(r, g, b);
-      const sat = maxC - minC;
-      if (sat > maxSat && maxC > 45 && minC < 235) {
-        maxSat = sat;
-        vibrantR = r;
-        vibrantG = g;
-        vibrantB = b;
+      const [h, s, l] = rgbToHsl(r, g, b);
+
+      // Filter out neutral grays / blacks / whites for accent extraction
+      if (s >= 0.16 && l >= 0.12 && l <= 0.90) {
+        // Shift hue so 0 is centered around Red (345..15)
+        const shiftedHue = (h + 15) % 360;
+        const bucketIndex = Math.floor(shiftedHue / 30);
+        // Weight by saturation and distance from extreme lightness
+        const weight = s * (1.0 - Math.abs(l - 0.5));
+        bucketWeights[bucketIndex] += weight;
+        bucketHues[bucketIndex] += h * weight;
+        bucketSats[bucketIndex] += s * weight;
+        bucketCounts[bucketIndex]++;
       }
     }
 
-    if (count === 0) {
-      applyThemeModeFallback(themeMode);
+    if (totalPixels === 0) {
+      applyThemeModeFallback('canopy');
       return;
     }
 
-    const avgR = Math.round(rSum / count);
-    const avgG = Math.round(gSum / count);
-    const avgB = Math.round(bSum / count);
+    const avgR = Math.round(rSum / totalPixels);
+    const avgG = Math.round(gSum / totalPixels);
+    const avgB = Math.round(bSum / totalPixels);
 
-    // Perceived brightness (0..255)
+    // Find the winning chromatic hue bucket
+    let bestBucket = -1;
+    let maxWeight = 0;
+    for (let b = 0; b < HUE_BUCKET_COUNT; b++) {
+      if (bucketWeights[b] > maxWeight) {
+        maxWeight = bucketWeights[b];
+        bestBucket = b;
+      }
+    }
+
+    let accentH = 135; // Default leaf green
+    let accentS = 0.65;
+    if (bestBucket >= 0 && bucketWeights[bestBucket] > 0) {
+      accentH = bucketHues[bestBucket] / bucketWeights[bestBucket];
+      accentS = Math.min(0.95, Math.max(0.65, bucketSats[bestBucket] / bucketWeights[bestBucket]));
+    }
+
+    // Determine theme mode (light if brightness > 150)
     const brightness = (avgR * 299 + avgG * 587 + avgB * 114) / 1000;
-    const isLight =
-      themeMode === 'light'
-        ? true
-        : themeMode === 'dark'
-          ? false
-          : brightness > 145;
+    const isLight = brightness > 155;
+
+    // Convert tuned HSL to accent color
+    const targetL = isLight ? 0.38 : 0.64;
+    const accentRgb = hslToRgb(accentH, accentS, targetL);
+    const accentHex = rgbToHex(accentRgb);
+
+    // Secondary warm complementary accent
+    const warmH = (accentH + 30) % 360;
+    const warmRgb = hslToRgb(warmH, 0.82, isLight ? 0.45 : 0.68);
+    const warmHex = rgbToHex(warmRgb);
 
     if (isLight) {
-      // Warm alabaster/tinted light surface
       const bgRgb: RGBTuple = [
-        Math.min(250, Math.max(228, Math.round(avgR * 0.25 + 186))),
-        Math.min(248, Math.max(224, Math.round(avgG * 0.25 + 182))),
-        Math.min(245, Math.max(220, Math.round(avgB * 0.25 + 178))),
+        Math.min(252, Math.max(242, Math.round(250 - (255 - avgR) * 0.08))),
+        Math.min(252, Math.max(242, Math.round(250 - (255 - avgG) * 0.08))),
+        Math.min(252, Math.max(242, Math.round(250 - (255 - avgB) * 0.08))),
       ];
-      const accentRgb: RGBTuple =
-        maxSat > 35
-          ? [
-              Math.max(40, Math.min(195, vibrantR)),
-              Math.max(40, Math.min(165, vibrantG)),
-              Math.max(40, Math.min(195, vibrantB)),
-            ]
-          : [184, 92, 75];
-
-      applyComputedRootVariables(
-        bgRgb,
-        accentRgb,
-        true,
-        [45, 40, 38],
-        [104, 94, 88]
-      );
+      applyThemeVariables({
+        bg: `rgba(${bgRgb[0]}, ${bgRgb[1]}, ${bgRgb[2]}, 0.94)`,
+        card: 'rgba(255, 255, 255, 0.85)',
+        border: 'rgba(15, 23, 42, 0.12)',
+        accent: accentHex,
+        accentSoft: `rgba(${accentRgb[0]}, ${accentRgb[1]}, ${accentRgb[2]}, 0.14)`,
+        accentWarm: warmHex,
+        textPrimary: '#0f172a',
+        textSecondary: '#475569',
+        track: 'rgba(15, 23, 42, 0.08)',
+        isLight: true,
+      });
     } else {
-      // Deep obsidian/tinted dark surface
+      // Dark glass with subtle chromatic undertone of the wallpaper
       const bgRgb: RGBTuple = [
-        Math.max(12, Math.min(34, Math.round(avgR * 0.18 + 10))),
-        Math.max(12, Math.min(34, Math.round(avgG * 0.18 + 10))),
-        Math.max(16, Math.min(42, Math.round(avgB * 0.18 + 14))),
+        Math.max(12, Math.min(32, Math.round(avgR * 0.12 + 10))),
+        Math.max(12, Math.min(32, Math.round(avgG * 0.12 + 10))),
+        Math.max(14, Math.min(36, Math.round(avgB * 0.12 + 12))),
       ];
-      const accentRgb: RGBTuple =
-        maxSat > 35
-          ? [
-              Math.max(130, Math.min(245, vibrantR + 35)),
-              Math.max(120, Math.min(235, vibrantG + 35)),
-              Math.max(145, Math.min(255, vibrantB + 35)),
-            ]
-          : [162, 155, 254];
-
-      applyComputedRootVariables(
-        bgRgb,
-        accentRgb,
-        false,
-        [241, 242, 246],
-        [168, 174, 190]
-      );
+      applyThemeVariables({
+        bg: `rgba(${bgRgb[0]}, ${bgRgb[1]}, ${bgRgb[2]}, 0.92)`,
+        card: `rgba(255, 255, 255, 0.05)`,
+        border: `rgba(${accentRgb[0]}, ${accentRgb[1]}, ${accentRgb[2]}, 0.22)`,
+        accent: accentHex,
+        accentSoft: `rgba(${accentRgb[0]}, ${accentRgb[1]}, ${accentRgb[2]}, 0.18)`,
+        accentWarm: warmHex,
+        textPrimary: '#f5efe6',
+        textSecondary: '#9eb09a',
+        track: `rgba(${accentRgb[0]}, ${accentRgb[1]}, ${accentRgb[2]}, 0.12)`,
+        isLight: false,
+      });
     }
   } catch {
-    applyThemeModeFallback(themeMode);
+    applyThemeModeFallback('canopy');
   }
 }
 
 export async function applyThemeFromImageSrc(
   imageSrc: string,
-  themeMode: 'auto' | 'dark' | 'light' = 'auto'
+  themeMode: string = 'adaptive'
 ): Promise<void> {
   if (typeof window === 'undefined' || !imageSrc) {
     applyThemeModeFallback(themeMode);

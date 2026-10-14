@@ -11,7 +11,7 @@ import {
   MemoryStick,
   Wifi,
 } from 'lucide-react';
-import { ProcessEntry, SystemStats } from '../services/tauriBridge';
+import { ProcessEntry, SystemStats } from '../services/hostBridge';
 
 export interface PerformanceViewProps {
   stats: SystemStats;
@@ -163,17 +163,16 @@ const SparklineMini: React.FC<{
   width?: number;
   height?: number;
 }> = ({ data, color, width = 94, height = 22 }) => {
-  const max = Math.max(10, ...data);
-  const min = 0;
-  const range = max - min || 1;
+  const pad = 2;
+  const usableHeight = Math.max(1, height - pad * 2);
   const points = data
     .map((val, i) => {
-      const x = (i / (data.length - 1)) * width;
-      const y = height - ((val - min) / range) * (height - 4) - 2;
+      const clampedPercent = Math.max(0, Math.min(100, val));
+      const x = (i / Math.max(1, data.length - 1)) * width;
+      const y = pad + usableHeight * (1 - clampedPercent / 100);
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     })
     .join(' ');
-
   const areaPoints = `0,${height} ${points} ${width},${height}`;
   const safeId = color.replace(/[^a-zA-Z0-9]/g, '');
 
@@ -200,10 +199,10 @@ const SparklineMini: React.FC<{
 
 export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
   const [detailsOpen, setDetailsOpen] = useState<boolean>(false);
-  const [cpuHistory, setCpuHistory] = useState<number[]>(() => new Array(30).fill(18));
-  const [ramHistory, setRamHistory] = useState<number[]>(() => new Array(30).fill(35));
-  const [netDownHistory, setNetDownHistory] = useState<number[]>(() => new Array(30).fill(10));
-  const [netUpHistory, setNetUpHistory] = useState<number[]>(() => new Array(30).fill(5));
+  const [cpuHistory, setCpuHistory] = useState<number[]>(() => new Array(30).fill(0));
+  const [ramHistory, setRamHistory] = useState<number[]>(() => new Array(30).fill(0));
+  const [netDownHistory, setNetDownHistory] = useState<number[]>(() => new Array(30).fill(0));
+  const [netUpHistory, setNetUpHistory] = useState<number[]>(() => new Array(30).fill(0));
 
   const gpuTempC = Math.round(stats.gpu_temp_c || 54);
   const gpuUsage = Math.round(stats.gpu_usage ?? 4);

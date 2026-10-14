@@ -28,7 +28,7 @@ import {
   setDesktopWallpaperState,
   setMonitorWallpaper,
   setWallpaperDirectory,
-} from '../services/tauriBridge';
+} from '../services/hostBridge';
 
 export interface WallpaperViewProps {
   wallpapers: WallpaperEntry[];
@@ -168,7 +168,7 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
   const [desktopState, setDesktopState] = useState<DesktopWallpaperState | null>(null);
   const [busyMonitorId, setBusyMonitorId] = useState<string | null>(null);
   const [slideshowMinutes, setSlideshowMinutes] = useState<number>(30);
-
+  const [pickingMonitorId, setPickingMonitorId] = useState<string | null>(null);
   const isFavorite = (path: string) => settings.wallpaperFavorites?.includes(path) ?? false;
 
   const toggleFavorite = (e: React.MouseEvent, path: string) => {
@@ -243,13 +243,18 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
     }
     setTransitioningPath(entry.path);
 
-    // Monotonic token: a slower decode from an earlier click must never stamp its palette
-    // (or its wallpaper) over a newer selection.
-    const token = ++themeRequestRef.current;
+    // When a wallpaper is clicked, automatically switch theme to 'adaptive' if currently on 'canopy'
+    const targetThemeMode = settings.themeMode === 'canopy' ? 'adaptive' : settings.themeMode;
+    if (settings.themeMode === 'canopy') {
+      updateSettings({ themeMode: 'adaptive', activeWallpaperPath: entry.path });
+    } else {
+      updateSettings({ activeWallpaperPath: entry.path });
+    }
 
+    const token = ++themeRequestRef.current;
     const imgEl = imgRefs.current[entry.path] ?? null;
     if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
-      applyThemePalette(imgEl, settings.themeMode);
+      applyThemePalette(imgEl, targetThemeMode);
       setSwatches(extractImageSwatches(imgEl));
     } else if (entry.data_url) {
       try {
@@ -259,17 +264,17 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
         await decoded.decode();
 
         if (themeRequestRef.current !== token) {
-          return; // Superseded while decoding; the newest selection owns the theme.
+          return;
         }
 
-        applyThemePalette(decoded, settings.themeMode);
+        applyThemePalette(decoded, targetThemeMode);
         setSwatches(extractImageSwatches(decoded));
       } catch {
         if (themeRequestRef.current !== token) {
           return;
         }
         applyThemeModeFallback(
-          settings.themeMode,
+          targetThemeMode,
           settings.glassOpacity,
           settings.glassBlurStrength
         );
@@ -298,7 +303,7 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
     }, 450);
   };
 
-  const handlePalettePillClick = async (mode: 'auto' | 'dark' | 'light') => {
+  const handlePalettePillClick = async (mode: 'canopy' | 'adaptive' | 'dark' | 'light') => {
     updateSettings({ themeMode: mode });
     if (activeWallpaper) {
       const imgEl = imgRefs.current[activeWallpaper.path] ?? null;
@@ -376,27 +381,31 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
   };
 
   const palettePills: {
-    id: 'auto' | 'dark' | 'light';
+    id: 'canopy' | 'adaptive' | 'dark' | 'light';
     label: string;
     swatchColor: string;
   }[] = [
     {
-      id: 'auto',
+      id: 'canopy',
+      label: 'Canopy',
+      swatchColor: '#74a86c',
+    },
+    {
+      id: 'adaptive',
       label: 'Adaptive',
-      swatchColor: swatches.dominant,
+      swatchColor: swatches.dominant || '#74a86c',
     },
     {
       id: 'dark',
       label: 'Obsidian',
-      swatchColor: swatches.surface,
+      swatchColor: '#121218',
     },
     {
       id: 'light',
       label: 'Alabaster',
-      swatchColor: swatches.accent,
+      swatchColor: '#f8fafc',
     },
   ];
-
   return (
     <div
       data-tauri-drag-region="false"
@@ -654,21 +663,22 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
         </div>
       </div>
 
-      {/* EXPERIMENTAL: per-monitor wallpaper + slideshow, backed by the host's IDesktopWallpaper controller */}
-      <div
-        data-tauri-drag-region="false"
-        className="shrink-0 rounded-[13px] overflow-hidden pointer-events-auto"
-        style={{
-          background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
-          border: '1px solid var(--theme-border, rgba(255, 255, 255, 0.07))',
-        }}
-      >
-        <button
-          type="button"
+      {/* EXPERIMENTAL: per-monitor wallpaper drawer (only rendered when enabled in Settings) */}
+      {settings.wallpaperPerMonitor && (
+        <div
           data-tauri-drag-region="false"
-          onClick={() => setShowPerMonitor((prev) => !prev)}
-          className="w-full flex items-center justify-between px-3 py-2 pointer-events-auto cursor-pointer"
+          className="shrink-0 rounded-[13px] overflow-hidden pointer-events-auto"
+          style={{
+            background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
+            border: '1px solid var(--theme-border, rgba(255, 255, 255, 0.07))',
+          }}
         >
+          <button
+            type="button"
+            data-tauri-drag-region="false"
+            onClick={() => setShowPerMonitor((prev) => !prev)}
+            className="w-full flex items-center justify-between px-3 py-2 pointer-events-auto cursor-pointer"
+          >
           <span className="flex items-center gap-2">
             <MonitorIcon
               className="w-3.5 h-3.5"
@@ -769,24 +779,66 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
                                 : 'No wallpaper set'}
                           </span>
                         </div>
-                        <button
-                          type="button"
-                          data-tauri-drag-region="false"
-                          disabled={!activeWallpaper || busy}
-                          onClick={() => handleAssignMonitor(monitor.id)}
-                          title={
-                            activeWallpaper
-                              ? `Apply "${activeWallpaper.name}" to this display`
-                              : 'Select a wallpaper first'
-                          }
-                          className="px-2 py-1 rounded-full text-[10px] font-medium transition-all active:scale-95 pointer-events-auto cursor-pointer disabled:opacity-40 disabled:cursor-default"
-                          style={{
-                            background: 'var(--theme-track, rgba(255, 255, 255, 0.12))',
-                            color: 'var(--theme-text-primary, #F1F2F6)',
-                          }}
-                        >
-                          {busy ? 'Applying…' : 'Set from selection'}
-                        </button>
+                        <div className="relative">
+                          <button
+                            type="button"
+                            data-tauri-drag-region="false"
+                            disabled={busy}
+                            onClick={() => setPickingMonitorId(pickingMonitorId === monitor.id ? null : monitor.id)}
+                            title={`Select a specific wallpaper for ${monitor.label}`}
+                            className="px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all active:scale-95 pointer-events-auto cursor-pointer"
+                            style={{
+                              background: 'var(--theme-accent, #74a86c)',
+                              color: '#11111b',
+                            }}
+                          >
+                            {busy ? 'Applying…' : 'Select image'}
+                          </button>
+
+                          {/* Per-Monitor Image Picker Dropdown */}
+                          {pickingMonitorId === monitor.id && (
+                            <div
+                              data-tauri-drag-region="false"
+                              className="absolute right-0 bottom-full mb-1.5 z-50 w-72 max-h-60 overflow-y-auto rounded-xl p-2.5 bento-card shadow-2xl border flex flex-col gap-2 bg-[#18171c]/95 backdrop-blur-xl pointer-events-auto"
+                            >
+                              <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-[var(--theme-text-secondary)] pb-1 border-b border-white/10">
+                                <span>Wallpapers for {monitor.label}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setPickingMonitorId(null)}
+                                  className="hover:text-white p-0.5 text-xs cursor-pointer"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                              <div className="grid grid-cols-2 gap-1.5 max-h-44 overflow-y-auto pr-0.5">
+                                {wallpapers.map((wp) => (
+                                  <button
+                                    key={wp.path}
+                                    type="button"
+                                    onClick={async () => {
+                                      setPickingMonitorId(null);
+                                      setBusyMonitorId(monitor.id);
+                                      await setMonitorWallpaper(monitor.id, wp.path);
+                                      await refreshDesktopState();
+                                      setBusyMonitorId(null);
+                                    }}
+                                    className="flex flex-col rounded-lg overflow-hidden border border-white/10 hover:border-[var(--theme-accent)] transition-all p-1 text-left cursor-pointer group hover:bg-white/[0.04]"
+                                  >
+                                    <div className="w-full h-14 rounded overflow-hidden bg-black/40">
+                                      {wp.data_url ? (
+                                        <img src={wp.data_url} alt={wp.name} className="w-full h-full object-cover" />
+                                      ) : null}
+                                    </div>
+                                    <span className="text-[9px] font-medium truncate mt-1 text-[var(--theme-text-primary)]">
+                                      {wp.name}
+                                    </span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
@@ -870,6 +922,7 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
           </div>
         )}
       </div>
+      )}
     </div>
   );
 };

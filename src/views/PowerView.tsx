@@ -10,7 +10,7 @@ import {
   Shield,
   X,
 } from 'lucide-react';
-import { SystemStats, executePowerAction } from '../services/tauriBridge';
+import { SystemStats, executePowerAction } from '../services/hostBridge';
 
 export interface PowerViewProps {
   stats: SystemStats;

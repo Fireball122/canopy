@@ -3,15 +3,19 @@
 @tailwind utilities;
 
 :root {
-  --theme-bg: rgba(18, 18, 26, 0.86);
-  --theme-card: rgba(255, 255, 255, 0.04);
-  --theme-border: rgba(255, 255, 255, 0.06);
-  --theme-text-primary: #F1F2F6;
-  --theme-text-secondary: #9E9EA7;
-  --theme-accent: #A29BFE;
-  --theme-track: rgba(255, 255, 255, 0.08);
+  --theme-bg: rgba(17, 25, 19, 0.92);
+  --theme-card: rgba(26, 38, 29, 0.78);
+  --theme-border: rgba(116, 168, 108, 0.22);
+  --theme-accent: #74a86c;
+  --theme-accent-soft: rgba(116, 168, 108, 0.18);
+  --theme-accent-warm: #e07a5f;
+  --theme-text: #f5efe6;
+  --theme-text-primary: #f5efe6;
+  --theme-text-muted: #9eb09a;
+  --theme-text-secondary: #9eb09a;
+  --theme-track: rgba(116, 168, 108, 0.12);
   --glass-blur: 24px;
-  --glass-opacity: 0.86;
+  --glass-opacity: 0.92;
 }
 
 /* Colour transitions live only on the theme-coloured surfaces (glass shell, cards, pills).
@@ -50,8 +54,8 @@ input[type="range"].caelestia-slider {
     -webkit-user-select: none;
     margin: 0;
     padding: 0;
-    width: 100vw;
-    height: 100vh;
+    width: 100%;
+    height: 100%;
     color: var(--theme-text-primary);
     font-family: "Segoe UI Variable Display", "Inter", "Segoe UI", system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -72,8 +76,9 @@ input[type="range"].caelestia-slider {
 /* Outer Canopy Dropdown Container (850x430, flush top bezel, wallpaper-adaptive glass) */
 .canopy-shell,
 .caelestia-shell {
-  width: 850px;
-  height: 430px;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
   margin-top: 0;
   background: var(--theme-bg);
   color: var(--theme-text-primary);
@@ -91,8 +96,30 @@ input[type="range"].caelestia-slider {
 }
 
 /* Light wallpaper / Force Light adaptive text & surface overrides */
+html[data-theme="light"] {
+  --theme-bg: rgba(248, 250, 248, 0.94);
+  --theme-card: rgba(255, 255, 255, 0.85);
+  --theme-border: rgba(45, 65, 50, 0.14);
+  --theme-accent: #447a40;
+  --theme-accent-soft: rgba(68, 122, 64, 0.14);
+  --theme-accent-warm: #d9684c;
+  --theme-text: #1a261d;
+  --theme-text-primary: #1a261d;
+  --theme-text-muted: #4a6350;
+  --theme-text-secondary: #4a6350;
+  --theme-track: rgba(45, 65, 50, 0.10);
+}
+
 html[data-theme="light"] .canopy-shell {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  background: var(--theme-bg);
+  box-shadow: 0 20px 45px -10px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  border-color: var(--theme-border);
+}
+
+html[data-theme="light"] .bento-card {
+  background: var(--theme-card);
+  border-color: var(--theme-border);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
 }
 
 html[data-theme="light"] .canopy-shell .text-white,
@@ -103,10 +130,24 @@ html[data-theme="light"] .canopy-shell .text-zinc-200 {
 
 html[data-theme="light"] .canopy-shell .text-zinc-300,
 html[data-theme="light"] .canopy-shell .text-zinc-400,
-html[data-theme="light"] .canopy-shell .text-zinc-500 {
+html[data-theme="light"] .canopy-shell .text-zinc-500,
+html[data-theme="light"] .canopy-shell .text-white\/40,
+html[data-theme="light"] .canopy-shell .text-white\/50,
+html[data-theme="light"] .canopy-shell .text-white\/60 {
   color: var(--theme-text-secondary) !important;
 }
 
+html[data-theme="light"] .canopy-shell .border-white\/10,
+html[data-theme="light"] .canopy-shell .border-white\/15,
+html[data-theme="light"] .canopy-shell .border-white\/20 {
+  border-color: var(--theme-border) !important;
+}
+
+html[data-theme="light"] .canopy-shell .bg-white\/\[0\.04\],
+html[data-theme="light"] .canopy-shell .bg-white\/\[0\.06\],
+html[data-theme="light"] .canopy-shell .bg-white\/\[0\.08\] {
+  background: rgba(0, 0, 0, 0.04) !important;
+}
 /* Slide-down Dropdown Transition States */
 .canopy-dropdown,
 .caelestia-dropdown {
