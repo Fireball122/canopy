@@ -1,4 +1,3 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Check,
   ChevronDown,
@@ -11,35 +10,35 @@ import {
   Pause,
   Play,
   Radio,
+  Repeat,
+  Shuffle,
   SkipBack,
   SkipForward,
-  Shuffle,
-  Repeat,
   Sliders,
   Volume2,
   VolumeX,
-  BarChart2,
-  Activity,
 } from 'lucide-react';
+import type React from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CanopyMascot } from '../components/CanopyMascot';
 import { RadialGauge } from '../components/RadialGauge';
 import { useSettings } from '../context/SettingsContext';
-import {
-  MediaInfo,
-  MediaSessionItem,
-  AudioSessionEntry,
-  getAudioSpectrum,
-  getAudioSessions,
-  setAudioSessionVolume,
-  setAudioSessionMute,
-  getMediaSessions,
-  selectMediaSession,
-  mediaToggleShuffle,
-  mediaCycleRepeat,
-} from '../services/hostBridge';
+import { useAlbumArt } from '../hooks/useAlbumArt';
 import { usePanelOpen } from '../hooks/usePanelOpen';
 import { usePlaybackClock } from '../hooks/usePlaybackClock';
-import { useAlbumArt } from '../hooks/useAlbumArt';
+import {
+  type AudioSessionEntry,
+  getAudioSessions,
+  getAudioSpectrum,
+  getMediaSessions,
+  type MediaInfo,
+  type MediaSessionItem,
+  mediaCycleRepeat,
+  mediaToggleShuffle,
+  selectMediaSession,
+  setAudioSessionMute,
+  setAudioSessionVolume,
+} from '../services/hostBridge';
 
 export interface MediaViewProps {
   media: MediaInfo;
@@ -192,7 +191,12 @@ function renderSessionIcon(appName?: string): React.ReactNode {
   if (lower.includes('feishin') || lower.includes('foobar') || lower.includes('musicbee')) {
     return <Headphones className="w-3.5 h-3.5 text-[#cba6f7]" strokeWidth={2} />;
   }
-  if (lower.includes('chrome') || lower.includes('edge') || lower.includes('firefox') || lower.includes('brave')) {
+  if (
+    lower.includes('chrome') ||
+    lower.includes('edge') ||
+    lower.includes('firefox') ||
+    lower.includes('brave')
+  ) {
     return <Globe className="w-3.5 h-3.5 text-[#89dceb]" strokeWidth={2} />;
   }
   return <Music className="w-3.5 h-3.5 text-[#cba6f7]" strokeWidth={2} />;
@@ -210,12 +214,12 @@ function resolveBuiltinLyrics(title: string, artist: string): LyricLine[] {
 
 function cleanTrackMetadata(
   rawTitle: string,
-  rawArtist: string
+  rawArtist: string,
 ): { cleanTitle: string; cleanArtist: string } {
   let cleanTitle = rawTitle
     .replace(
-      /\s*[\(\[【](?:official\s*(?:music\s*)?(?:video|audio|lyric\s*video|lyrics|visualizer|mv)|lyric\s*video|lyrics?|audio|video|visualizer|mv|hd|hq|4k|remastered[^)\]]*|live[^)\]]*|feat\.?[^)\]]*|ft\.?[^)\]]*)[\)\]】]/gi,
-      ''
+      /\s*[([【](?:official\s*(?:music\s*)?(?:video|audio|lyric\s*video|lyrics|visualizer|mv)|lyric\s*video|lyrics?|audio|video|visualizer|mv|hd|hq|4k|remastered[^)\]]*|live[^)\]]*|feat\.?[^)\]]*|ft\.?[^)\]]*)[)\]】]/gi,
+      '',
     )
     .replace(/\s+(?:feat\.?|ft\.?|featuring)\s+.+$/i, '')
     .replace(/\s*[-|]\s*(?:youtube(?:\s+music)?|spotify|soundcloud).*$/i, '')
@@ -224,7 +228,7 @@ function cleanTrackMetadata(
 
   let cleanArtist = rawArtist
     .replace(/\s*-\s*topic$/i, '')
-    .replace(/\s*[\(\[](?:feat\.?|ft\.?)[^)\]]*[\)\]]/gi, '')
+    .replace(/\s*[([](?:feat\.?|ft\.?)[^)\]]*[)\]]/gi, '')
     .replace(/\s+(?:feat\.?|ft\.?|featuring)\s+.+$/i, '')
     .split('•')[0]
     .replace(/\s+/g, ' ')
@@ -255,7 +259,11 @@ function cleanTrackMetadata(
   };
 }
 
-function parseLrcLyrics(syncedLrc?: string | null, plainText?: string | null, durationSecs = 210): LyricLine[] {
+function parseLrcLyrics(
+  syncedLrc?: string | null,
+  plainText?: string | null,
+  durationSecs = 210,
+): LyricLine[] {
   if (syncedLrc && syncedLrc.trim().length > 0) {
     const parsed: LyricLine[] = [];
     const lineRegex = /\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\](.*)/;
@@ -348,7 +356,9 @@ export const MediaView: React.FC<MediaViewProps> = ({
     setRepeatMode(next);
     await mediaCycleRepeat();
   };
-  const lyricsCacheRef = useRef<Record<string, { lines: LyricLine[]; label: string; duration?: number }>>({});
+  const lyricsCacheRef = useRef<
+    Record<string, { lines: LyricLine[]; label: string; duration?: number }>
+  >({});
   const lyricsScrollRef = useRef<HTMLDivElement | null>(null);
   const activeLyricItemRef = useRef<HTMLButtonElement | null>(null);
 
@@ -436,7 +446,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
 
   const handleMixerVolume = (id: string, level: number) => {
     setMixerSessions((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, volume: level, muted: false } : s))
+      prev.map((s) => (s.id === id ? { ...s, volume: level, muted: false } : s)),
     );
     void setAudioSessionVolume(id, level).catch(() => {});
   };
@@ -466,10 +476,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
   useEffect(() => {
     if (!sessionMenuOpen) return;
     const handleOutsideClick = (e: MouseEvent) => {
-      if (
-        sessionPopoverRef.current &&
-        !sessionPopoverRef.current.contains(e.target as Node)
-      ) {
+      if (sessionPopoverRef.current && !sessionPopoverRef.current.contains(e.target as Node)) {
         setSessionMenuOpen(false);
       }
     };
@@ -482,8 +489,8 @@ export const MediaView: React.FC<MediaViewProps> = ({
       media.sessions && media.sessions.length > 0
         ? media.sessions
         : fetchedSessions.length > 0
-        ? fetchedSessions
-        : DEFAULT_FALLBACK_SESSIONS;
+          ? fetchedSessions
+          : DEFAULT_FALLBACK_SESSIONS;
 
     if (!selectedSessionId) return base;
     return base.map((item) => ({
@@ -499,9 +506,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
     if (media.source_app) {
       const src = (media.source_app || '').toLowerCase();
       const matched = base.find(
-        (s) =>
-          (s.app_name || '').toLowerCase() === src ||
-          (s.id || '').toLowerCase() === src
+        (s) => (s.app_name || '').toLowerCase() === src || (s.id || '').toLowerCase() === src,
       );
       if (matched) return matched;
     }
@@ -509,11 +514,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
   }, [sessions, media.source_app]);
   const smtcDuration = Number(media.duration_secs) || 0;
   const effectiveDuration =
-    smtcDuration > 2.0
-      ? smtcDuration
-      : inferredDuration > 2.0
-      ? inferredDuration
-      : 219;
+    smtcDuration > 2.0 ? smtcDuration : inferredDuration > 2.0 ? inferredDuration : 219;
   const clampedPosition = Math.min(effectiveDuration, Math.max(0, playbackClock.position));
   const progressPercent = Math.min(100, Math.max(0, (clampedPosition / effectiveDuration) * 100));
 
@@ -564,14 +565,10 @@ export const MediaView: React.FC<MediaViewProps> = ({
     }
 
     const extractValidLyrics = (
-      item: LrclibTrackResponse | null | undefined
+      item: LrclibTrackResponse | null | undefined,
     ): { lines: LyricLine[]; label: string; duration?: number } | null => {
       if (!item) return null;
-      const parsed = parseLrcLyrics(
-        item.syncedLyrics,
-        item.plainLyrics,
-        effectiveDuration
-      );
+      const parsed = parseLrcLyrics(item.syncedLyrics, item.plainLyrics, effectiveDuration);
       if (parsed.length > 0) {
         const dur =
           typeof item.duration === 'number' && item.duration > 10
@@ -591,7 +588,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
       try {
         // 1. Primary query: /api/get?artist_name={artist}&track_name={title}
         const getUrl = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(
-          rawArtist
+          rawArtist,
         )}&track_name=${encodeURIComponent(rawTitle)}`;
         const getRes = await fetch(getUrl, { signal: controller.signal });
         if (getRes.ok) {
@@ -608,7 +605,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
         // 2. If cleaned metadata differs, try /api/get with cleaned artist & title
         if (cleanTitle !== rawTitle || cleanArtist !== rawArtist) {
           const cleanGetUrl = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(
-            cleanArtist
+            cleanArtist,
           )}&track_name=${encodeURIComponent(cleanTitle)}`;
           const cleanGetRes = await fetch(cleanGetUrl, { signal: controller.signal });
           if (cleanGetRes.ok) {
@@ -625,7 +622,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
 
         // 3. Fallback search: /api/search?track_name={cleanTitle}&artist_name={cleanArtist}
         const searchByFieldsUrl = `https://lrclib.net/api/search?track_name=${encodeURIComponent(
-          cleanTitle
+          cleanTitle,
         )}&artist_name=${encodeURIComponent(cleanArtist)}`;
         const searchRes = await fetch(searchByFieldsUrl, { signal: controller.signal });
         if (searchRes.ok) {
@@ -647,7 +644,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
         const queryText = `${cleanArtist} ${cleanTitle}`.trim();
         if (queryText) {
           const searchByQueryUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(
-            queryText
+            queryText,
           )}`;
           const queryRes = await fetch(searchByQueryUrl, { signal: controller.signal });
           if (queryRes.ok) {
@@ -991,7 +988,13 @@ export const MediaView: React.FC<MediaViewProps> = ({
                   borderColor: repeatMode > 0 ? 'var(--theme-accent)' : 'var(--theme-border)',
                   color: repeatMode > 0 ? 'var(--theme-accent)' : 'var(--theme-text-secondary)',
                 }}
-                title={repeatMode === 2 ? 'Repeat All' : repeatMode === 1 ? 'Repeat Current Track' : 'Repeat Off'}
+                title={
+                  repeatMode === 2
+                    ? 'Repeat All'
+                    : repeatMode === 1
+                      ? 'Repeat Current Track'
+                      : 'Repeat Off'
+                }
               >
                 <Repeat className="w-3.5 h-3.5" strokeWidth={2} />
                 {repeatMode === 1 && (
@@ -1046,7 +1049,9 @@ export const MediaView: React.FC<MediaViewProps> = ({
               <div className="w-full max-w-[330px] h-9 flex items-end justify-between gap-1 px-1 pt-1.5 overflow-hidden">
                 {Array.from({ length: 32 }, (_, i) => {
                   const rawAmp = spectrumBands[i] || 0;
-                  const waveDance = isPlaying ? ((Math.sin(visualizerTick * 0.35 + i * 0.35) + 1) / 2) * 0.45 : 0;
+                  const waveDance = isPlaying
+                    ? ((Math.sin(visualizerTick * 0.35 + i * 0.35) + 1) / 2) * 0.45
+                    : 0;
                   const amp = rawAmp > 0.03 ? Math.min(1, rawAmp * 1.8) : waveDance;
                   const heightPercent = Math.max(12, Math.min(100, Math.round(amp * 100)));
                   return (
@@ -1055,7 +1060,8 @@ export const MediaView: React.FC<MediaViewProps> = ({
                       className="flex-1 rounded-t-sm transition-all duration-75"
                       style={{
                         height: `${heightPercent}%`,
-                        background: 'linear-gradient(180deg, var(--theme-accent), var(--theme-border))',
+                        background:
+                          'linear-gradient(180deg, var(--theme-accent), var(--theme-border))',
                         opacity: isPlaying || amp > 0.1 ? 0.95 : 0.3,
                       }}
                     />
@@ -1071,8 +1077,10 @@ export const MediaView: React.FC<MediaViewProps> = ({
                     d={`M 0 18 ${Array.from({ length: 22 }, (_, i) => {
                       const x = (i / 21) * 330;
                       const rawAmp = spectrumBands[i] || 0;
-                      const amp = rawAmp > 0.03 ? rawAmp * 2.0 : (isPlaying ? 0.45 : 0.05);
-                      const y = 18 + Math.sin(visualizerTick * 0.5 + i * 0.6) * (amp * 14 + (isPlaying ? 3 : 1));
+                      const amp = rawAmp > 0.03 ? rawAmp * 2.0 : isPlaying ? 0.45 : 0.05;
+                      const y =
+                        18 +
+                        Math.sin(visualizerTick * 0.5 + i * 0.6) * (amp * 14 + (isPlaying ? 3 : 1));
                       return `L ${x.toFixed(1)} ${y.toFixed(1)}`;
                     }).join(' ')}`}
                     fill="none"
@@ -1101,12 +1109,11 @@ export const MediaView: React.FC<MediaViewProps> = ({
                 title="Switch active Windows SMTC media session"
               >
                 {renderSessionIcon(currentSession?.app_name)}
-                <span className="truncate max-w-[130px]">{currentSession?.app_name || 'System Audio'}</span>
+                <span className="truncate max-w-[130px]">
+                  {currentSession?.app_name || 'System Audio'}
+                </span>
                 {sessionMenuOpen ? (
-                  <ChevronUp
-                    style={{ color: 'var(--theme-accent, #cba6f7)' }}
-                    strokeWidth={2}
-                  />
+                  <ChevronUp style={{ color: 'var(--theme-accent, #cba6f7)' }} strokeWidth={2} />
                 ) : (
                   <ChevronDown
                     className="w-3.5 h-3.5"
@@ -1142,6 +1149,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
                       const isCurrent = session.id === (currentSession?.id ?? '');
                       return (
                         <button
+                          key={session.id}
                           data-tauri-drag-region="false"
                           onClick={async () => {
                             setSelectedSessionId(session.id);
@@ -1248,8 +1256,8 @@ export const MediaView: React.FC<MediaViewProps> = ({
                         isActive
                           ? 'font-bold scale-[1.01]'
                           : isPast
-                          ? 'opacity-45 hover:opacity-80'
-                          : 'opacity-70 hover:opacity-100'
+                            ? 'opacity-45 hover:opacity-80'
+                            : 'opacity-70 hover:opacity-100'
                       }${riseIn ? ' canopy-lyric-active' : ''}`}
                       style={{
                         ...(isActive
@@ -1344,7 +1352,9 @@ export const MediaView: React.FC<MediaViewProps> = ({
                         onClick={() => handleMixerMute(session.id, !session.muted)}
                         className="w-6 h-6 shrink-0 rounded-md flex items-center justify-center border transition-all hover:scale-105 active:scale-95 pointer-events-auto cursor-pointer"
                         style={{
-                          background: session.muted ? 'var(--theme-accent, #cba6f7)' : 'transparent',
+                          background: session.muted
+                            ? 'var(--theme-accent, #cba6f7)'
+                            : 'transparent',
                           borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.12))',
                           color: session.muted ? '#11111b' : 'var(--theme-text-primary, #cdd6f4)',
                         }}
@@ -1373,9 +1383,9 @@ export const MediaView: React.FC<MediaViewProps> = ({
                         className="flex-1 h-1.5 rounded-full pointer-events-auto cursor-pointer"
                         style={{
                           background: `linear-gradient(to right, var(--theme-accent, #cba6f7) 0%, #89dceb ${Math.round(
-                            session.volume
+                            session.volume,
                           )}%, var(--theme-track, rgba(255,255,255,0.14)) ${Math.round(
-                            session.volume
+                            session.volume,
                           )}%, var(--theme-track, rgba(255,255,255,0.14)) 100%)`,
                           opacity: session.is_active ? 1 : 0.55,
                         }}

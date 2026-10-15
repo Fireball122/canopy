@@ -40,7 +40,15 @@ export const RadialGauge: React.FC<RadialGaugeProps> = ({
   const spokeGradientId = `${uid}-spokes`;
 
   const spokes = React.useMemo(() => {
-    if (!bands || bands.length === 0) return [] as Array<{ idx: number; x1: number; y1: number; x2: number; y2: number; length: number }>;
+    if (!bands || bands.length === 0)
+      return [] as Array<{
+        idx: number;
+        x1: number;
+        y1: number;
+        x2: number;
+        y2: number;
+        length: number;
+      }>;
     const count = bands.length;
     const cx = size / 2;
     const cy = size / 2;

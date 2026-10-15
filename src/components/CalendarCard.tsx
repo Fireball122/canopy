@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Plus, Trash2, X, Bell, Clock } from 'lucide-react';
+import { Bell, ChevronLeft, ChevronRight, Clock, Plus, Trash2, X } from 'lucide-react';
+import type React from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSettings } from '../context/SettingsContext';
 
 export interface CalendarEvent {
@@ -70,8 +71,7 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
   const calendarFirstDay: 'sunday' | 'monday' =
     firstDayOfWeek ?? settings?.calendarFirstDay ?? 'monday';
 
-  const weekdayHeaders =
-    calendarFirstDay === 'sunday' ? WEEKDAYS_SUNDAY : WEEKDAYS_MONDAY;
+  const weekdayHeaders = calendarFirstDay === 'sunday' ? WEEKDAYS_SUNDAY : WEEKDAYS_MONDAY;
 
   const today = useMemo(() => new Date(), []);
   const todayIso = useMemo(() => {
@@ -82,7 +82,7 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
   }, [today]);
 
   const [viewDate, setViewDate] = useState<Date>(
-    () => new Date(today.getFullYear(), today.getMonth(), 1)
+    () => new Date(today.getFullYear(), today.getMonth(), 1),
   );
   const [selectedIso, setSelectedIso] = useState<string>(todayIso);
   const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
@@ -102,15 +102,14 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
       if (raw !== null) {
         const parsed = JSON.parse(raw) as unknown;
         if (Array.isArray(parsed)) {
-          return parsed.filter(
-            (item): item is CalendarEvent =>
-              Boolean(
-                item &&
-                  typeof item === 'object' &&
-                  typeof (item as CalendarEvent).id === 'string' &&
-                  typeof (item as CalendarEvent).date === 'string' &&
-                  typeof (item as CalendarEvent).text === 'string'
-              )
+          return parsed.filter((item): item is CalendarEvent =>
+            Boolean(
+              item &&
+                typeof item === 'object' &&
+                typeof (item as CalendarEvent).id === 'string' &&
+                typeof (item as CalendarEvent).date === 'string' &&
+                typeof (item as CalendarEvent).text === 'string',
+            ),
           );
         }
       }
@@ -159,14 +158,12 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
   useEffect(() => {
     if (!timePickerOpen) return;
     const raf = window.requestAnimationFrame(() => {
-      const activeHourEl = hourColumnRef.current?.querySelector<HTMLButtonElement>(
-        '[data-active="true"]'
-      );
+      const activeHourEl =
+        hourColumnRef.current?.querySelector<HTMLButtonElement>('[data-active="true"]');
       activeHourEl?.scrollIntoView({ block: 'center', behavior: 'smooth' });
 
-      const activeMinuteEl = minuteColumnRef.current?.querySelector<HTMLButtonElement>(
-        '[data-active="true"]'
-      );
+      const activeMinuteEl =
+        minuteColumnRef.current?.querySelector<HTMLButtonElement>('[data-active="true"]');
       activeMinuteEl?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     });
     return () => window.cancelAnimationFrame(raf);
@@ -181,7 +178,7 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
       const d = String(now.getDate()).padStart(2, '0');
       const currentIso = `${y}-${m}-${d}`;
       const currentHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(
-        now.getMinutes()
+        now.getMinutes(),
       ).padStart(2, '0')}`;
 
       for (const ev of events) {
@@ -221,8 +218,7 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
     year: 'numeric',
   });
 
-  const isViewingCurrentMonth =
-    viewYear === today.getFullYear() && viewMonth === today.getMonth();
+  const isViewingCurrentMonth = viewYear === today.getFullYear() && viewMonth === today.getMonth();
 
   const eventsByDate = useMemo(() => {
     const byDate: Record<string, CalendarEvent[]> = {};
@@ -236,14 +232,13 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
 
   const selectedDayEvents = useMemo(
     () => eventsByDate[selectedIso] ?? [],
-    [eventsByDate, selectedIso]
+    [eventsByDate, selectedIso],
   );
 
   const cells = useMemo<CalendarDayCell[]>(() => {
     const firstDayOfMonth = new Date(viewYear, viewMonth, 1);
     const rawDay = firstDayOfMonth.getDay(); // 0 = Sunday .. 6 = Saturday
-    const startWeekday =
-      calendarFirstDay === 'sunday' ? rawDay : (rawDay + 6) % 7;
+    const startWeekday = calendarFirstDay === 'sunday' ? rawDay : (rawDay + 6) % 7;
 
     const daysInCurrentMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
     const daysInPrevMonth = new Date(viewYear, viewMonth, 0).getDate();
@@ -779,12 +774,8 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
                           style={{
                             pointerEvents: 'auto',
                             cursor: 'pointer',
-                            background: active
-                              ? 'var(--theme-accent, #A29BFE)'
-                              : 'transparent',
-                            color: active
-                              ? '#FFFFFF'
-                              : 'var(--theme-text-primary, #F8FAFC)',
+                            background: active ? 'var(--theme-accent, #A29BFE)' : 'transparent',
+                            color: active ? '#FFFFFF' : 'var(--theme-text-primary, #F8FAFC)',
                           }}
                           className={`pointer-events-auto cursor-pointer w-full py-0.5 rounded text-[11px] font-mono tabular-nums text-center transition-all ${
                             active ? 'font-bold shadow-sm' : 'hover:bg-white/10 opacity-80'
@@ -829,12 +820,8 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
                           style={{
                             pointerEvents: 'auto',
                             cursor: 'pointer',
-                            background: active
-                              ? 'var(--theme-accent, #A29BFE)'
-                              : 'transparent',
-                            color: active
-                              ? '#FFFFFF'
-                              : 'var(--theme-text-primary, #F8FAFC)',
+                            background: active ? 'var(--theme-accent, #A29BFE)' : 'transparent',
+                            color: active ? '#FFFFFF' : 'var(--theme-text-primary, #F8FAFC)',
                           }}
                           className={`pointer-events-auto cursor-pointer w-full py-0.5 rounded text-[11px] font-mono tabular-nums text-center transition-all ${
                             active ? 'font-bold shadow-sm' : 'hover:bg-white/10 opacity-80'
@@ -879,12 +866,8 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
                           style={{
                             pointerEvents: 'auto',
                             cursor: 'pointer',
-                            background: active
-                              ? 'var(--theme-accent, #A29BFE)'
-                              : 'transparent',
-                            color: active
-                              ? '#FFFFFF'
-                              : 'var(--theme-text-secondary, #94A3B8)',
+                            background: active ? 'var(--theme-accent, #A29BFE)' : 'transparent',
+                            color: active ? '#FFFFFF' : 'var(--theme-text-secondary, #94A3B8)',
                           }}
                           className={`pointer-events-auto cursor-pointer flex-1 rounded py-1 text-[11px] font-mono font-bold tracking-wider transition-all active:scale-95 ${
                             active ? 'shadow-sm' : 'hover:text-white'

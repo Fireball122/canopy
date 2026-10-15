@@ -14,6 +14,10 @@ export interface DailyForecastItem {
 }
 
 export interface WeatherData {
+  /** True only when the current response came from the weather service. */
+  isLive: boolean;
+  /** Local timestamp for the response or failed refresh. */
+  updatedAt: number;
   temp: number;
   condition: string;
   code: number;
@@ -89,54 +93,29 @@ function formatDayLabel(isoDate: string, index: number): string {
   return parsed.toLocaleDateString('en-US', { weekday: 'short' });
 }
 
-function buildFallbackWeather(
+function buildUnavailableWeather(
   locationName: string,
-  unit: 'fahrenheit' | 'celsius' = 'celsius'
+  unit: 'fahrenheit' | 'celsius' = 'celsius',
 ): WeatherData {
   const isFahrenheit = unit === 'fahrenheit';
   const unitSymbol: '°F' | '°C' = isFahrenheit ? '°F' : '°C';
-  const baseTemp = isFahrenheit ? 68 : 20;
-  const now = new Date();
-
-  const hourly: HourlyForecastItem[] = Array.from({ length: 8 }, (_, idx) => {
-    const future = new Date(now.getTime() + idx * 3600 * 1000);
-    const curve = Math.round(Math.sin((idx / 8) * Math.PI) * (isFahrenheit ? 5 : 3));
-    const code = idx === 3 || idx === 4 ? 2 : 0;
-    return {
-      time: formatHourLabel(future.toISOString(), idx),
-      temp: baseTemp + curve,
-      condition: mapWmoCodeToCondition(code),
-      code,
-    };
-  });
-
-  const dayNames = ['Today', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const daily: DailyForecastItem[] = Array.from({ length: 7 }, (_, idx) => {
-    const code = idx === 2 ? 61 : idx % 2 === 1 ? 2 : 0;
-    return {
-      day: dayNames[idx],
-      tempMax: (isFahrenheit ? 74 : 23) - (idx % 3) * (isFahrenheit ? 2 : 1),
-      tempMin: (isFahrenheit ? 51 : 11) + (idx % 2) * (isFahrenheit ? 2 : 1),
-      condition: mapWmoCodeToCondition(code),
-      code,
-    };
-  });
 
   return {
-    temp: isFahrenheit ? 71 : 22,
-    condition: 'Clear',
-    code: 0,
-    feelsLike: isFahrenheit ? 70 : 21,
-    humidity: 36,
-    windSpeed: 8,
-    uvIndex: 4,
-    high: isFahrenheit ? 75 : 24,
-    low: isFahrenheit ? 52 : 11,
+    isLive: false,
+    updatedAt: Date.now(),
+    temp: 0,
+    condition: 'Unavailable',
+    code: -1,
+    feelsLike: 0,
+    humidity: 0,
+    windSpeed: 0,
+    high: 0,
+    low: 0,
     locationName,
     unit,
     unitSymbol,
-    hourly,
-    daily,
+    hourly: [],
+    daily: [],
   };
 }
 
@@ -172,24 +151,35 @@ function readStoredWeatherPrefs(): WeatherFetchOptions {
     return {
       unit: parsed.temperatureUnit === 'fahrenheit' ? 'fahrenheit' : 'celsius',
       locationMode: parsed.weatherLocationMode === 'manual' ? 'manual' : 'auto',
-      manualLatitude:
-        typeof parsed.manualLatitude === 'number' ? parsed.manualLatitude : undefined,
+      manualLatitude: typeof parsed.manualLatitude === 'number' ? parsed.manualLatitude : undefined,
       manualLongitude:
         typeof parsed.manualLongitude === 'number' ? parsed.manualLongitude : undefined,
-      manualCityName:
-        typeof parsed.manualCityName === 'string' ? parsed.manualCityName : undefined,
+      manualCityName: typeof parsed.manualCityName === 'string' ? parsed.manualCityName : undefined,
     };
   } catch {
     return {};
   }
 }
 
-async function resolveIpGeolocation(): Promise<CachedGeoLocation> {
+async function resolveIpGeolocation(): Promise<CachedGeoLocation | null> {
   const now = Date.now();
   if (cachedIpGeo && now - cachedIpGeo.fetchedAt < 30 * 60 * 1000) {
     return cachedIpGeo;
   }
 
+  // Check persistent storage for last known coordinates
+  if (!cachedIpGeo && typeof window !== 'undefined') {
+    try {
+      const saved = window.localStorage.getItem('canopy_last_known_geo');
+      if (saved) {
+        cachedIpGeo = JSON.parse(saved) as CachedGeoLocation;
+      }
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
+  // 1. Primary provider: ipapi.co
   const controller = new AbortController();
   const timeoutId = globalThis.setTimeout(() => controller.abort(), 3500);
 
@@ -215,33 +205,81 @@ async function resolveIpGeolocation(): Promise<CachedGeoLocation> {
           locationName,
           fetchedAt: now,
         };
+        try {
+          window.localStorage.setItem('canopy_last_known_geo', JSON.stringify(cachedIpGeo));
+        } catch {}
         return cachedIpGeo;
       }
     }
   } catch {
-    // Fall back to default coordinates on timeout or network error
+    // Primary provider failed, cascade to secondary
   } finally {
     globalThis.clearTimeout(timeoutId);
   }
 
-  return (
-    cachedIpGeo ?? {
-      lat: 37.7749,
-      lon: -122.4194,
-      locationName: 'San Francisco, CA',
-      fetchedAt: now,
+  // 2. Secondary fallback provider: ipwho.is
+  const fbController = new AbortController();
+  const fbTimeoutId = globalThis.setTimeout(() => fbController.abort(), 3500);
+  try {
+    const fbRes = await fetch('https://ipwho.is/', {
+      signal: fbController.signal,
+      headers: { Accept: 'application/json' },
+    });
+    if (fbRes.ok) {
+      const fbGeo = (await fbRes.json()) as {
+        success?: boolean;
+        latitude?: number;
+        longitude?: number;
+        city?: string;
+        region_code?: string;
+      };
+      if (
+        fbGeo.success !== false &&
+        typeof fbGeo.latitude === 'number' &&
+        Number.isFinite(fbGeo.latitude) &&
+        typeof fbGeo.longitude === 'number' &&
+        Number.isFinite(fbGeo.longitude)
+      ) {
+        const city = fbGeo.city?.trim() || 'Local Area';
+        const region = fbGeo.region_code?.trim();
+        const locationName = region ? `${city}, ${region}` : city;
+        cachedIpGeo = {
+          lat: fbGeo.latitude,
+          lon: fbGeo.longitude,
+          locationName,
+          fetchedAt: now,
+        };
+        try {
+          window.localStorage.setItem('canopy_last_known_geo', JSON.stringify(cachedIpGeo));
+        } catch {}
+        return cachedIpGeo;
+      }
     }
-  );
+  } catch {
+    // Both network requests failed; use last known cached location
+  } finally {
+    globalThis.clearTimeout(fbTimeoutId);
+  }
+
+  return cachedIpGeo;
 }
 
 async function resolveManualCoordinates(
   cityName: string,
-  fallbackLat: number,
-  fallbackLon: number
-): Promise<{ lat: number; lon: number; label: string }> {
+  fallbackLat?: number,
+  fallbackLon?: number,
+): Promise<{ lat: number; lon: number; label: string } | null> {
   const trimmed = cityName.trim();
+  const hasFallbackCoordinates =
+    typeof fallbackLat === 'number' &&
+    Number.isFinite(fallbackLat) &&
+    typeof fallbackLon === 'number' &&
+    Number.isFinite(fallbackLon);
+
   if (!trimmed) {
-    return { lat: fallbackLat, lon: fallbackLon, label: 'San Francisco' };
+    return hasFallbackCoordinates
+      ? { lat: fallbackLat, lon: fallbackLon, label: 'Manual location' }
+      : null;
   }
 
   const key = trimmed.toLowerCase();
@@ -250,6 +288,8 @@ async function resolveManualCoordinates(
   }
 
   const isDefaultSf =
+    typeof fallbackLat === 'number' &&
+    typeof fallbackLon === 'number' &&
     (key === 'san francisco' || key === 'san francisco, ca') &&
     Math.abs(fallbackLat - 37.7749) < 0.01 &&
     Math.abs(fallbackLon - -122.4194) < 0.01;
@@ -261,7 +301,7 @@ async function resolveManualCoordinates(
   const timeoutId = globalThis.setTimeout(() => controller.abort(), 3000);
   try {
     const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(
-      trimmed
+      trimmed,
     )}&count=1&language=en&format=json`;
     const res = await fetch(url, { signal: controller.signal });
     if (res.ok) {
@@ -275,11 +315,7 @@ async function resolveManualCoordinates(
         }>;
       };
       const first = data.results?.[0];
-      if (
-        first &&
-        typeof first.latitude === 'number' &&
-        typeof first.longitude === 'number'
-      ) {
+      if (first && typeof first.latitude === 'number' && typeof first.longitude === 'number') {
         const resolvedLabel = first.admin1
           ? `${first.name || trimmed}, ${first.admin1}`
           : first.name || trimmed;
@@ -298,13 +334,15 @@ async function resolveManualCoordinates(
     globalThis.clearTimeout(timeoutId);
   }
 
-  return { lat: fallbackLat, lon: fallbackLon, label: trimmed };
+  return typeof fallbackLat === 'number' && typeof fallbackLon === 'number'
+    ? { lat: fallbackLat, lon: fallbackLon, label: trimmed }
+    : null;
 }
 
 export async function fetchWeather(
   optionsOrLat?: WeatherFetchOptions | number,
   lonArg?: number,
-  locationNameArg?: string
+  locationNameArg?: string,
 ): Promise<WeatherData> {
   const stored = readStoredWeatherPrefs();
 
@@ -324,25 +362,34 @@ export async function fetchWeather(
     };
   }
 
-  const unit: 'fahrenheit' | 'celsius' =
-    options.unit === 'fahrenheit' ? 'fahrenheit' : 'celsius';
+  const unit: 'fahrenheit' | 'celsius' = options.unit === 'fahrenheit' ? 'fahrenheit' : 'celsius';
   const unitSymbol: '°F' | '°C' = unit === 'fahrenheit' ? '°F' : '°C';
   const locationMode = options.locationMode ?? 'auto';
 
-  let lat = options.manualLatitude ?? 37.7749;
-  let lon = options.manualLongitude ?? -122.4194;
-  let locationName = options.manualCityName?.trim() || 'San Francisco';
+  let lat = options.manualLatitude;
+  let lon = options.manualLongitude;
+  let locationName = options.manualCityName?.trim() || 'Manual location';
 
   if (locationMode === 'auto') {
     const geo = await resolveIpGeolocation();
+    if (!geo) {
+      return buildUnavailableWeather('Location unavailable', unit);
+    }
     lat = geo.lat;
     lon = geo.lon;
     locationName = geo.locationName;
   } else if (options.manualCityName) {
     const resolved = await resolveManualCoordinates(options.manualCityName, lat, lon);
+    if (!resolved) {
+      return buildUnavailableWeather('Manual location needed', unit);
+    }
     lat = resolved.lat;
     lon = resolved.lon;
     locationName = resolved.label;
+  }
+
+  if (typeof lat !== 'number' || typeof lon !== 'number') {
+    return buildUnavailableWeather('Manual location needed', unit);
   }
 
   const url =
@@ -357,24 +404,22 @@ export async function fetchWeather(
   try {
     const response = await fetch(url);
     if (!response.ok) {
-      return buildFallbackWeather(locationName, unit);
+      return buildUnavailableWeather(locationName, unit);
     }
 
     const data = (await response.json()) as OpenMeteoResponse;
     if (!data.current) {
-      return buildFallbackWeather(locationName, unit);
+      return buildUnavailableWeather(locationName, unit);
     }
 
     const currentCode = Number(data.current.weather_code ?? 0);
     const currentTemp = Math.round(
-      Number(data.current.temperature_2m ?? (unit === 'fahrenheit' ? 70 : 21))
+      Number(data.current.temperature_2m ?? (unit === 'fahrenheit' ? 70 : 21)),
     );
     const feelsLike = Math.round(Number(data.current.apparent_temperature ?? currentTemp));
     const humidity = Math.round(Number(data.current.relative_humidity_2m ?? 40));
     const windSpeed = Math.round(Number(data.current.wind_speed_10m ?? 6));
-    const uvIndex = Math.round(
-      Number(data.current.uv_index ?? data.daily?.uv_index_max?.[0] ?? 4)
-    );
+    const uvIndex = Math.round(Number(data.current.uv_index ?? data.daily?.uv_index_max?.[0] ?? 4));
 
     const hourlyTimes = data.hourly?.time ?? [];
     const hourlyTemps = data.hourly?.temperature_2m ?? [];
@@ -416,11 +461,12 @@ export async function fetchWeather(
       };
     });
 
-    const fallback = buildFallbackWeather(locationName, unit);
-    const high = daily[0]?.tempMax ?? currentTemp + 4;
-    const low = daily[0]?.tempMin ?? currentTemp - 8;
+    const high = daily[0]?.tempMax ?? currentTemp;
+    const low = daily[0]?.tempMin ?? currentTemp;
 
     return {
+      isLive: true,
+      updatedAt: Date.now(),
       temp: currentTemp,
       condition: mapWmoCodeToCondition(currentCode),
       code: currentCode,
@@ -433,10 +479,10 @@ export async function fetchWeather(
       locationName,
       unit,
       unitSymbol,
-      hourly: hourly.length > 0 ? hourly : fallback.hourly,
-      daily: daily.length > 0 ? daily : fallback.daily,
+      hourly,
+      daily,
     };
   } catch {
-    return buildFallbackWeather(locationName, unit);
+    return buildUnavailableWeather(locationName, unit);
   }
 }

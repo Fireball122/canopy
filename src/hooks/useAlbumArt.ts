@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 const artworkCache = new Map<string, string>();
 
@@ -11,7 +11,7 @@ const artworkCache = new Map<string, string>();
 export function useAlbumArt(
   title?: string | null,
   artist?: string | null,
-  smtcThumbnail?: string | null
+  smtcThumbnail?: string | null,
 ): string | null {
   const [artworkUrl, setArtworkUrl] = useState<string | null>(smtcThumbnail || null);
 
@@ -45,17 +45,12 @@ export function useAlbumArt(
       try {
         const query = cleanArtist ? `${cleanArtist} ${cleanTitle}` : cleanTitle;
         const res = await fetch(
-          `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=music&entity=song&limit=1`
+          `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=music&entity=song&limit=1`,
         );
         if (!res.ok) return;
 
         const data = await res.json();
-        if (
-          active &&
-          data.results &&
-          data.results.length > 0 &&
-          data.results[0].artworkUrl100
-        ) {
+        if (active && data.results && data.results.length > 0 && data.results[0].artworkUrl100) {
           const highRes = data.results[0].artworkUrl100.replace(/\d+x\d+bb/, '600x600bb');
           artworkCache.set(cacheKey, highRes);
           setArtworkUrl(highRes);

@@ -1,16 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
-import {
-  Check,
-  Clock,
-  Lock,
-  LogOut,
-  Moon,
-  Power,
-  RotateCw,
-  Shield,
-  X,
-} from 'lucide-react';
-import { SystemStats, executePowerAction } from '../services/hostBridge';
+import { Check, Clock, Lock, LogOut, Moon, Power, RotateCw, Shield, X } from 'lucide-react';
+import type React from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { executePowerAction, type SystemStats } from '../services/hostBridge';
 
 export interface PowerViewProps {
   stats: SystemStats;
@@ -146,7 +137,8 @@ export const PowerView: React.FC<PowerViewProps> = ({ stats, onActionTriggered }
                   '0 8px 24px -4px rgba(0, 0, 0, 0.35), 0 0 16px -2px var(--theme-accent, rgba(162, 155, 254, 0.35))';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = 'var(--theme-border, rgba(255, 255, 255, 0.08))';
+                e.currentTarget.style.borderColor =
+                  'var(--theme-border, rgba(255, 255, 255, 0.08))';
                 e.currentTarget.style.boxShadow = '0 4px 16px rgba(0, 0, 0, 0.25)';
               }}
             >
@@ -200,10 +192,7 @@ export const PowerView: React.FC<PowerViewProps> = ({ stats, onActionTriggered }
             <span>{stats.uptime_formatted}</span>
           </span>
           <span style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }}>•</span>
-          <span
-            className="font-medium"
-            style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }}
-          >
+          <span className="font-medium" style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }}>
             {stats.os_name}
           </span>
         </div>
@@ -218,10 +207,7 @@ export const PowerView: React.FC<PowerViewProps> = ({ stats, onActionTriggered }
             </span>
           ) : (
             <div className="flex items-center gap-1.5 text-[10px] font-mono opacity-80">
-              <Shield
-                className="w-3 h-3"
-                style={{ color: 'var(--theme-accent, #A29BFE)' }}
-              />
+              <Shield className="w-3 h-3" style={{ color: 'var(--theme-accent, #A29BFE)' }} />
               <span style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }}>
                 {stats.username}@{stats.hostname}
               </span>
@@ -261,10 +247,7 @@ export const PowerView: React.FC<PowerViewProps> = ({ stats, onActionTriggered }
                 >
                   Confirm {pendingItem.label}
                 </div>
-                <div
-                  className="text-xs"
-                  style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }}
-                >
+                <div className="text-xs" style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }}>
                   Executing in{' '}
                   <span
                     className="font-mono font-bold"
@@ -326,8 +309,7 @@ export const PowerView: React.FC<PowerViewProps> = ({ stats, onActionTriggered }
               style={{
                 background: 'var(--theme-accent, #A29BFE)',
                 color: '#11111b',
-                boxShadow:
-                  '0 4px 16px -2px var(--theme-accent, rgba(162, 155, 254, 0.45))',
+                boxShadow: '0 4px 16px -2px var(--theme-accent, rgba(162, 155, 254, 0.45))',
               }}
             >
               <Check className="w-3.5 h-3.5 stroke-[2.5]" />

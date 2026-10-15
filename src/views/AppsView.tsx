@@ -1,4 +1,3 @@
-import React, { useEffect, useMemo, useState } from 'react';
 import {
   AppWindow,
   Calculator,
@@ -18,11 +17,9 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
-import {
-  InstalledAppItem,
-  getInstalledApps,
-  launchApp,
-} from '../services/hostBridge';
+import type React from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { getInstalledApps, type InstalledAppItem, launchApp } from '../services/hostBridge';
 
 export interface AppsViewProps {
   onAppLaunched?: () => void;
@@ -44,16 +41,31 @@ const BASE_CATEGORIES = [
 
 function renderAppIcon(app: InstalledAppItem): React.ReactNode {
   const key = `${app.id} ${app.name} ${app.path} ${app.category}`.toLowerCase();
-  if (key.includes('terminal') || key.includes('powershell') || key.includes('cmd') || key.includes('wt')) {
+  if (
+    key.includes('terminal') ||
+    key.includes('powershell') ||
+    key.includes('cmd') ||
+    key.includes('wt')
+  ) {
     return <Terminal className="w-4 h-4" strokeWidth={1.9} />;
   }
-  if (key.includes('code') || key.includes('visual studio') || key.includes('git') || key.includes('dev')) {
+  if (
+    key.includes('code') ||
+    key.includes('visual studio') ||
+    key.includes('git') ||
+    key.includes('dev')
+  ) {
     return <Code2 className="w-4 h-4" strokeWidth={1.9} />;
   }
   if (key.includes('explorer') || key.includes('folder') || key.includes('files')) {
     return <FolderOpen className="w-4 h-4" strokeWidth={1.9} />;
   }
-  if (key.includes('taskmgr') || key.includes('task manager') || key.includes('resource') || key.includes('perf')) {
+  if (
+    key.includes('taskmgr') ||
+    key.includes('task manager') ||
+    key.includes('resource') ||
+    key.includes('perf')
+  ) {
     return <Cpu className="w-4 h-4" strokeWidth={1.9} />;
   }
   if (
@@ -76,7 +88,12 @@ function renderAppIcon(app: InstalledAppItem): React.ReactNode {
   if (key.includes('paint') || key.includes('photo') || key.includes('creative')) {
     return <Palette className="w-4 h-4" strokeWidth={1.9} />;
   }
-  if (key.includes('notepad') || key.includes('note') || key.includes('word') || key.includes('doc')) {
+  if (
+    key.includes('notepad') ||
+    key.includes('note') ||
+    key.includes('word') ||
+    key.includes('doc')
+  ) {
     return <FileText className="w-4 h-4" strokeWidth={1.9} />;
   }
   if (key.includes('setting') || key.includes('control')) {
@@ -103,10 +120,10 @@ export const AppsView: React.FC<AppsViewProps> = ({
   const [launchedId, setLaunchedId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [failedIconIds, setFailedIconIds] = useState<Record<string, boolean>>({});
-  const loadApps = async () => {
+  const loadApps = async (force = true) => {
     setLoading(true);
     try {
-      const items = await getInstalledApps();
+      const items = await getInstalledApps(force);
       setApps(items);
     } finally {
       setLoading(false);
@@ -152,7 +169,8 @@ export const AppsView: React.FC<AppsViewProps> = ({
   const filteredApps = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return apps.filter((app) => {
-      const combinedKey = `${app.id} ${app.name} ${app.path} ${app.category} ${app.description || ''}`.toLowerCase();
+      const combinedKey =
+        `${app.id} ${app.name} ${app.path} ${app.category} ${app.description || ''}`.toLowerCase();
       const isBrowser =
         app.category.toLowerCase() === 'browser' ||
         combinedKey.includes('brave') ||
@@ -269,10 +287,7 @@ export const AppsView: React.FC<AppsViewProps> = ({
                 color: 'var(--theme-text-primary, #cdd6f4)',
               }}
             >
-              <Sparkles
-                className="w-3 h-3"
-                style={{ color: 'var(--theme-accent, #cba6f7)' }}
-              />
+              <Sparkles className="w-3 h-3" style={{ color: 'var(--theme-accent, #cba6f7)' }} />
               <span>{statusMessage}</span>
             </div>
           ) : (
@@ -292,7 +307,7 @@ export const AppsView: React.FC<AppsViewProps> = ({
           <button
             type="button"
             data-tauri-drag-region="false"
-            onClick={loadApps}
+            onClick={() => void loadApps(true)}
             className="p-1.5 rounded-xl border transition-all hover:scale-[1.03] active:scale-95 pointer-events-auto cursor-pointer"
             style={{
               background: 'var(--theme-track, rgba(255, 255, 255, 0.05))',
@@ -445,7 +460,11 @@ export const AppsView: React.FC<AppsViewProps> = ({
                           ? 'var(--theme-accent, #cba6f7)'
                           : 'var(--theme-border, rgba(255, 255, 255, 0.08))',
                   }}
-                  title={isPickerMode ? `Click to pin ${app.name} to Dashboard` : `Launch ${app.name} (${app.path})`}
+                  title={
+                    isPickerMode
+                      ? `Click to pin ${app.name} to Dashboard`
+                      : `Launch ${app.name} (${app.path})`
+                  }
                 >
                   <div className="flex items-start justify-between gap-2 w-full">
                     {/* App Icon Badge */}
@@ -503,7 +522,9 @@ export const AppsView: React.FC<AppsViewProps> = ({
                                 : 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))',
                             }}
                           >
-                            <span>{isLaunched ? 'Launched' : isLaunching ? 'Starting' : app.category}</span>
+                            <span>
+                              {isLaunched ? 'Launched' : isLaunching ? 'Starting' : app.category}
+                            </span>
                             <ExternalLink className="w-2.5 h-2.5 opacity-70 group-hover:opacity-100" />
                           </span>
                           {onPinApp && (

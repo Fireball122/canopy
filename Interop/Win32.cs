@@ -58,6 +58,11 @@ public static class Win32
     // Hotkey Message & Modifiers
     public const int WM_NULL = 0x0000;
     public const int WM_HOTKEY = 0x0312;
+    public const int WM_DISPLAYCHANGE = 0x007E;
+    public const int WM_POWERBROADCAST = 0x0218;
+    public const int PBT_APMSUSPEND = 0x0004;
+    public const int PBT_APMRESUMESUSPEND = 0x0007;
+    public const int PBT_APMRESUMEAUTOMATIC = 0x0012;
     public const uint MOD_ALT = 0x0001;
     public const uint MOD_CONTROL = 0x0002;
     public const uint MOD_SHIFT = 0x0004;
@@ -268,10 +273,10 @@ public static class Win32
                     return LockWorkStation();
 
                 case "sleep":
-                    return SetSuspendState(hibernate: false, forceCritical: true, disableWakeEvent: true);
+                    return SetSuspendState(hibernate: false, forceCritical: false, disableWakeEvent: false);
 
                 case "hibernate":
-                    return SetSuspendState(hibernate: true, forceCritical: true, disableWakeEvent: true);
+                    return SetSuspendState(hibernate: true, forceCritical: false, disableWakeEvent: false);
 
                 case "restart":
                     System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("shutdown.exe", "/r /t 0") { CreateNoWindow = true, UseShellExecute = false });

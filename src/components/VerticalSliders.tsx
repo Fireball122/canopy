@@ -1,5 +1,6 @@
-import React, { useRef, useState } from 'react';
-import { Volume2, VolumeX, Sun, Mic, MicOff } from 'lucide-react';
+import { Mic, MicOff, Sun, Volume2, VolumeX } from 'lucide-react';
+import type React from 'react';
+import { useRef, useState } from 'react';
 
 export interface VerticalSlidersProps {
   volume: number;
@@ -160,8 +161,7 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
             value: clampedBrightness,
             displayValue: `${clampedBrightness}%`,
             fillStyle: {
-              background:
-                'linear-gradient(to top, var(--theme-accent, #A29BFE) 0%, #FDE047 100%)',
+              background: 'linear-gradient(to top, var(--theme-accent, #A29BFE) 0%, #FDE047 100%)',
             },
             glowColor: 'var(--theme-accent, #A29BFE)',
             muted: false,
@@ -180,7 +180,9 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
                 ? 'rgba(239, 68, 68, 0.65)'
                 : 'linear-gradient(to top, var(--theme-accent, #A29BFE) 0%, #89DCEB 100%)',
             },
-            glowColor: effectiveMicMuted ? 'rgba(239, 68, 68, 0.7)' : 'var(--theme-accent, #A29BFE)',
+            glowColor: effectiveMicMuted
+              ? 'rgba(239, 68, 68, 0.7)'
+              : 'var(--theme-accent, #A29BFE)',
             muted: effectiveMicMuted,
           },
         ]
@@ -258,9 +260,7 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
               data-tauri-drag-region="false"
               style={{ pointerEvents: 'none' }}
               className={`relative z-10 px-1 py-0.5 rounded-full text-[9px] font-mono font-semibold tabular-nums tracking-tight transition-all duration-150 ${
-                showTooltip
-                  ? 'bg-black/75 text-white shadow-sm scale-105'
-                  : 'opacity-85'
+                showTooltip ? 'bg-black/75 text-white shadow-sm scale-105' : 'opacity-85'
               }`}
             >
               {slider.displayValue}
@@ -289,16 +289,14 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
                 slider.id === 'volume'
                   ? handleVolumeIconClick
                   : slider.id === 'mic'
-                  ? handleMicIconClick
-                  : undefined
+                    ? handleMicIconClick
+                    : undefined
               }
               className={`relative z-10 p-1.5 rounded-full transition-transform active:scale-90 pointer-events-auto cursor-pointer ${
                 slider.muted ? 'text-rose-400 opacity-90' : 'text-current opacity-90'
               }`}
               style={{
-                color: slider.muted
-                  ? 'rgb(244, 63, 94)'
-                  : 'var(--theme-text-primary, #F1F2F6)',
+                color: slider.muted ? 'rgb(244, 63, 94)' : 'var(--theme-text-primary, #F1F2F6)',
               }}
             >
               {slider.id === 'volume' ? (

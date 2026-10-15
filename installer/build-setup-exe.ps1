@@ -18,7 +18,7 @@ if (-not (Test-Path $OutputDir)) { New-Item -ItemType Directory -Path $OutputDir
 $dotnet = "$HOME/.dotnet/dotnet.exe"
 if (-not (Test-Path $dotnet)) { $dotnet = "dotnet" }
 
-& $dotnet publish "$ProjectRoot\Canopy.csproj" -c $Configuration -r win-x64 -o $PublishDir --self-contained false -p:SkipFrontendBuild=true
+& $dotnet publish "$ProjectRoot\Canopy.csproj" -c $Configuration -r win-x64 -o $PublishDir --self-contained true -p:SkipFrontendBuild=true
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
 
 Copy-Item (Join-Path $ProjectRoot "app.ico") (Join-Path $PublishDir "app.ico") -Force

@@ -5,13 +5,26 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+if ($Version -notmatch '^\d+\.\d+\.\d+$') {
+    throw "MSI versions must use major.minor.patch numbers, for example 1.2.3."
+}
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Resolve-Path (Join-Path $ScriptDir "..")
 $PublishDir = Join-Path $ProjectRoot "bin\$Configuration\net8.0-windows10.0.19041.0\publish-msi"
 $OutputDir = Join-Path $ProjectRoot "dist-installer"
 $GeneratedWxs = Join-Path $ScriptDir "GeneratedFiles.wxs"
 
-Write-Host "==> 1. Publishing Canopy ($Configuration)..." -ForegroundColor Cyan
+Write-Host "==> 1. Building the frontend..." -ForegroundColor Cyan
+Push-Location $ProjectRoot
+try {
+    & npm run build
+    if ($LASTEXITCODE -ne 0) { throw "npm run build failed" }
+}
+finally {
+    Pop-Location
+}
+
+Write-Host "==> 2. Publishing Canopy ($Configuration)..." -ForegroundColor Cyan
 if (Test-Path $PublishDir) { Remove-Item $PublishDir -Recurse -Force }
 New-Item -ItemType Directory -Path $PublishDir -Force | Out-Null
 if (-not (Test-Path $OutputDir)) { New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null }
@@ -19,7 +32,7 @@ if (-not (Test-Path $OutputDir)) { New-Item -ItemType Directory -Path $OutputDir
 $dotnet = "$HOME/.dotnet/dotnet.exe"
 if (-not (Test-Path $dotnet)) { $dotnet = "dotnet" }
 
-& $dotnet publish "$ProjectRoot\Canopy.csproj" -c $Configuration -r win-x64 -o $PublishDir --self-contained false -p:SkipFrontendBuild=true
+& $dotnet publish "$ProjectRoot\Canopy.csproj" -c $Configuration -r win-x64 -o $PublishDir --self-contained true -p:SkipFrontendBuild=true
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
 
 Copy-Item (Join-Path $ProjectRoot "app.ico") (Join-Path $PublishDir "app.ico") -Force
@@ -34,8 +47,18 @@ if ((Test-Path $nativeLoader) -and (-not (Test-Path $rootLoader))) {
     if (-not (Test-Path $nativeDir)) { New-Item -ItemType Directory -Path $nativeDir -Force | Out-Null }
     Copy-Item $rootLoader $nativeLoader -Force
 }
-Write-Host "==> 2. Generating WiX components for payload..." -ForegroundColor Cyan
-$allFiles = Get-ChildItem -Path $PublishDir -Recurse -File
+Write-Host "==> 3. Generating WiX components for payload..." -ForegroundColor Cyan
+$allFiles = Get-ChildItem -Path $PublishDir -Recurse -File | Sort-Object FullName
+
+function Get-StableHash([string]$Text) {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Text.ToLowerInvariant()))
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
 
 $sb = [System.Text.StringBuilder]::new()
 [void]$sb.AppendLine('<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">')
@@ -55,10 +78,14 @@ foreach ($file in $allFiles) {
         $dirId = "DIR_" + $cleanDir
     }
 
-    $compGuid = [guid]::NewGuid().ToString().ToUpper()
-    $fileId = "fil_" + $fileIndex
+    $identity = $relPath.Replace('\', '/').ToLowerInvariant()
+    $hash = Get-StableHash $identity
+    $hashText = ([System.BitConverter]::ToString($hash)).Replace('-', '')
+    $compGuid = ([guid]::new([byte[]]$hash[0..15])).ToString().ToUpperInvariant()
+    $componentId = "cmp_" + $hashText.Substring(0, 20)
+    $fileId = "fil_" + $hashText.Substring(0, 20)
 
-    [void]$sb.AppendLine("      <Component Id=`"cmp_$fileIndex`" Directory=`"$dirId`" Guid=`"$compGuid`">")
+    [void]$sb.AppendLine("      <Component Id=`"$componentId`" Directory=`"$dirId`" Guid=`"$compGuid`">")
     [void]$sb.AppendLine("        <File Id=`"$fileId`" Source=`"$($file.FullName)`" KeyPath=`"yes`" />")
     [void]$sb.AppendLine("      </Component>")
 }
@@ -91,7 +118,7 @@ if ($subDirs) {
 
 Set-Content -Path $GeneratedWxs -Value $sb.ToString() -Encoding UTF8
 
-Write-Host "==> 3. Checking WiX Toolset..." -ForegroundColor Cyan
+Write-Host "==> 4. Checking WiX Toolset..." -ForegroundColor Cyan
 $wix = "$HOME/.dotnet/tools/wix.exe"
 if (-not (Test-Path $wix)) {
     $wixCmd = Get-Command "wix" -ErrorAction SilentlyContinue
@@ -99,11 +126,12 @@ if (-not (Test-Path $wix)) {
 }
 
 $MsiOutput = Join-Path $OutputDir "Canopy-v$Version-x64.msi"
-Write-Host "==> 4. Building MSI Installer with WiX: $MsiOutput" -ForegroundColor Cyan
+Write-Host "==> 5. Building MSI Installer with WiX: $MsiOutput" -ForegroundColor Cyan
 
 & $wix build (Join-Path $ScriptDir "Canopy.wxs") "$GeneratedWxs" `
     -arch x64 `
     -d SourceDir="$PublishDir" `
+    -d ProductVersion="$Version" `
     -out "$MsiOutput"
 
 if ($LASTEXITCODE -ne 0) { throw "WiX build failed" }

@@ -1,4 +1,5 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import type React from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { setHostConfig } from '../services/hostBridge';
 
 export type TabId =
@@ -100,10 +101,10 @@ export const DEFAULT_SETTINGS: CanopySettings = {
   calendarFirstDay: 'monday',
   temperatureUnit: 'celsius',
   weatherLocationMode: 'auto',
-  manualCityName: 'San Francisco',
-  manualLatitude: 37.7749,
-  manualLongitude: -122.4194,
-  wallpaperDirectory: 'C:\\Users\\CEO\\Pictures\\Wallpapers',
+  manualCityName: '',
+  manualLatitude: undefined,
+  manualLongitude: undefined,
+  wallpaperDirectory: '',
   themeMode: 'canopy',
   activeWallpaperPath: '',
   glassBlurStrength: 24,
@@ -227,9 +228,10 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       animationsEnabled: settings.animationsEnabled,
       animationDurationMs: settings.animationDurationMs,
       suspendWhenClosed: settings.suspendWebViewWhenClosed,
+      showPanelOnLaunch: settings.showPanelOnLaunch,
       hotkey: settings.globalHotkey,
       diagnosticLogging: settings.diagnosticLogging,
-    });
+    }).catch(() => undefined);
   }, [
     settings.triggerWidth,
     settings.triggerHeight,
@@ -245,6 +247,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     settings.animationsEnabled,
     settings.animationDurationMs,
     settings.suspendWebViewWhenClosed,
+    settings.showPanelOnLaunch,
     settings.globalHotkey,
     settings.diagnosticLogging,
   ]);

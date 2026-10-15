@@ -23,24 +23,12 @@ public partial class App : Application
         AppDomain.CurrentDomain.UnhandledException += (s, args) =>
         {
             _log.WriteException("AppDomain unhandled", args.ExceptionObject as Exception ?? new Exception(args.ExceptionObject?.ToString()));
-            try
-            {
-                System.IO.File.AppendAllText(
-                    System.IO.Path.Combine(AppContext.BaseDirectory, "error.log"),
-                    $"[{DateTime.Now:O}] [AppDomain Unhandled] {args.ExceptionObject}\r\n");
-            }
-            catch { }
+            LogFatalError("AppDomain Unhandled", args.ExceptionObject);
         };
         TaskScheduler.UnobservedTaskException += (s, args) =>
         {
             _log.WriteException("Task unobserved", args.Exception);
-            try
-            {
-                System.IO.File.AppendAllText(
-                    System.IO.Path.Combine(AppContext.BaseDirectory, "error.log"),
-                    $"[{DateTime.Now:O}] [Task Unobserved] {args.Exception}\r\n");
-            }
-            catch { }
+            LogFatalError("Task Unobserved", args.Exception);
             args.SetObserved();
         };
         _singleInstanceMutex = new Mutex(initiallyOwned: true, MutexName, out _ownsMutex);
@@ -65,7 +53,7 @@ public partial class App : Application
         // open the panel on launch, which is what the desktop shortcut asks for.
         bool startHidden = HasArgument(e.Args, "--hidden");
         bool forceExpand = HasArgument(e.Args, "--expand") || HasArgument(e.Args, "--toggle");
-        bool startExpanded = forceExpand || !startHidden;
+        bool startExpanded = forceExpand || (!startHidden && HostPreferences.LoadShowPanelOnLaunch());
 
         _log.Write($"startup args [{string.Join(' ', e.Args)}] startExpanded={startExpanded}");
 
@@ -112,16 +100,23 @@ public partial class App : Application
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         _log.WriteException("dispatcher unhandled", e.Exception);
+        LogFatalError("Dispatcher Unhandled", e.Exception);
+        e.Handled = true;
+    }
+    private static void LogFatalError(string category, object? exceptionObject)
+    {
         try
         {
-            System.IO.File.AppendAllText(
-                System.IO.Path.Combine(AppContext.BaseDirectory, "error.log"),
-                $"[{DateTime.Now:O}] {e.Exception}\r\n");
+            string dir = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Canopy");
+            System.IO.Directory.CreateDirectory(dir);
+            string path = System.IO.Path.Combine(dir, "error.log");
+            System.IO.File.AppendAllText(path, $"[{DateTime.Now:O}] [{category}] {exceptionObject}\r\n");
         }
         catch
         {
         }
-        e.Handled = true;
     }
 
     protected override void OnExit(ExitEventArgs e)

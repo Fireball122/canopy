@@ -10,8 +10,8 @@ export interface ProcessEntry {
 export interface SystemStats {
   cpu_usage: number;
   cpu_temp_c: number;
-  gpu_usage: number;
-  gpu_temp_c: number;
+  gpu_usage: number | null;
+  gpu_temp_c: number | null;
   core_usages: number[];
   top_processes: ProcessEntry[];
   net_down_kbps: number;
@@ -128,7 +128,7 @@ const FALLBACK_TRACKS: FallbackTrackSpec[] = [
           <rect width="200" height="200" rx="28" fill="url(#g1)"/>
           <circle cx="100" cy="100" r="54" fill="rgba(17,17,27,0.55)" stroke="#f5c2e7" stroke-width="3"/>
           <circle cx="100" cy="100" r="14" fill="#cba6f7"/>
-        </svg>`
+        </svg>`,
       ),
   },
   {
@@ -153,7 +153,7 @@ const FALLBACK_TRACKS: FallbackTrackSpec[] = [
           <rect width="200" height="200" rx="28" fill="url(#g2)"/>
           <circle cx="100" cy="96" r="46" fill="#f9e2af" opacity="0.85"/>
           <rect x="30" y="122" width="140" height="48" rx="8" fill="#181825" opacity="0.75"/>
-        </svg>`
+        </svg>`,
       ),
   },
   {
@@ -177,7 +177,7 @@ const FALLBACK_TRACKS: FallbackTrackSpec[] = [
           </defs>
           <rect width="200" height="200" rx="28" fill="url(#g3)"/>
           <polygon points="100,42 152,144 48,144" fill="rgba(17,17,27,0.65)" stroke="#89dceb" stroke-width="3"/>
-        </svg>`
+        </svg>`,
       ),
   },
 ];
@@ -261,22 +261,36 @@ let fallbackWallpapers: WallpaperEntry[] = [
 async function invokeBridge<T>(
   cmd: string,
   args: Record<string, unknown> | undefined,
-  fallback: () => T | Promise<T>
+  fallback: () => T | Promise<T>,
 ): Promise<T> {
-  try {
-    if (typeof window !== 'undefined') {
-      const bridge = window.__CANOPY_BRIDGE__ || window.__CAELESTIA_BRIDGE__;
-      if (bridge?.invoke) {
+  if (typeof window !== 'undefined') {
+    const bridge = window.__CANOPY_BRIDGE__ || window.__CAELESTIA_BRIDGE__;
+    if (bridge?.invoke) {
+      try {
         return await bridge.invoke<T>(cmd, args);
+      } catch (error) {
+        reportBridgeError(cmd, error);
+        throw error;
       }
     }
-    if (typeof window !== 'undefined' && Boolean(window.__TAURI_INTERNALS__)) {
-      return await invoke<T>(cmd, args);
+    if (window.__TAURI_INTERNALS__) {
+      try {
+        return await invoke<T>(cmd, args);
+      } catch (error) {
+        reportBridgeError(cmd, error);
+        throw error;
+      }
     }
-  } catch {
-    // Gracefully fall through to live telemetry fallback
   }
+
+  // Demo fallbacks are for standalone browser preview only. Native host failures must remain visible.
   return await fallback();
+}
+
+function reportBridgeError(cmd: string, error: unknown): void {
+  if (typeof window === 'undefined') return;
+  const message = error instanceof Error ? error.message : String(error);
+  window.dispatchEvent(new CustomEvent('canopy:bridge-error', { detail: { cmd, message } }));
 }
 
 function formatFallbackUptime(): string {
@@ -295,10 +309,6 @@ function buildFallbackSystemStats(): SystemStats {
   const cpuWave = 21 + Math.sin(t * 0.65) * 9 + Math.cos(t * 1.4) * 4;
   const cpu_usage = Math.round(Math.min(98, Math.max(4, cpuWave)) * 10) / 10;
   const cpu_temp_c = Math.round((41 + Math.sin(t * 0.35) * 1.8) * 10) / 10;
-
-  const gpuWave = 34 + Math.sin(t * 0.5) * 8 + Math.cos(t * 1.1) * 3;
-  const gpu_usage = Math.round(Math.min(99, Math.max(5, gpuWave)) * 10) / 10;
-  const gpu_temp_c = Math.round((54 + Math.cos(t * 0.3) * 2.1) * 10) / 10;
 
   const baseCores = [28, 19, 42, 15, 31, 22, 37, 12, 26, 18, 29, 16];
   const core_usages = baseCores.map((base, idx) => {
@@ -350,8 +360,8 @@ function buildFallbackSystemStats(): SystemStats {
   return {
     cpu_usage,
     cpu_temp_c,
-    gpu_usage,
-    gpu_temp_c,
+    gpu_usage: null,
+    gpu_temp_c: null,
     core_usages,
     top_processes,
     net_down_kbps: Math.round((245.6 + Math.abs(Math.sin(t * 0.7)) * 1180.0) * 10) / 10,
@@ -365,19 +375,28 @@ function buildFallbackSystemStats(): SystemStats {
     uptime_formatted: formatFallbackUptime(),
     hostname: 'CANOPY-WIN11',
     os_name: 'Windows 11 Pro (24H2)',
-    username: 'CEO',
+    username: 'user',
   };
 }
 
 export async function getSystemStats(): Promise<SystemStats> {
   const fallback = buildFallbackSystemStats();
-  const raw = await invokeBridge<Partial<SystemStats>>('get_system_stats', undefined, () => fallback);
+  const raw = await invokeBridge<Partial<SystemStats>>(
+    'get_system_stats',
+    undefined,
+    () => fallback,
+  );
 
   return {
     cpu_usage: typeof raw.cpu_usage === 'number' ? raw.cpu_usage : fallback.cpu_usage,
-    cpu_temp_c: typeof raw.cpu_temp_c === 'number' && raw.cpu_temp_c > 0 ? raw.cpu_temp_c : fallback.cpu_temp_c,
-    gpu_usage: typeof raw.gpu_usage === 'number' ? raw.gpu_usage : fallback.gpu_usage,
-    gpu_temp_c: typeof raw.gpu_temp_c === 'number' && raw.gpu_temp_c > 0 ? raw.gpu_temp_c : fallback.gpu_temp_c,
+    cpu_temp_c:
+      typeof raw.cpu_temp_c === 'number' && raw.cpu_temp_c > 0
+        ? raw.cpu_temp_c
+        : fallback.cpu_temp_c,
+    gpu_usage:
+      typeof raw.gpu_usage === 'number' && Number.isFinite(raw.gpu_usage) ? raw.gpu_usage : null,
+    gpu_temp_c:
+      typeof raw.gpu_temp_c === 'number' && Number.isFinite(raw.gpu_temp_c) ? raw.gpu_temp_c : null,
     core_usages:
       Array.isArray(raw.core_usages) && raw.core_usages.length > 0
         ? raw.core_usages
@@ -399,7 +418,8 @@ export async function getSystemStats(): Promise<SystemStats> {
     ram_total_gb: typeof raw.ram_total_gb === 'number' ? raw.ram_total_gb : fallback.ram_total_gb,
     disk_usage: typeof raw.disk_usage === 'number' ? raw.disk_usage : fallback.disk_usage,
     disk_used_gb: typeof raw.disk_used_gb === 'number' ? raw.disk_used_gb : fallback.disk_used_gb,
-    disk_total_gb: typeof raw.disk_total_gb === 'number' ? raw.disk_total_gb : fallback.disk_total_gb,
+    disk_total_gb:
+      typeof raw.disk_total_gb === 'number' ? raw.disk_total_gb : fallback.disk_total_gb,
     uptime_formatted: raw.uptime_formatted || fallback.uptime_formatted,
     hostname: raw.hostname || fallback.hostname,
     os_name: raw.os_name || fallback.os_name,
@@ -446,7 +466,7 @@ export async function getMediaInfo(): Promise<MediaInfo> {
 
 export async function getMediaSessions(): Promise<MediaSessionItem[]> {
   const sessions = await invokeBridge<MediaSessionItem[]>('get_media_sessions', undefined, () =>
-    buildFallbackSessions()
+    buildFallbackSessions(),
   );
   if (!Array.isArray(sessions) || sessions.length === 0) {
     return buildFallbackSessions();
@@ -458,7 +478,7 @@ export async function selectMediaSession(sessionId: string): Promise<void> {
   const idx = FALLBACK_TRACKS.findIndex(
     (t) =>
       t.id.toLowerCase() === sessionId.toLowerCase() ||
-      t.source_app.toLowerCase() === sessionId.toLowerCase()
+      t.source_app.toLowerCase() === sessionId.toLowerCase(),
   );
   if (idx >= 0) {
     fallbackTrackIndex = idx;
@@ -469,7 +489,7 @@ export async function selectMediaSession(sessionId: string): Promise<void> {
   await invokeBridge<unknown>(
     'select_media_session',
     { sessionId, session_id: sessionId },
-    () => undefined
+    () => undefined,
   );
 }
 
@@ -496,8 +516,7 @@ export async function mediaNext(): Promise<void> {
 
 export async function mediaPrev(): Promise<void> {
   await invokeBridge<unknown>('media_prev', undefined, () => {
-    fallbackTrackIndex =
-      (fallbackTrackIndex - 1 + FALLBACK_TRACKS.length) % FALLBACK_TRACKS.length;
+    fallbackTrackIndex = (fallbackTrackIndex - 1 + FALLBACK_TRACKS.length) % FALLBACK_TRACKS.length;
     fallbackIsPlaying = true;
     fallbackPausedElapsedSecs = 0;
     fallbackTrackStartMs = Date.now();
@@ -518,7 +537,6 @@ export async function mediaCycleRepeat(): Promise<number> {
   return invokeBridge<number>('media_cycle_repeat', undefined, () => 0);
 }
 
-
 export interface HostConfig {
   // Index signature keeps this assignable to the bridge's plain-object argument type.
   [key: string]: unknown;
@@ -536,6 +554,7 @@ export interface HostConfig {
   animationsEnabled?: boolean;
   animationDurationMs?: number;
   suspendWhenClosed?: boolean;
+  showPanelOnLaunch?: boolean;
   hotkey?: string;
   diagnosticLogging?: boolean;
 }
@@ -561,7 +580,11 @@ export async function getAudioSessions(): Promise<AudioSessionEntry[]> {
 }
 
 export async function setAudioSessionVolume(id: string, level: number): Promise<void> {
-  await invokeBridge<unknown>('set_session_volume', { id, level: Math.round(level) }, () => undefined);
+  await invokeBridge<unknown>(
+    'set_session_volume',
+    { id, level: Math.round(level) },
+    () => undefined,
+  );
 }
 
 export async function setAudioSessionMute(id: string, muted: boolean): Promise<void> {
@@ -630,7 +653,11 @@ export async function setDesktopWallpaperState(config: {
 }
 
 export async function setMonitorWallpaper(monitorId: string, path: string): Promise<void> {
-  await invokeBridge<unknown>('set_monitor_wallpaper', { monitor_id: monitorId, path }, () => undefined);
+  await invokeBridge<unknown>(
+    'set_monitor_wallpaper',
+    { monitor_id: monitorId, path },
+    () => undefined,
+  );
 }
 
 export async function openLogFolder(): Promise<void> {
@@ -659,8 +686,14 @@ export async function getAudioSpectrum(): Promise<number[]> {
 }
 
 export async function getMasterVolume(): Promise<number> {
-  const level = await invokeBridge<number>('get_master_volume', undefined, () => fallbackAudioState.volume);
-  const clamped = Math.round(Math.min(100, Math.max(0, Number.isFinite(level) ? level : fallbackAudioState.volume)));
+  const level = await invokeBridge<number>(
+    'get_master_volume',
+    undefined,
+    () => fallbackAudioState.volume,
+  );
+  const clamped = Math.round(
+    Math.min(100, Math.max(0, Number.isFinite(level) ? level : fallbackAudioState.volume)),
+  );
   fallbackAudioState = {
     ...fallbackAudioState,
     volume: clamped,
@@ -672,14 +705,16 @@ export async function setMasterVolume(level: number): Promise<void> {
   const clamped = Math.round(Math.min(100, Math.max(0, level)));
   fallbackAudioState = {
     volume: clamped,
-    muted: clamped === 0 ? true : false,
+    muted: clamped === 0,
   };
   await invokeBridge<unknown>('set_master_volume', { level: clamped }, () => undefined);
 }
 
 export async function getBrightness(): Promise<number> {
   const level = await invokeBridge<number>('get_brightness', undefined, () => fallbackBrightness);
-  const clamped = Math.round(Math.min(100, Math.max(0, Number.isFinite(level) ? level : fallbackBrightness)));
+  const clamped = Math.round(
+    Math.min(100, Math.max(0, Number.isFinite(level) ? level : fallbackBrightness)),
+  );
   fallbackBrightness = clamped;
   return clamped;
 }
@@ -725,7 +760,7 @@ function hydrateWallpaperEntries(list: WallpaperEntry[]): WallpaperEntry[] {
 
 export async function getWallpapers(): Promise<WallpaperEntry[]> {
   const list = await invokeBridge<WallpaperEntry[]>('get_wallpapers', undefined, () =>
-    fallbackWallpapers.map((item) => ({ ...item }))
+    fallbackWallpapers.map((item) => ({ ...item })),
   );
   return hydrateWallpaperEntries(list);
 }
@@ -743,15 +778,13 @@ export async function pickWallpaperFolder(currentDir?: string): Promise<string |
   return invokeBridge<string | null>(
     'pick_wallpaper_folder',
     { currentDir, current_dir: currentDir },
-    () => currentDir ?? null
+    () => currentDir ?? null,
   );
 }
 
 export async function setWallpaperDirectory(path: string): Promise<WallpaperEntry[]> {
-  const list = await invokeBridge<WallpaperEntry[]>(
-    'set_wallpaper_directory',
-    { path },
-    () => fallbackWallpapers.map((item) => ({ ...item }))
+  const list = await invokeBridge<WallpaperEntry[]>('set_wallpaper_directory', { path }, () =>
+    fallbackWallpapers.map((item) => ({ ...item })),
   );
   return hydrateWallpaperEntries(list);
 }
@@ -795,7 +828,7 @@ export async function runTerminalCommand(cmd: string): Promise<string> {
       return `System uptime: ${formatFallbackUptime()}`;
     }
     if (clean === 'whoami') {
-      return 'canopy\\CEO';
+      return 'canopy\\user';
     }
     if (clean === 'hostname') {
       return 'CANOPY-WIN11';
@@ -825,24 +858,104 @@ export async function notifyTabSwitched(): Promise<void> {
 }
 
 const FALLBACK_INSTALLED_APPS: InstalledAppItem[] = [
-  { id: 'brave', name: 'Brave', category: 'Browser', path: 'brave.exe', description: 'Default Web Browser (BraveHTML)' },
-  { id: 'wt', name: 'Windows Terminal', category: 'Developer', path: 'wt.exe', description: 'Modern tabs & shells' },
-  { id: 'explorer', name: 'File Explorer', category: 'System', path: 'explorer.exe', description: 'Browse local drives & files' },
-  { id: 'taskmgr', name: 'Task Manager', category: 'System', path: 'taskmgr.exe', description: 'Process & resource monitor' },
-  { id: 'code', name: 'Visual Studio Code', category: 'Developer', path: 'code', description: 'Code editor & workspace' },
-  { id: 'edge', name: 'Microsoft Edge', category: 'Browser', path: 'msedge.exe', description: 'Web browser' },
-  { id: 'notepad', name: 'Notepad', category: 'Productivity', path: 'notepad.exe', description: 'Quick text & notes' },
-  { id: 'calc', name: 'Calculator', category: 'Utilities', path: 'calc.exe', description: 'Standard & scientific calculator' },
-  { id: 'mspaint', name: 'Paint', category: 'Creative', path: 'mspaint.exe', description: 'Image canvas & editor' },
-  { id: 'snippingtool', name: 'Snipping Tool', category: 'Utilities', path: 'SnippingTool.exe', description: 'Screen capture & recording' },
-  { id: 'settings', name: 'Windows Settings', category: 'System', path: 'ms-settings:', description: 'System configuration' },
-  { id: 'powershell', name: 'PowerShell', category: 'Developer', path: 'powershell.exe', description: 'Command-line shell' },
-  { id: 'control', name: 'Control Panel', category: 'System', path: 'control.exe', description: 'Classic Windows settings' },
+  {
+    id: 'brave',
+    name: 'Brave',
+    category: 'Browser',
+    path: 'brave.exe',
+    description: 'Default Web Browser (BraveHTML)',
+  },
+  {
+    id: 'wt',
+    name: 'Windows Terminal',
+    category: 'Developer',
+    path: 'wt.exe',
+    description: 'Modern tabs & shells',
+  },
+  {
+    id: 'explorer',
+    name: 'File Explorer',
+    category: 'System',
+    path: 'explorer.exe',
+    description: 'Browse local drives & files',
+  },
+  {
+    id: 'taskmgr',
+    name: 'Task Manager',
+    category: 'System',
+    path: 'taskmgr.exe',
+    description: 'Process & resource monitor',
+  },
+  {
+    id: 'code',
+    name: 'Visual Studio Code',
+    category: 'Developer',
+    path: 'code',
+    description: 'Code editor & workspace',
+  },
+  {
+    id: 'edge',
+    name: 'Microsoft Edge',
+    category: 'Browser',
+    path: 'msedge.exe',
+    description: 'Web browser',
+  },
+  {
+    id: 'notepad',
+    name: 'Notepad',
+    category: 'Productivity',
+    path: 'notepad.exe',
+    description: 'Quick text & notes',
+  },
+  {
+    id: 'calc',
+    name: 'Calculator',
+    category: 'Utilities',
+    path: 'calc.exe',
+    description: 'Standard & scientific calculator',
+  },
+  {
+    id: 'mspaint',
+    name: 'Paint',
+    category: 'Creative',
+    path: 'mspaint.exe',
+    description: 'Image canvas & editor',
+  },
+  {
+    id: 'snippingtool',
+    name: 'Snipping Tool',
+    category: 'Utilities',
+    path: 'SnippingTool.exe',
+    description: 'Screen capture & recording',
+  },
+  {
+    id: 'settings',
+    name: 'Windows Settings',
+    category: 'System',
+    path: 'ms-settings:',
+    description: 'System configuration',
+  },
+  {
+    id: 'powershell',
+    name: 'PowerShell',
+    category: 'Developer',
+    path: 'powershell.exe',
+    description: 'Command-line shell',
+  },
+  {
+    id: 'control',
+    name: 'Control Panel',
+    category: 'System',
+    path: 'control.exe',
+    description: 'Classic Windows settings',
+  },
 ];
 
-export async function getInstalledApps(): Promise<InstalledAppItem[]> {
-  const list = await invokeBridge<InstalledAppItem[]>('get_installed_apps', undefined, () =>
-    FALLBACK_INSTALLED_APPS.map((item) => ({ ...item }))
+export async function getInstalledApps(force = false): Promise<InstalledAppItem[]> {
+  const list = await invokeBridge<InstalledAppItem[]>(
+    'get_installed_apps',
+    force ? { force: true } : undefined,
+    () => FALLBACK_INSTALLED_APPS.map((item) => ({ ...item })),
   );
   if (!Array.isArray(list) || list.length === 0) {
     return FALLBACK_INSTALLED_APPS.map((item) => ({ ...item }));
@@ -855,7 +968,7 @@ export async function launchApp(target: string): Promise<boolean> {
 }
 
 export async function executePowerAction(
-  action: 'sleep' | 'restart' | 'shutdown' | 'lock' | 'signout' | 'hibernate'
+  action: 'sleep' | 'restart' | 'shutdown' | 'lock' | 'signout' | 'hibernate',
 ): Promise<boolean> {
   return invokeBridge<boolean>('execute_power_action', { action }, () => true);
 }

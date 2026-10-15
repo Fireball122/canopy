@@ -1,121 +1,111 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
-  Play,
-  Pause,
-  SkipBack,
-  SkipForward,
-  Sun,
-  Cloud,
-  CloudRain,
-  CloudSnow,
-  CloudLightning,
-  CloudSun,
-  Wind,
-  Droplets,
-  Thermometer,
-  Terminal as TerminalIcon,
-  Clock,
   Activity,
-  Music,
-  LayoutGrid,
-  Image as ImageIcon,
-  Send,
-  RefreshCw,
-  Monitor,
-  User,
-  Disc,
-  MapPin,
-  Bell,
-  Settings as SettingsIcon,
   AppWindow,
-  Sparkles,
-  Power as PowerIcon,
-  FolderOpen,
-  Cpu,
-  Compass,
-  Code2,
-  Calculator,
-  FileText,
-  Plus,
   Battery,
   BatteryCharging,
-  Search,
-  Sliders,
-  Mic2,
+  Bell,
+  Calculator,
+  Clock,
+  CloudSun,
+  Code2,
+  Compass,
+  Cpu,
+  Disc,
+  FileText,
+  FolderOpen,
+  Image as ImageIcon,
+  LayoutGrid,
   Lock,
+  MapPin,
+  Mic2,
+  Monitor,
   Moon,
+  Music,
+  Pause,
+  Play,
+  Plus,
+  Power as PowerIcon,
+  RefreshCw,
+  Search,
+  Settings as SettingsIcon,
+  SkipBack,
+  SkipForward,
+  Sliders,
+  Terminal as TerminalIcon,
+  User,
 } from 'lucide-react';
-import {
-  SystemStats,
-  MediaInfo,
-  WallpaperEntry,
-  getSystemStats,
-  getMediaInfo,
-  getAudioSpectrum,
-  mediaPlayPause,
-  mediaNext,
-  mediaPrev,
-  mediaSeek,
-  getMasterVolume,
-  setMasterVolume,
-  getBrightness,
-  setBrightness,
-  setAudioVolume,
-  getWallpapers,
-  applyWallpaper,
-  setDesktopWallpaper,
-  selectMediaSession,
-  runTerminalCommand,
-  setDropdownOpen,
-  setTopHoverTrigger,
-  launchApp,
-  notifyTabSwitched,
-  getMicState,
-  setMicVolume as writeMicVolume,
-  setMicMute as writeMicMute,
-  getBatteryStatus,
-  pickWallpaperFolder,
-  reloadUi,
-  BatteryStatus,
-  InstalledAppItem,
-  getInstalledApps,
-  executePowerAction,
-} from './services/hostBridge';
+import type React from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CalendarCard } from './components/CalendarCard';
+import { CanopyMascot } from './components/CanopyMascot';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { VerticalSliders } from './components/VerticalSliders';
+import { SettingsProvider, type TabId, useSettings } from './context/SettingsContext';
+import { useAlbumArt } from './hooks/useAlbumArt';
 import { usePanelOpen } from './hooks/usePanelOpen';
 import { usePlaybackClock } from './hooks/usePlaybackClock';
-import { useAlbumArt } from './hooks/useAlbumArt';
-import { WeatherData, fetchWeather } from './services/weather';
-import { CanopyMascot } from './components/CanopyMascot';
-import { CalendarCard } from './components/CalendarCard';
-import { VerticalSliders } from './components/VerticalSliders';
-import { SettingsProvider, useSettings, TabId } from './context/SettingsContext';
-import { ErrorBoundary } from './components/ErrorBoundary';
-import { applyThemePalette, applyThemeFromImageSrc, applyThemeModeFallback } from './services/palette';
+import {
+  applyWallpaper,
+  type BatteryStatus,
+  executePowerAction,
+  getBatteryStatus,
+  getBrightness,
+  getInstalledApps,
+  getMasterVolume,
+  getMediaInfo,
+  getMicState,
+  getSystemStats,
+  getWallpapers,
+  type InstalledAppItem,
+  launchApp,
+  type MediaInfo,
+  mediaNext,
+  mediaPlayPause,
+  mediaPrev,
+  mediaSeek,
+  notifyTabSwitched,
+  pickWallpaperFolder,
+  reloadUi,
+  type SystemStats,
+  selectMediaSession,
+  setAudioVolume,
+  setBrightness,
+  setDesktopWallpaper,
+  setDropdownOpen,
+  setMasterVolume,
+  setTopHoverTrigger,
+  type WallpaperEntry,
+  setMicMute as writeMicMute,
+  setMicVolume as writeMicVolume,
+} from './services/hostBridge';
+import {
+  applyThemeFromImageSrc,
+  applyThemeModeFallback,
+  applyThemePalette,
+} from './services/palette';
+import { fetchWeather, type WeatherData } from './services/weather';
 import { WallpaperView } from './views/WallpaperView';
-const QUICK_APP_CATALOGUE: Record<string, { label: string; icon: React.ReactNode; path: string }> = {
-  terminal: { label: 'Terminal', icon: <TerminalIcon className="w-3 h-3" />, path: 'wt.exe' },
-  explorer: { label: 'Files', icon: <FolderOpen className="w-3 h-3" />, path: 'explorer.exe' },
-  taskmgr: { label: 'TaskMgr', icon: <Cpu className="w-3 h-3" />, path: 'taskmgr.exe' },
-  browser: { label: 'Browser', icon: <Compass className="w-3 h-3" />, path: 'msedge.exe' },
-  msedge: { label: 'Browser', icon: <Compass className="w-3 h-3" />, path: 'msedge.exe' },
-  code: { label: 'VSCode', icon: <Code2 className="w-3 h-3" />, path: 'code' },
-  notepad: { label: 'Notepad', icon: <FileText className="w-3 h-3" />, path: 'notepad.exe' },
-  calc: { label: 'Calc', icon: <Calculator className="w-3 h-3" />, path: 'calc.exe' },
-  spotify: { label: 'Spotify', icon: <Music className="w-3 h-3" />, path: 'spotify.exe' },
-};
+
+const QUICK_APP_CATALOGUE: Record<string, { label: string; icon: React.ReactNode; path: string }> =
+  {
+    terminal: { label: 'Terminal', icon: <TerminalIcon className="w-3 h-3" />, path: 'wt.exe' },
+    explorer: { label: 'Files', icon: <FolderOpen className="w-3 h-3" />, path: 'explorer.exe' },
+    taskmgr: { label: 'TaskMgr', icon: <Cpu className="w-3 h-3" />, path: 'taskmgr.exe' },
+    browser: { label: 'Browser', icon: <Compass className="w-3 h-3" />, path: 'msedge.exe' },
+    msedge: { label: 'Browser', icon: <Compass className="w-3 h-3" />, path: 'msedge.exe' },
+    code: { label: 'VSCode', icon: <Code2 className="w-3 h-3" />, path: 'code' },
+    notepad: { label: 'Notepad', icon: <FileText className="w-3 h-3" />, path: 'notepad.exe' },
+    calc: { label: 'Calc', icon: <Calculator className="w-3 h-3" />, path: 'calc.exe' },
+    spotify: { label: 'Spotify', icon: <Music className="w-3 h-3" />, path: 'spotify.exe' },
+  };
+
+import { AppsView } from './views/AppsView';
 import { MediaView } from './views/MediaView';
 import { PerformanceView } from './views/PerformanceView';
-import { SettingsView } from './views/SettingsView';
-import { AppsView } from './views/AppsView';
 import { PowerView } from './views/PowerView';
-
-interface TerminalEntry {
-  id: string;
-  command: string;
-  output: string;
-  timestamp: string;
-  isFastfetch?: boolean;
-}
+import { SettingsView } from './views/SettingsView';
+import { TerminalView } from './views/TerminalView';
+import { renderWeatherIcon, WeatherView } from './views/WeatherView';
 
 interface CommandPaletteItem {
   id: string;
@@ -153,7 +143,10 @@ function samePayload(a: unknown, b: unknown): boolean {
   return aKeys.every((key) => samePayload(aRecord[key], bRecord[key]));
 }
 
-function filterPaletteCommands(commands: CommandPaletteItem[], query: string): CommandPaletteItem[] {
+function filterPaletteCommands(
+  commands: CommandPaletteItem[],
+  query: string,
+): CommandPaletteItem[] {
   const needle = query.trim().toLowerCase();
   if (needle.length === 0) {
     return commands;
@@ -164,58 +157,23 @@ function filterPaletteCommands(commands: CommandPaletteItem[], query: string): C
   );
 }
 
-const WINDOWS_POWERSHELL_UPTIME_CMD =
-  '(Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime | Select-Object Days, Hours, Minutes, Seconds';
-
 const DEFAULT_WEATHER: WeatherData = {
-  temp: 15,
-  condition: 'Clear',
-  code: 0,
-  feelsLike: 14,
-  humidity: 42,
-  windSpeed: 8,
-  uvIndex: 4,
-  high: 19,
-  low: 9,
-  locationName: 'San Francisco, CA',
+  isLive: false,
+  updatedAt: 0,
+  temp: 0,
+  condition: 'Unavailable',
+  code: -1,
+  feelsLike: 0,
+  humidity: 0,
+  windSpeed: 0,
+  high: 0,
+  low: 0,
+  locationName: 'Weather unavailable',
   unit: 'celsius',
   unitSymbol: '°C',
-  hourly: [
-    { time: 'Now', temp: 15, condition: 'Clear', code: 0 },
-    { time: '1 PM', temp: 17, condition: 'Clear', code: 0 },
-    { time: '2 PM', temp: 18, condition: 'Mostly Clear', code: 1 },
-    { time: '3 PM', temp: 18, condition: 'Partly Cloudy', code: 2 },
-    { time: '4 PM', temp: 16, condition: 'Clear', code: 0 },
-    { time: '5 PM', temp: 14, condition: 'Clear', code: 0 },
-  ],
-  daily: [
-    { day: 'Today', tempMax: 19, tempMin: 9, condition: 'Clear', code: 0 },
-    { day: 'Tue', tempMax: 18, tempMin: 8, condition: 'Mostly Clear', code: 1 },
-    { day: 'Wed', tempMax: 16, tempMin: 7, condition: 'Partly Cloudy', code: 2 },
-    { day: 'Thu', tempMax: 16, tempMin: 7, condition: 'Clear', code: 0 },
-    { day: 'Fri', tempMax: 17, tempMin: 8, condition: 'Clear', code: 0 },
-  ],
+  hourly: [],
+  daily: [],
 };
-
-function renderWeatherIcon(code: number, condition: string, sizeClass = 'w-7 h-7'): React.ReactNode {
-  const lower = condition.toLowerCase();
-  if (code >= 95 || lower.includes('thunder')) {
-    return <CloudLightning className={`${sizeClass} text-[#f9e2af] drop-shadow-[0_0_8px_rgba(249,226,175,0.45)]`} strokeWidth={1.75} />;
-  }
-  if ((code >= 71 && code <= 86) || lower.includes('snow')) {
-    return <CloudSnow className={`${sizeClass} text-[#89dceb] drop-shadow-[0_0_8px_rgba(137,220,235,0.45)]`} strokeWidth={1.75} />;
-  }
-  if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82) || lower.includes('rain') || lower.includes('drizzle')) {
-    return <CloudRain className={`${sizeClass} text-[#89b4fa] drop-shadow-[0_0_8px_rgba(137,180,250,0.45)]`} strokeWidth={1.75} />;
-  }
-  if (code === 1 || code === 2 || lower.includes('partly') || lower.includes('mostly')) {
-    return <CloudSun className={`${sizeClass} text-[#fab387] drop-shadow-[0_0_8px_rgba(250,179,135,0.4)]`} strokeWidth={1.75} />;
-  }
-  if (code === 3 || (code >= 45 && code <= 48) || lower.includes('cloud') || lower.includes('overcast') || lower.includes('fog')) {
-    return <Cloud className={`${sizeClass} text-[#bac2de] drop-shadow-[0_0_8px_rgba(186,194,222,0.35)]`} strokeWidth={1.75} />;
-  }
-  return <Sun className={`${sizeClass} text-[#f9e2af] drop-shadow-[0_0_10px_rgba(249,226,175,0.55)]`} strokeWidth={1.75} />;
-}
 
 const QUICK_LAUNCH_SLOTS = 6;
 
@@ -223,7 +181,10 @@ const QUICK_LAUNCH_SLOTS = 6;
  * Places an app into the fixed six-slot Quick Launch dock: the first empty slot when there is room,
  * otherwise the last occupied slot so the other positions never renumber.
  */
-function placeInQuickLaunch(pinnedApps: string[], appId: string): { slots: string[]; replacedId: string } {
+function placeInQuickLaunch(
+  pinnedApps: string[],
+  appId: string,
+): { slots: string[]; replacedId: string } {
   const slots = Array.from({ length: QUICK_LAUNCH_SLOTS }, (_, index) => pinnedApps[index] ?? '');
   const emptyIndex = slots.indexOf('');
   if (emptyIndex !== -1) {
@@ -264,8 +225,8 @@ const CanopyShellContent: React.FC = () => {
   const [stats, setStats] = useState<SystemStats>({
     cpu_usage: 14,
     cpu_temp_c: 41,
-    gpu_usage: 4,
-    gpu_temp_c: 54,
+    gpu_usage: null,
+    gpu_temp_c: null,
     core_usages: [18, 12, 24, 9, 15, 11, 21, 8, 14, 10, 16, 7],
     top_processes: [
       { name: 'Canopy.exe', pid: 30416, cpu_usage: 1.4, memory_mb: 58.2 },
@@ -285,7 +246,7 @@ const CanopyShellContent: React.FC = () => {
     uptime_formatted: 'up 3 hours, 18 minutes',
     hostname: 'CANOPY-WIN11',
     os_name: 'Windows 11',
-    username: 'CEO',
+    username: 'user',
   });
 
   // Media state (polled every 800ms)
@@ -299,9 +260,30 @@ const CanopyShellContent: React.FC = () => {
     artwork_url: null,
     source_app: 'Spotify',
     sessions: [
-      { id: 'Spotify.exe', app_name: 'Spotify', title: 'Bad Apple!!', artist: 'Nomico', is_playing: false, is_current: true },
-      { id: 'Feishin.exe', app_name: 'Feishin', title: 'Night of Nights', artist: 'COOL&CREATE', is_playing: false, is_current: false },
-      { id: 'chrome.exe', app_name: 'Chrome', title: 'Lofi Hip Hop Radio', artist: 'Lofi Girl', is_playing: false, is_current: false },
+      {
+        id: 'Spotify.exe',
+        app_name: 'Spotify',
+        title: 'Bad Apple!!',
+        artist: 'Nomico',
+        is_playing: false,
+        is_current: true,
+      },
+      {
+        id: 'Feishin.exe',
+        app_name: 'Feishin',
+        title: 'Night of Nights',
+        artist: 'COOL&CREATE',
+        is_playing: false,
+        is_current: false,
+      },
+      {
+        id: 'chrome.exe',
+        app_name: 'Chrome',
+        title: 'Lofi Hip Hop Radio',
+        artist: 'Lofi Girl',
+        is_playing: false,
+        is_current: false,
+      },
     ],
   });
 
@@ -317,21 +299,6 @@ const CanopyShellContent: React.FC = () => {
   const [weather, setWeather] = useState<WeatherData>(DEFAULT_WEATHER);
   const [weatherLoading, setWeatherLoading] = useState<boolean>(false);
 
-  // Terminal state
-  const [terminalInput, setTerminalInput] = useState<string>('');
-  const [terminalBusy, setTerminalBusy] = useState<boolean>(false);
-  const [terminalHistory, setTerminalHistory] = useState<TerminalEntry[]>([
-    {
-      id: 'init-fastfetch',
-      command: 'fastfetch',
-      output: '',
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      isFastfetch: true,
-    },
-  ]);
-  const terminalEndRef = useRef<HTMLDivElement | null>(null);
-  const [commandHistoryList, setCommandHistoryList] = useState<string[]>(['fastfetch']);
-  const [historyIndex, setHistoryIndex] = useState<number>(-1);
   const [appPickerMode, setAppPickerMode] = useState<boolean>(false);
 
   // Microphone slider (host-backed) + battery chip state
@@ -361,7 +328,12 @@ const CanopyShellContent: React.FC = () => {
   useEffect(() => {
     const handleNavigateTab = (e: Event) => {
       const detail = (e as CustomEvent<unknown>).detail;
-      if (detail && typeof detail === 'object' && 'tab' in detail && typeof detail.tab === 'string') {
+      if (
+        detail &&
+        typeof detail === 'object' &&
+        'tab' in detail &&
+        typeof detail.tab === 'string'
+      ) {
         setActiveTab(detail.tab as TabId);
       }
     };
@@ -371,21 +343,60 @@ const CanopyShellContent: React.FC = () => {
     };
   }, []);
 
-  const visibleTabs = useMemo<{ id: TabId; label: string; icon: React.ReactNode }[]>(() => [
-    { id: 'dashboard', label: 'Dashboard', icon: <LayoutGrid className="w-3.5 h-3.5" strokeWidth={1.9} /> },
-    { id: 'media', label: 'Media', icon: <Music className="w-3.5 h-3.5" strokeWidth={1.9} /> },
-    { id: 'performance', label: 'Performance', icon: <Activity className="w-3.5 h-3.5" strokeWidth={1.9} /> },
-    ...(settings.showAppsTab
-      ? [{ id: 'apps' as TabId, label: 'Apps', icon: <AppWindow className="w-3.5 h-3.5" strokeWidth={1.9} /> }]
-      : []),
-    { id: 'wallpaper', label: 'Wallpaper', icon: <ImageIcon className="w-3.5 h-3.5" strokeWidth={1.9} /> },
-    { id: 'weather', label: 'Weather', icon: <CloudSun className="w-3.5 h-3.5" strokeWidth={1.9} /> },
-    ...(settings.showTerminalTab
-      ? [{ id: 'terminal' as TabId, label: 'Terminal', icon: <TerminalIcon className="w-3.5 h-3.5" strokeWidth={1.9} /> }]
-      : []),
-    { id: 'power' as TabId, label: 'Power', icon: <PowerIcon className="w-3.5 h-3.5" strokeWidth={1.9} /> },
-    { id: 'settings', label: 'Settings', icon: <SettingsIcon className="w-3.5 h-3.5" strokeWidth={1.9} /> },
-  ], [settings.showAppsTab, settings.showTerminalTab]);
+  const visibleTabs = useMemo<{ id: TabId; label: string; icon: React.ReactNode }[]>(
+    () => [
+      {
+        id: 'dashboard',
+        label: 'Dashboard',
+        icon: <LayoutGrid className="w-3.5 h-3.5" strokeWidth={1.9} />,
+      },
+      { id: 'media', label: 'Media', icon: <Music className="w-3.5 h-3.5" strokeWidth={1.9} /> },
+      {
+        id: 'performance',
+        label: 'Performance',
+        icon: <Activity className="w-3.5 h-3.5" strokeWidth={1.9} />,
+      },
+      ...(settings.showAppsTab
+        ? [
+            {
+              id: 'apps' as TabId,
+              label: 'Apps',
+              icon: <AppWindow className="w-3.5 h-3.5" strokeWidth={1.9} />,
+            },
+          ]
+        : []),
+      {
+        id: 'wallpaper',
+        label: 'Wallpaper',
+        icon: <ImageIcon className="w-3.5 h-3.5" strokeWidth={1.9} />,
+      },
+      {
+        id: 'weather',
+        label: 'Weather',
+        icon: <CloudSun className="w-3.5 h-3.5" strokeWidth={1.9} />,
+      },
+      ...(settings.showTerminalTab
+        ? [
+            {
+              id: 'terminal' as TabId,
+              label: 'Developer',
+              icon: <TerminalIcon className="w-3.5 h-3.5" strokeWidth={1.9} />,
+            },
+          ]
+        : []),
+      {
+        id: 'power' as TabId,
+        label: 'Power',
+        icon: <PowerIcon className="w-3.5 h-3.5" strokeWidth={1.9} />,
+      },
+      {
+        id: 'settings',
+        label: 'Settings',
+        icon: <SettingsIcon className="w-3.5 h-3.5" strokeWidth={1.9} />,
+      },
+    ],
+    [settings.showAppsTab, settings.showTerminalTab],
+  );
 
   // If the Apps tab is toggled off in Settings while active, return to Dashboard.
   // The Quick Launch "Add App" picker also lives on the Apps tab, so keep it mounted while
@@ -410,6 +421,17 @@ const CanopyShellContent: React.FC = () => {
     }, 5000);
   }, []);
 
+  useEffect(() => {
+    const onBridgeError = (event: Event) => {
+      const detail = (event as CustomEvent<{ cmd?: string; message?: string }>).detail;
+      const action = detail?.cmd?.replaceAll('_', ' ') || 'native action';
+      const reason = detail?.message?.trim();
+      handleToastNotification(`Canopy couldn't complete ${action}${reason ? `: ${reason}` : '.'}`);
+    };
+    window.addEventListener('canopy:bridge-error', onBridgeError);
+    return () => window.removeEventListener('canopy:bridge-error', onBridgeError);
+  }, [handleToastNotification]);
+
   // Sync topHoverTrigger setting to native host
   useEffect(() => {
     setTopHoverTrigger(settings.topHoverTrigger).catch(() => {});
@@ -432,7 +454,12 @@ const CanopyShellContent: React.FC = () => {
       let nextOpen: boolean | null = null;
       if (typeof detail === 'boolean') {
         nextOpen = detail;
-      } else if (detail && typeof detail === 'object' && 'open' in detail && typeof detail.open === 'boolean') {
+      } else if (
+        detail &&
+        typeof detail === 'object' &&
+        'open' in detail &&
+        typeof detail.open === 'boolean'
+      ) {
         nextOpen = detail.open;
       }
       if (nextOpen === null) {
@@ -478,7 +505,6 @@ const CanopyShellContent: React.FC = () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [paletteOpen]);
-
 
   // Apply dynamic theme palette whenever wallpapers or settings.themeMode change
   const syncThemeWithActiveWallpaper = useCallback(
@@ -592,7 +618,11 @@ const CanopyShellContent: React.FC = () => {
     let active = true;
     (async () => {
       try {
-        const [vol, bri, wpList] = await Promise.all([getMasterVolume(), getBrightness(), getWallpapers()]);
+        const [vol, bri, wpList] = await Promise.all([
+          getMasterVolume(),
+          getBrightness(),
+          getWallpapers(),
+        ]);
         if (!active) return;
         if (typeof vol === 'number' && !Number.isNaN(vol)) {
           setVolume(Math.round(vol));
@@ -631,15 +661,18 @@ const CanopyShellContent: React.FC = () => {
     };
   }, [settings.showMicSlider, shellActive]);
 
-  const handleMicLevelChange = useCallback((level: number) => {
-    const clamped = Math.max(0, Math.min(100, Math.round(level)));
-    setMicVolume(clamped);
-    if (clamped > 0 && micMuted) {
-      setMicMuted(false);
-      writeMicMute(false).catch(() => {});
-    }
-    writeMicVolume(clamped).catch(() => {});
-  }, [micMuted]);
+  const handleMicLevelChange = useCallback(
+    (level: number) => {
+      const clamped = Math.max(0, Math.min(100, Math.round(level)));
+      setMicVolume(clamped);
+      if (clamped > 0 && micMuted) {
+        setMicMuted(false);
+        writeMicMute(false).catch(() => {});
+      }
+      writeMicVolume(clamped).catch(() => {});
+    },
+    [micMuted],
+  );
 
   const handleMicMuteToggle = useCallback(() => {
     setMicMuted((prev) => {
@@ -686,7 +719,10 @@ const CanopyShellContent: React.FC = () => {
     const onHotkeyFailed = (e: Event) => {
       const detail = (e as CustomEvent<unknown>).detail;
       const hotkey =
-        detail && typeof detail === 'object' && 'hotkey' in detail && typeof detail.hotkey === 'string'
+        detail &&
+        typeof detail === 'object' &&
+        'hotkey' in detail &&
+        typeof detail.hotkey === 'string'
           ? detail.hotkey
           : 'the configured hotkey';
       handleToastNotification(`Hotkey ${hotkey} is taken by another app`);
@@ -712,7 +748,12 @@ const CanopyShellContent: React.FC = () => {
     let active = true;
     const onBatteryChanged = (e: Event) => {
       const detail = (e as CustomEvent<unknown>).detail;
-      if (!detail || typeof detail !== 'object' || !('has_battery' in detail) || typeof detail.has_battery !== 'boolean') {
+      if (
+        !detail ||
+        typeof detail !== 'object' ||
+        !('has_battery' in detail) ||
+        typeof detail.has_battery !== 'boolean'
+      ) {
         return;
       }
       const next: BatteryStatus = {
@@ -855,7 +896,9 @@ const CanopyShellContent: React.FC = () => {
       const target = e.target;
       if (
         target instanceof Element &&
-        target.closest('input, textarea, select, button, a, [contenteditable="true"], [role="button"]')
+        target.closest(
+          'input, textarea, select, button, a, [contenteditable="true"], [role="button"]',
+        )
       ) {
         return;
       }
@@ -898,13 +941,6 @@ const CanopyShellContent: React.FC = () => {
     const id = window.setInterval(refreshWeather, 30 * 60 * 1000);
     return () => window.clearInterval(id);
   }, [refreshWeather]);
-
-  // Auto-scroll terminal output
-  useEffect(() => {
-    if (activeTab === 'terminal') {
-      terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [terminalHistory, activeTab]);
 
   // Media transport handlers
   const handlePlayPause = async () => {
@@ -1015,71 +1051,12 @@ const CanopyShellContent: React.FC = () => {
         await applyWallpaper(entry.path);
       }
       setWallpaperStatus(`Applied "${entry.name}"`);
-    } catch {
-      setWallpaperStatus(`Active: "${entry.name}"`);
+    } catch (error) {
+      const reason =
+        error instanceof Error ? error.message : 'The Windows wallpaper service returned an error.';
+      setWallpaperStatus(`Couldn't apply "${entry.name}": ${reason}`);
     }
     window.setTimeout(() => setWallpaperStatus(''), 2500);
-  };
-
-  // Terminal command execution
-  const executeCommand = async (rawCmd: string) => {
-    const cmd = rawCmd.trim();
-    if (!cmd) return;
-
-    setCommandHistoryList((prev) => (prev[prev.length - 1] === cmd ? prev : [...prev, cmd]));
-    setHistoryIndex(-1);
-
-    const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    if (cmd.toLowerCase() === 'clear' || cmd.toLowerCase() === 'cls') {
-      setTerminalHistory([]);
-      setTerminalInput('');
-      return;
-    }
-
-    if (cmd.toLowerCase() === 'fastfetch' || cmd.toLowerCase() === 'neofetch') {
-      setTerminalHistory((prev) => [
-        ...prev,
-        {
-          id: `${Date.now()}-${Math.random()}`,
-          command: cmd,
-          output: '',
-          timestamp: ts,
-          isFastfetch: true,
-        },
-      ]);
-      setTerminalInput('');
-      return;
-    }
-
-    const actualCommandToRun =
-      cmd.toLowerCase() === 'uptime' ? WINDOWS_POWERSHELL_UPTIME_CMD : cmd;
-
-    setTerminalBusy(true);
-    setTerminalInput('');
-    try {
-      const output = await runTerminalCommand(actualCommandToRun);
-      setTerminalHistory((prev) => [
-        ...prev,
-        {
-          id: `${Date.now()}-${Math.random()}`,
-          command: cmd === 'uptime' ? `uptime (${WINDOWS_POWERSHELL_UPTIME_CMD})` : cmd,
-          output: output || stats.uptime_formatted || 'Command completed with no output.',
-          timestamp: ts,
-        },
-      ]);
-    } catch (err) {
-      setTerminalHistory((prev) => [
-        ...prev,
-        {
-          id: `${Date.now()}-${Math.random()}`,
-          command: cmd,
-          output: err instanceof Error ? err.message : 'Execution error',
-          timestamp: ts,
-        },
-      ]);
-    } finally {
-      setTerminalBusy(false);
-    }
   };
 
   // Clock formatting driven exclusively by Settings
@@ -1121,9 +1098,6 @@ const CanopyShellContent: React.FC = () => {
     .replace(/hours?/i, 'h')
     .replace(/minutes?/i, 'm')
     .replace(/,\s*/g, ' ');
-
-  const uvValue = typeof weather.uvIndex === 'number' ? weather.uvIndex : 4;
-  const uvRiskLabel = uvValue >= 8 ? 'Very High' : uvValue >= 6 ? 'High' : uvValue >= 3 ? 'Moderate' : 'Low';
 
   return (
     <div
@@ -1170,8 +1144,14 @@ const CanopyShellContent: React.FC = () => {
             <div
               data-tauri-drag-region="false"
               className="canopy-pill absolute right-2.5 top-1/2 -translate-y-1/2 px-2 py-1 flex items-center gap-1 text-[10px] font-mono tabular-nums pointer-events-none"
-              style={{ color: battery.charging ? 'var(--theme-accent)' : 'var(--theme-text-secondary)' }}
-              title={battery.charging ? `Charging — ${Math.round(battery.percent)}%` : `On battery — ${Math.round(battery.percent)}%`}
+              style={{
+                color: battery.charging ? 'var(--theme-accent)' : 'var(--theme-text-secondary)',
+              }}
+              title={
+                battery.charging
+                  ? `Charging — ${Math.round(battery.percent)}%`
+                  : `On battery — ${Math.round(battery.percent)}%`
+              }
             >
               {battery.charging ? (
                 <BatteryCharging className="w-3 h-3 shrink-0" />
@@ -1209,7 +1189,11 @@ const CanopyShellContent: React.FC = () => {
                     border: active ? '1px solid var(--theme-accent)' : '1px solid transparent',
                   }}
                 >
-                  <span style={{ color: active ? 'var(--theme-accent)' : 'var(--theme-text-secondary)' }}>
+                  <span
+                    style={{
+                      color: active ? 'var(--theme-accent)' : 'var(--theme-text-secondary)',
+                    }}
+                  >
                     {tab.icon}
                   </span>
                   <span>{tab.label}</span>
@@ -1226,7 +1210,10 @@ const CanopyShellContent: React.FC = () => {
         </header>
 
         {/* Main Content Viewport (386px height) with Fade & Slide Tab Transition */}
-        <main key={activeTab} className="canopy-tab-transition flex-1 px-2.5 py-2.5 overflow-hidden">
+        <main
+          key={activeTab}
+          className="canopy-tab-transition flex-1 px-2.5 py-2.5 overflow-hidden"
+        >
           {/* ================================================================================= */}
           {/* TAB 1: DASHBOARD (4-Zone Bento Grid — Zero Inline Toggles, Zero Slider Overlap)    */}
           {/* ================================================================================= */}
@@ -1247,25 +1234,39 @@ const CanopyShellContent: React.FC = () => {
                         className="text-[9px] font-mono uppercase tracking-wider flex items-center gap-1"
                         style={{ color: 'var(--theme-text-secondary)' }}
                       >
-                        <MapPin className="w-2.5 h-2.5 shrink-0" style={{ color: 'var(--theme-accent)' }} />
-                        <span className="truncate">{weather.locationName.split(',')[0]}</span>
+                        <MapPin
+                          className="w-2.5 h-2.5 shrink-0"
+                          style={{ color: 'var(--theme-accent)' }}
+                        />
+                        <span className="truncate">
+                          {weather.isLive ? weather.locationName.split(',')[0] : 'Weather offline'}
+                        </span>
                       </span>
                       <div className="mt-1.5 flex items-baseline gap-1">
                         <span
                           className="text-3xl font-bold tracking-tight tabular-nums leading-none"
                           style={{ color: 'var(--theme-text-primary)' }}
                         >
-                          {weather.temp}
-                          {tempUnit}
+                          {weather.isLive ? `${weather.temp}${tempUnit}` : '—'}
                         </span>
                       </div>
                     </div>
 
                     <div
                       className="p-1.5 rounded-xl group-hover:scale-105 transition-transform shrink-0"
-                      style={{ background: 'var(--theme-track)', border: '1px solid var(--theme-border)' }}
+                      style={{
+                        background: 'var(--theme-track)',
+                        border: '1px solid var(--theme-border)',
+                      }}
                     >
-                      {renderWeatherIcon(weather.code, weather.condition, 'w-5 h-5')}
+                      {weather.isLive ? (
+                        renderWeatherIcon(weather.code, weather.condition, 'w-5 h-5')
+                      ) : (
+                        <CloudSun
+                          className="w-5 h-5"
+                          style={{ color: 'var(--theme-text-secondary)' }}
+                        />
+                      )}
                     </div>
                   </div>
 
@@ -1274,22 +1275,37 @@ const CanopyShellContent: React.FC = () => {
                       className="text-xs font-semibold tracking-tight truncate"
                       style={{ color: 'var(--theme-accent)' }}
                     >
-                      {weather.condition}
+                      {weather.isLive ? weather.condition : 'Weather unavailable'}
                     </div>
-                    <div className="mt-1.5 flex items-center gap-1">
-                      <span
-                        className="px-1.5 py-0.5 rounded-md text-[9px] font-mono tabular-nums"
-                        style={{ background: 'var(--theme-track)', color: 'var(--theme-text-secondary)' }}
+                    {weather.isLive ? (
+                      <div className="mt-1.5 flex items-center gap-1">
+                        <span
+                          className="px-1.5 py-0.5 rounded-md text-[9px] font-mono tabular-nums"
+                          style={{
+                            background: 'var(--theme-track)',
+                            color: 'var(--theme-text-secondary)',
+                          }}
+                        >
+                          H:<strong className="text-[#fab387] ml-0.5">{weather.high}°</strong>
+                        </span>
+                        <span
+                          className="px-1.5 py-0.5 rounded-md text-[9px] font-mono tabular-nums"
+                          style={{
+                            background: 'var(--theme-track)',
+                            color: 'var(--theme-text-secondary)',
+                          }}
+                        >
+                          L:<strong className="text-[#89b4fa] ml-0.5">{weather.low}°</strong>
+                        </span>
+                      </div>
+                    ) : (
+                      <div
+                        className="mt-1.5 text-[9px] font-mono"
+                        style={{ color: 'var(--theme-text-secondary)' }}
                       >
-                        H:<strong className="text-[#fab387] ml-0.5">{weather.high}°</strong>
-                      </span>
-                      <span
-                        className="px-1.5 py-0.5 rounded-md text-[9px] font-mono tabular-nums"
-                        style={{ background: 'var(--theme-track)', color: 'var(--theme-text-secondary)' }}
-                      >
-                        L:<strong className="text-[#89b4fa] ml-0.5">{weather.low}°</strong>
-                      </span>
-                    </div>
+                        Open Weather to retry
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -1319,17 +1335,29 @@ const CanopyShellContent: React.FC = () => {
                   {/* Digital Clock Stack */}
                   <div className="my-auto flex flex-col items-center justify-center">
                     <div className="flex items-baseline gap-1 font-mono font-bold tracking-tight tabular-nums">
-                      <span className="text-3xl leading-none" style={{ color: 'var(--theme-text-primary)' }}>
+                      <span
+                        className="text-3xl leading-none"
+                        style={{ color: 'var(--theme-text-primary)' }}
+                      >
                         {formattedHours}
                       </span>
-                      <span className="text-2xl leading-none animate-pulse" style={{ color: 'var(--theme-accent)' }}>
+                      <span
+                        className="text-2xl leading-none animate-pulse"
+                        style={{ color: 'var(--theme-accent)' }}
+                      >
                         :
                       </span>
-                      <span className="text-3xl leading-none" style={{ color: 'var(--theme-text-primary)' }}>
+                      <span
+                        className="text-3xl leading-none"
+                        style={{ color: 'var(--theme-text-primary)' }}
+                      >
                         {formattedMinutes}
                       </span>
                       {settings.showSeconds && (
-                        <span className="text-xs font-semibold ml-0.5" style={{ color: 'var(--theme-accent)' }}>
+                        <span
+                          className="text-xs font-semibold ml-0.5"
+                          style={{ color: 'var(--theme-accent)' }}
+                        >
                           :{formattedSeconds}
                         </span>
                       )}
@@ -1337,7 +1365,10 @@ const CanopyShellContent: React.FC = () => {
                   </div>
 
                   {/* Day & Date Badge Underneath */}
-                  <div className="flex items-center justify-between pt-1.5" style={{ borderTop: '1px solid var(--theme-border)' }}>
+                  <div
+                    className="flex items-center justify-between pt-1.5"
+                    style={{ borderTop: '1px solid var(--theme-border)' }}
+                  >
                     <span
                       className="px-2 py-0.5 rounded-md text-[10px] font-semibold tracking-tight"
                       style={{
@@ -1347,7 +1378,10 @@ const CanopyShellContent: React.FC = () => {
                     >
                       {formattedDayDate}
                     </span>
-                    <span className="text-[9px] font-mono tabular-nums" style={{ color: 'var(--theme-text-secondary)' }}>
+                    <span
+                      className="text-[9px] font-mono tabular-nums"
+                      style={{ color: 'var(--theme-text-secondary)' }}
+                    >
                       :{formattedSeconds}s
                     </span>
                   </div>
@@ -1361,7 +1395,10 @@ const CanopyShellContent: React.FC = () => {
                   <div className="flex items-center gap-1.5 min-w-0">
                     <div
                       className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
-                      style={{ background: 'var(--theme-track)', border: '1px solid var(--theme-accent)' }}
+                      style={{
+                        background: 'var(--theme-track)',
+                        border: '1px solid var(--theme-accent)',
+                      }}
                     >
                       <User className="w-3.5 h-3.5" style={{ color: 'var(--theme-accent)' }} />
                     </div>
@@ -1394,14 +1431,26 @@ const CanopyShellContent: React.FC = () => {
                 {/* Pinned Quick-Launch App Dock */}
                 <div
                   className="bento-card h-[34px] shrink-0 px-2.5 flex items-center justify-between gap-1"
-                  style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)' }}
+                  style={{
+                    background: 'var(--theme-card)',
+                    border: '1px solid var(--theme-border)',
+                  }}
                 >
-                  <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: 'var(--theme-text-secondary)' }}>
+                  <span
+                    className="text-[9px] font-mono uppercase tracking-wider"
+                    style={{ color: 'var(--theme-text-secondary)' }}
+                  >
                     Quick Launch
                   </span>
                   <div className="flex items-center gap-1.5">
                     {Array.from({ length: 6 }).map((_, slotIdx) => {
-                      const appId = (settings.pinnedApps || ['terminal', 'explorer', 'taskmgr', 'msedge', 'code'])[slotIdx];
+                      const appId = (settings.pinnedApps || [
+                        'terminal',
+                        'explorer',
+                        'taskmgr',
+                        'msedge',
+                        'code',
+                      ])[slotIdx];
                       if (!appId || appId.trim().length === 0) {
                         return (
                           <button
@@ -1420,7 +1469,11 @@ const CanopyShellContent: React.FC = () => {
                       const app = QUICK_APP_CATALOGUE[appId] || {
                         label: custom?.label || appId,
                         icon: custom?.icon_data_url ? (
-                          <img src={custom.icon_data_url} alt={custom.label} className="w-3.5 h-3.5 object-contain" />
+                          <img
+                            src={custom.icon_data_url}
+                            alt={custom.label}
+                            className="w-3.5 h-3.5 object-contain"
+                          />
                         ) : (
                           <AppWindow className="w-3.5 h-3.5" />
                         ),
@@ -1448,7 +1501,10 @@ const CanopyShellContent: React.FC = () => {
                 </div>
 
                 {/* Interactive Calendar with Reminders (Bottom) */}
-                <CalendarCard className="flex-1 min-h-0" onToastNotification={handleToastNotification} />
+                <CalendarCard
+                  className="flex-1 min-h-0"
+                  onToastNotification={handleToastNotification}
+                />
               </div>
 
               {/* ZONE 3: VERTICAL SLIDER DECK (Self-contained Bento Card, respects enableBrightnessSlider) */}
@@ -1491,8 +1547,14 @@ const CanopyShellContent: React.FC = () => {
 
                 {/* Circular Vinyl Artwork with Circular Progress Ring */}
                 <div className="relative flex items-center justify-center my-0.5">
-                  <div className="relative flex items-center justify-center" style={{ width: vinylSize, height: vinylSize }}>
-                    <svg className="w-full h-full -rotate-90" viewBox={`0 0 ${vinylSize} ${vinylSize}`}>
+                  <div
+                    className="relative flex items-center justify-center"
+                    style={{ width: vinylSize, height: vinylSize }}
+                  >
+                    <svg
+                      className="w-full h-full -rotate-90"
+                      viewBox={`0 0 ${vinylSize} ${vinylSize}`}
+                    >
                       <circle
                         cx={vinylSize / 2}
                         cy={vinylSize / 2}
@@ -1528,7 +1590,11 @@ const CanopyShellContent: React.FC = () => {
                       title="Click vinyl to Play / Pause"
                     >
                       {resolvedArtwork ? (
-                        <img src={resolvedArtwork} alt={trackTitle} className="w-full h-full object-cover" />
+                        <img
+                          src={resolvedArtwork}
+                          alt={trackTitle}
+                          className="w-full h-full object-cover"
+                        />
                       ) : (
                         <>
                           <div className="absolute inset-2 rounded-full border border-white/[0.07] pointer-events-none" />
@@ -1585,7 +1651,11 @@ const CanopyShellContent: React.FC = () => {
                     }}
                     title={isMusicPlaying ? 'Pause' : 'Play'}
                   >
-                    {isMusicPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 ml-0.5" />}
+                    {isMusicPlaying ? (
+                      <Pause className="w-3.5 h-3.5" />
+                    ) : (
+                      <Play className="w-3.5 h-3.5 ml-0.5" />
+                    )}
                   </button>
                   <button
                     type="button"
@@ -1734,422 +1804,19 @@ const CanopyShellContent: React.FC = () => {
           {/* TAB 6: WEATHER (Balanced Left Cohesive Card + Right Hourly & Extended Outlook)    */}
           {/* ================================================================================= */}
           {activeTab === 'weather' && (
-            <div className="w-full h-full grid grid-cols-12 gap-2.5">
-              {/* Left 5 Cols: Cohesive, Well-Proportioned Atmospheric Bento Card */}
-              <div className="col-span-5 flex flex-col h-full">
-                <div className="bento-card flex-1 p-3.5 flex flex-col justify-between relative overflow-hidden">
-                  {/* Top Header: Location & Refresh */}
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <span
-                        className="text-[10px] font-mono uppercase tracking-widest flex items-center gap-1"
-                        style={{ color: 'var(--theme-accent)' }}
-                      >
-                        <MapPin className="w-3 h-3 shrink-0" />
-                        <span className="truncate">{weather.locationName}</span>
-                      </span>
-                      <div className="mt-1.5 flex items-baseline gap-2">
-                        <span
-                          className="text-4xl font-bold tracking-tight tabular-nums leading-none"
-                          style={{ color: 'var(--theme-text-primary)' }}
-                        >
-                          {weather.temp}
-                          {tempUnit}
-                        </span>
-                        <span
-                          className="px-2 py-0.5 rounded-full text-[11px] font-semibold"
-                          style={{
-                            background: 'var(--theme-track)',
-                            color: 'var(--theme-accent)',
-                            border: '1px solid var(--theme-border)',
-                          }}
-                        >
-                          {weather.condition}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        type="button"
-                        data-tauri-drag-region="false"
-                        onClick={refreshWeather}
-                        className="p-1.5 rounded-xl transition-all pointer-events-auto cursor-pointer"
-                        style={{
-                          background: 'var(--theme-track)',
-                          color: 'var(--theme-text-primary)',
-                          border: '1px solid var(--theme-border)',
-                        }}
-                        title="Refresh Open-Meteo Telemetry"
-                      >
-                        <RefreshCw className={`w-3.5 h-3.5 ${weatherLoading ? 'animate-spin' : ''}`} />
-                      </button>
-                      <div
-                        className="p-2 rounded-2xl"
-                        style={{ background: 'var(--theme-track)', border: '1px solid var(--theme-border)' }}
-                      >
-                        {renderWeatherIcon(weather.code, weather.condition, 'w-7 h-7')}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Daily Range Progress Strip */}
-                  <div
-                    className="my-2 px-3 py-2 rounded-xl flex items-center justify-between gap-2.5"
-                    style={{ background: 'var(--theme-track)', border: '1px solid var(--theme-border)' }}
-                  >
-                    <span className="text-[11px] font-mono tabular-nums" style={{ color: 'var(--theme-text-secondary)' }}>
-                      Low <strong className="text-[#89b4fa]">{weather.low}{tempUnit}</strong>
-                    </span>
-                    <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--theme-border)' }}>
-                      <div
-                        className="h-full rounded-full w-3/4 mx-auto"
-                        style={{ backgroundColor: 'var(--theme-accent)' }}
-                      />
-                    </div>
-                    <span className="text-[11px] font-mono tabular-nums" style={{ color: 'var(--theme-text-secondary)' }}>
-                      High <strong className="text-[#fab387]">{weather.high}{tempUnit}</strong>
-                    </span>
-                  </div>
-
-                  {/* 2x2 Atmospheric Telemetry Grid: Feels Like, Humidity, Wind Speed, UV Index */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="canopy-pill p-2.5 flex flex-col justify-between">
-                      <span className="text-[9px] font-mono uppercase tracking-wider flex items-center gap-1" style={{ color: 'var(--theme-text-secondary)' }}>
-                        <Thermometer className="w-3 h-3 text-[#fab387]" /> Feels Like
-                      </span>
-                      <div className="mt-1 flex items-baseline justify-between">
-                        <span className="text-base font-bold tabular-nums" style={{ color: 'var(--theme-text-primary)' }}>
-                          {weather.feelsLike}
-                          {tempUnit}
-                        </span>
-                        <span className="text-[9px] font-mono" style={{ color: 'var(--theme-text-secondary)' }}>
-                          {Math.abs(weather.feelsLike - weather.temp) <= 2 ? 'Similar' : 'Wind chill'}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="canopy-pill p-2.5 flex flex-col justify-between">
-                      <span className="text-[9px] font-mono uppercase tracking-wider flex items-center gap-1" style={{ color: 'var(--theme-text-secondary)' }}>
-                        <Droplets className="w-3 h-3 text-[#89dceb]" /> Humidity
-                      </span>
-                      <div className="mt-1 flex items-baseline justify-between">
-                        <span className="text-base font-bold tabular-nums" style={{ color: 'var(--theme-text-primary)' }}>
-                          {weather.humidity}%
-                        </span>
-                        <span className="text-[9px] font-mono" style={{ color: 'var(--theme-text-secondary)' }}>
-                          {weather.humidity < 35 ? 'Dry' : weather.humidity <= 65 ? 'Comfort' : 'Humid'}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="canopy-pill p-2.5 flex flex-col justify-between">
-                      <span className="text-[9px] font-mono uppercase tracking-wider flex items-center gap-1" style={{ color: 'var(--theme-text-secondary)' }}>
-                        <Wind className="w-3 h-3 text-[#a6e3a1]" /> Wind Speed
-                      </span>
-                      <div className="mt-1 flex items-baseline justify-between">
-                        <span className="text-base font-bold tabular-nums" style={{ color: 'var(--theme-text-primary)' }}>
-                          {weather.windSpeed} <span className="text-[10px] font-normal">mph</span>
-                        </span>
-                        <span className="text-[9px] font-mono" style={{ color: 'var(--theme-text-secondary)' }}>
-                          {weather.windSpeed < 12 ? 'Calm' : 'Breezy'}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="canopy-pill p-2.5 flex flex-col justify-between">
-                      <span className="text-[9px] font-mono uppercase tracking-wider flex items-center gap-1" style={{ color: 'var(--theme-text-secondary)' }}>
-                        <Sparkles className="w-3 h-3 text-[#f9e2af]" /> UV Index
-                      </span>
-                      <div className="mt-1 flex items-baseline justify-between">
-                        <span className="text-base font-bold tabular-nums" style={{ color: 'var(--theme-text-primary)' }}>
-                          {uvValue}
-                        </span>
-                        <span
-                          className="px-1.5 py-0.5 rounded text-[9px] font-mono"
-                          style={{ background: 'var(--theme-track)', color: 'var(--theme-accent)' }}
-                        >
-                          {uvRiskLabel}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Cohesive Footer Summary Bar */}
-                  <div
-                    className="pt-2 mt-1 flex items-center justify-between text-[10px] font-mono"
-                    style={{ borderTop: '1px solid var(--theme-border)', color: 'var(--theme-text-secondary)' }}
-                  >
-                    <span>
-                      Source: {settings.weatherLocationMode === 'auto' ? 'Auto IP + Open-Meteo' : 'Manual Coords'}
-                    </span>
-                    <span style={{ color: 'var(--theme-accent)' }}>Unit: {tempUnit}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Right 7 Cols: Hourly Forecast Cards + 5-Day Extended Outlook */}
-              <div className="col-span-7 flex flex-col gap-2.5 h-full">
-                <div className="bento-card p-3.5">
-                  <span
-                    className="text-[10px] font-mono uppercase tracking-widest block mb-2"
-                    style={{ color: 'var(--theme-text-secondary)' }}
-                  >
-                    Hourly Forecast
-                  </span>
-                  <div className="grid grid-cols-6 gap-2">
-                    {weather.hourly.slice(0, 6).map((item, idx) => (
-                      <div key={idx} className="canopy-pill p-2 flex flex-col items-center justify-between gap-1.5">
-                        <span className="text-[10px] font-mono" style={{ color: 'var(--theme-text-secondary)' }}>
-                          {item.time}
-                        </span>
-                        {renderWeatherIcon(item.code, item.condition, 'w-5 h-5')}
-                        <span className="text-xs font-bold tabular-nums" style={{ color: 'var(--theme-text-primary)' }}>
-                          {item.temp}°
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="bento-card flex-1 p-3.5 flex flex-col justify-between overflow-hidden">
-                  <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: 'var(--theme-text-secondary)' }}>
-                    Extended Outlook
-                  </span>
-                  <div className="space-y-1.5 my-auto">
-                    {weather.daily.slice(0, 5).map((day, idx) => (
-                      <div
-                        key={idx}
-                        className="flex items-center justify-between px-3 py-1.5 rounded-xl"
-                        style={{ background: 'var(--theme-track)', border: '1px solid var(--theme-border)' }}
-                      >
-                        <span className="w-16 text-xs font-semibold" style={{ color: 'var(--theme-text-primary)' }}>
-                          {day.day}
-                        </span>
-                        <div className="flex items-center gap-2 w-32">
-                          {renderWeatherIcon(day.code, day.condition, 'w-4 h-4')}
-                          <span className="text-[11px] truncate" style={{ color: 'var(--theme-text-secondary)' }}>
-                            {day.condition}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2 w-36">
-                          <span className="text-[11px] font-mono tabular-nums w-8 text-right" style={{ color: 'var(--theme-text-secondary)' }}>
-                            {day.tempMin}°
-                          </span>
-                          <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--theme-border)' }}>
-                            <div
-                              className="h-full rounded-full w-4/5 mx-auto"
-                              style={{ backgroundColor: 'var(--theme-accent)' }}
-                            />
-                          </div>
-                          <span className="text-[11px] font-mono tabular-nums font-semibold w-8" style={{ color: 'var(--theme-text-primary)' }}>
-                            {day.tempMax}°
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
+            <WeatherView
+              weather={weather}
+              tempUnit={tempUnit}
+              weatherLoading={weatherLoading}
+              onRefreshWeather={refreshWeather}
+              locationMode={settings.weatherLocationMode}
+            />
           )}
 
           {/* ================================================================================= */}
           {/* TAB 7: TERMINAL (Interactive Canopy PowerShell Console)                           */}
           {/* ================================================================================= */}
-          {activeTab === 'terminal' && (
-            <div className="w-full h-full bento-card p-3.5 flex flex-col justify-between font-mono overflow-hidden">
-              <div
-                className="flex items-center justify-between pb-2 shrink-0"
-                style={{ borderBottom: '1px solid var(--theme-border)' }}
-              >
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#f38ba8]" />
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#f9e2af]" />
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#a6e3a1]" />
-                  <span className="ml-2 text-[11px]" style={{ color: 'var(--theme-text-secondary)' }}>
-                    {stats.username || 'CEO'}@{stats.hostname}:~ (canopy-powershell)
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-1.5">
-                  {[
-                    { label: 'fastfetch', cmd: 'fastfetch' },
-                    { label: 'ipconfig', cmd: 'ipconfig' },
-                    { label: 'tasklist', cmd: 'tasklist' },
-                    { label: 'uptime', cmd: 'uptime' },
-                    { label: 'clear', cmd: 'clear' },
-                  ].map((preset) => (
-                    <button
-                      key={preset.label}
-                      type="button"
-                      data-tauri-drag-region="false"
-                      onClick={() => executeCommand(preset.cmd)}
-                      className="px-2 py-0.5 rounded-md text-[10px] transition-all pointer-events-auto cursor-pointer"
-                      style={{
-                        background: 'var(--theme-track)',
-                        border: '1px solid var(--theme-border)',
-                        color: 'var(--theme-text-primary)',
-                      }}
-                      title={preset.label === 'uptime' ? WINDOWS_POWERSHELL_UPTIME_CMD : preset.cmd}
-                    >
-                      {preset.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div
-                data-tauri-drag-region="false"
-                className="flex-1 overflow-y-auto py-2.5 pr-1 space-y-3 text-[11px] leading-relaxed select-text pointer-events-auto"
-              >
-                {terminalHistory.map((item) => (
-                  <div key={item.id} className="space-y-1.5">
-                    <div className="flex items-center gap-2 text-xs">
-                      <span className="font-bold" style={{ color: 'var(--theme-accent)' }}>
-                        ❯
-                      </span>
-                      <span className="font-semibold" style={{ color: 'var(--theme-text-primary)' }}>
-                        {item.command}
-                      </span>
-                      <span className="text-[9px] ml-auto" style={{ color: 'var(--theme-text-secondary)' }}>
-                        {item.timestamp}
-                      </span>
-                    </div>
-
-                    {item.isFastfetch ? (
-                      <div
-                        className="grid grid-cols-12 gap-3 p-2.5 rounded-xl"
-                        style={{ background: 'var(--theme-track)', border: '1px solid var(--theme-border)' }}
-                      >
-                        <pre
-                          className="col-span-5 text-[10px] leading-[1.15] font-bold overflow-hidden"
-                          style={{ color: 'var(--theme-accent)' }}
-                        >
-{`       /\\
-      /  \\      canopy@win11
-     / /\\ \\     ------------
-    / /  \\ \\    🌿 Canopy Desktop Shell
-   / /    \\ \\   🎨 Adaptive Wallpaper Theme
-  / / /\\ \\ \\ \\  ⚡ Win32 + WebView2
- /_/ /  \\ \\_\\_\\`}
-                        </pre>
-                        <div className="col-span-7 text-[11px] space-y-0.5">
-                          <div>
-                            <span className="font-semibold" style={{ color: 'var(--theme-accent)' }}>
-                              OS:
-                            </span>{' '}
-                            <span>{stats.os_name || 'Windows 11 Pro x86_64'}</span>
-                          </div>
-                          <div>
-                            <span className="font-semibold" style={{ color: 'var(--theme-accent)' }}>
-                              Host:
-                            </span>{' '}
-                            <span>{stats.hostname}</span>
-                          </div>
-                          <div>
-                            <span className="font-semibold" style={{ color: 'var(--theme-accent)' }}>
-                              Uptime:
-                            </span>{' '}
-                            <span>{stats.uptime_formatted}</span>
-                          </div>
-                          <div>
-                            <span className="font-semibold" style={{ color: 'var(--theme-accent)' }}>
-                              CPU / GPU:
-                            </span>{' '}
-                            <span>
-                              {Math.round(stats.cpu_usage)}% ({Math.round(stats.cpu_temp_c)}°C) /{' '}
-                              {Math.round(stats.gpu_usage)}% ({Math.round(stats.gpu_temp_c)}°C)
-                            </span>
-                          </div>
-                          <div>
-                            <span className="font-semibold" style={{ color: 'var(--theme-accent)' }}>
-                              Memory:
-                            </span>{' '}
-                            <span>
-                              {stats.ram_used_gb.toFixed(1)} GiB / {stats.ram_total_gb.toFixed(1)} GiB (
-                              {Math.round(stats.ram_usage)}%)
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <pre
-                        className="p-2.5 rounded-xl whitespace-pre-wrap break-words font-mono text-[11px]"
-                        style={{
-                          background: 'var(--theme-track)',
-                          border: '1px solid var(--theme-border)',
-                          color: 'var(--theme-text-primary)',
-                        }}
-                      >
-                        {item.output}
-                      </pre>
-                    )}
-                  </div>
-                ))}
-                <div ref={terminalEndRef} />
-              </div>
-
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  executeCommand(terminalInput);
-                }}
-                className="pt-2 flex items-center gap-2 shrink-0"
-                style={{ borderTop: '1px solid var(--theme-border)' }}
-              >
-                <span className="font-bold text-sm" style={{ color: 'var(--theme-accent)' }}>
-                  ❯
-                </span>
-                <input
-                  type="text"
-                  data-tauri-drag-region="false"
-                  value={terminalInput}
-                  onChange={(e) => {
-                    setTerminalInput(e.target.value);
-                    setHistoryIndex(-1);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'ArrowUp') {
-                      e.preventDefault();
-                      if (commandHistoryList.length === 0) return;
-                      const nextIdx = historyIndex === -1 ? commandHistoryList.length - 1 : Math.max(0, historyIndex - 1);
-                      setHistoryIndex(nextIdx);
-                      setTerminalInput(commandHistoryList[nextIdx] || '');
-                    } else if (e.key === 'ArrowDown') {
-                      e.preventDefault();
-                      if (historyIndex === -1) return;
-                      const nextIdx = historyIndex + 1;
-                      if (nextIdx >= commandHistoryList.length) {
-                        setHistoryIndex(-1);
-                        setTerminalInput('');
-                      } else {
-                        setHistoryIndex(nextIdx);
-                        setTerminalInput(commandHistoryList[nextIdx] || '');
-                      }
-                    }
-                  }}
-                  disabled={terminalBusy}
-                  placeholder="Run PowerShell command (↑/↓ for history, e.g., fastfetch, ipconfig, uptime)..."
-                  className="flex-1 bg-transparent text-xs focus:outline-none font-mono pointer-events-auto"
-                  style={{ color: 'var(--theme-text-primary)' }}
-                />
-                <button
-                  type="submit"
-                  data-tauri-drag-region="false"
-                  disabled={terminalBusy || !terminalInput.trim()}
-                  className="px-2.5 py-1 rounded-lg disabled:opacity-40 text-[10px] flex items-center gap-1 transition-all pointer-events-auto cursor-pointer"
-                  style={{
-                    background: 'var(--theme-accent)',
-                    color: '#11111b',
-                  }}
-                >
-                  <Send className="w-3 h-3" />
-                  <span>{terminalBusy ? 'Running...' : 'Run'}</span>
-                </button>
-              </form>
-            </div>
-          )}
+          {activeTab === 'terminal' && <TerminalView stats={stats} />}
 
           {/* ================================================================================= */}
           {/* TAB 8: POWER (Sleep, Restart, Shut Down, Lock, Sign Out, Hibernate)               */}
@@ -2260,7 +1927,10 @@ const CanopyShellContent: React.FC = () => {
 
             <div className="max-h-[230px] overflow-y-auto py-1">
               {paletteMatches.length === 0 ? (
-                <div className="px-3 py-3 text-[11px]" style={{ color: 'var(--theme-text-secondary)' }}>
+                <div
+                  className="px-3 py-3 text-[11px]"
+                  style={{ color: 'var(--theme-text-secondary)' }}
+                >
                   No matching commands
                 </div>
               ) : (
@@ -2285,7 +1955,9 @@ const CanopyShellContent: React.FC = () => {
                       <span
                         className="shrink-0"
                         style={{
-                          color: highlighted ? 'var(--theme-accent)' : 'var(--theme-text-secondary)',
+                          color: highlighted
+                            ? 'var(--theme-accent)'
+                            : 'var(--theme-text-secondary)',
                         }}
                       >
                         {command.icon}

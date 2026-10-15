@@ -304,6 +304,15 @@ public partial class MainWindow : Window
                 distDir,
                 CoreWebView2HostResourceAccessKind.Allow);
 
+            core.NavigationStarting += (_, args) =>
+            {
+                if (!IsTrustedCanopyUri(args.Uri))
+                {
+                    args.Cancel = true;
+                }
+            };
+            core.NewWindowRequested += (_, args) => args.Handled = true;
+
             core.NavigationCompleted += (_, _) =>
             {
                 ApplyAdaptiveZoom(GetPanelMonitor());
@@ -346,6 +355,12 @@ public partial class MainWindow : Window
 
     private async void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
+        if (!IsTrustedCanopyUri(e.Source))
+        {
+            _log.Write($"rejected WebView message from untrusted source '{e.Source}'");
+            return;
+        }
+
         int id = 0;
         string cmd = string.Empty;
         try
@@ -368,6 +383,14 @@ public partial class MainWindow : Window
         }
     }
 
+    private static bool IsTrustedCanopyUri(string? source)
+    {
+        return Uri.TryCreate(source, UriKind.Absolute, out Uri? uri) &&
+               string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
+               string.Equals(uri.Host, "canopy.local", StringComparison.OrdinalIgnoreCase) &&
+               uri.IsDefaultPort;
+    }
+
     private async Task<object?> HandleBridgeCommandAsync(string cmd, JsonElement args)
     {
         switch (cmd)
@@ -379,8 +402,8 @@ public partial class MainWindow : Window
                 {
                     cpu_usage = (float)Math.Round(snap.CpuUsagePercent, 1),
                     cpu_temp_c = (float)Math.Round(snap.CpuTempC, 1),
-                    gpu_usage = (float)Math.Round(snap.GpuUsagePercent, 1),
-                    gpu_temp_c = (float)Math.Round(snap.GpuTempC, 1),
+                    gpu_usage = snap.GpuUsagePercent is double gpuUsage ? (float?)Math.Round(gpuUsage, 1) : null,
+                    gpu_temp_c = snap.GpuTempC is double gpuTemp ? (float?)Math.Round(gpuTemp, 1) : null,
                     core_usages = snap.CoreUsages,
                     top_processes = snap.TopProcesses,
                     net_down_kbps = (float)Math.Round(snap.NetDownKbps, 1),
@@ -572,13 +595,13 @@ public partial class MainWindow : Window
                     if (args.TryGetProperty("level", out JsonElement lvlEl) && lvlEl.TryGetDouble(out double lvl))
                     {
                         _currentBrightness = (int)Math.Clamp(Math.Round(lvl), 5, 100);
-                        _ = Task.Run(() => ApplyHardwareBrightness(_currentBrightness));
+                        QueueHardwareBrightness(_currentBrightness);
                     }
                 }
                 else if (args.ValueKind == JsonValueKind.Number && args.TryGetDouble(out double directLvl))
                 {
                     _currentBrightness = (int)Math.Clamp(Math.Round(directLvl), 5, 100);
-                    _ = Task.Run(() => ApplyHardwareBrightness(_currentBrightness));
+                    QueueHardwareBrightness(_currentBrightness);
                 }
                 return null;
             }
@@ -750,7 +773,7 @@ public partial class MainWindow : Window
                                 return false;
                             }
 
-                            key.SetValue("Canopy", $"\"{exePath}\"");
+                            key.SetValue("Canopy", $"\"{exePath}\" --hidden");
                         }
                         else
                         {
@@ -781,8 +804,12 @@ public partial class MainWindow : Window
             }
 
             case "get_installed_apps":
-                return await _systemMonitorService.GetInstalledAppsAsync();
-
+            {
+                bool force = args.ValueKind == JsonValueKind.Object &&
+                             args.TryGetProperty("force", out JsonElement fEl) &&
+                             fEl.GetBoolean();
+                return await _systemMonitorService.GetInstalledAppsAsync(force);
+            }
             case "launch_app":
             {
                 string? target = null;
@@ -859,6 +886,35 @@ public partial class MainWindow : Window
 
         return 80;
     }
+    private static CancellationTokenSource? _brightnessCts;
+    private static readonly object _brightnessLock = new();
+
+    private static void QueueHardwareBrightness(int level)
+    {
+        lock (_brightnessLock)
+        {
+            _brightnessCts?.Cancel();
+            _brightnessCts?.Dispose();
+            _brightnessCts = new CancellationTokenSource();
+            CancellationToken token = _brightnessCts.Token;
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(60, token);
+                    if (!token.IsCancellationRequested)
+                    {
+                        ApplyHardwareBrightness(level);
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                }
+            }, token);
+        }
+    }
+
 
     private static void ApplyHardwareBrightness(int level)
     {
@@ -1087,10 +1143,7 @@ public partial class MainWindow : Window
         if (TryGetBool(args, "showPanelOnLaunch", out bool showOnLaunch))
         {
             _showPanelOnLaunch = showOnLaunch;
-            if (!_showPanelOnLaunch && _isExpanded && DateTime.UtcNow < _ignoreAutoHideUntilUtc)
-            {
-                CollapsePanel();
-            }
+            HostPreferences.SaveShowPanelOnLaunch(showOnLaunch);
         }
 
         if (TryGetString(args, "hotkey", out string hotkey) &&
@@ -1190,11 +1243,34 @@ public partial class MainWindow : Window
                 handled = true;
             }
         }
-        else if (msg == 0x02E0) // WM_DPICHANGED
+        else if (msg == Win32.WM_DPICHANGED || msg == Win32.WM_DISPLAYCHANGE)
         {
+            _log.Write($"display geometry changed (msg=0x{msg:X4})");
             ApplyRoundedRegionForCurrentDpi();
             Win32.RECT panelMonitor = GetPanelMonitor();
             PositionWindowAtTopCenter(panelMonitor, offscreen: !_isExpanded);
+            handled = true;
+        }
+        else if (msg == Win32.WM_POWERBROADCAST)
+        {
+            int powerEvent = wParam.ToInt32();
+            if (powerEvent == Win32.PBT_APMSUSPEND)
+            {
+                _log.Write("system entering sleep (PBT_APMSUSPEND)");
+                _audioController.PauseCapture();
+                _audioSessions.Pause();
+                _systemMonitorService.Pause();
+            }
+            else if (powerEvent is Win32.PBT_APMRESUMESUSPEND or Win32.PBT_APMRESUMEAUTOMATIC)
+            {
+                _log.Write("system resumed from sleep; re-syncing services");
+                if (_isExpanded)
+                {
+                    _audioController.ResumeCapture();
+                    _audioSessions.Resume();
+                    _systemMonitorService.Resume();
+                }
+            }
             handled = true;
         }
 

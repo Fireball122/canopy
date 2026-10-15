@@ -1,4 +1,3 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ChevronDown,
@@ -13,22 +12,24 @@ import {
   Shuffle,
   X,
 } from 'lucide-react';
+import type React from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSettings } from '../context/SettingsContext';
 import {
-  applyThemeFromImageSrc,
-  applyThemeModeFallback,
-  applyThemePalette,
-} from '../services/palette';
-import {
-  DesktopWallpaperState,
-  WallpaperEntry,
+  type DesktopWallpaperState,
   getDesktopWallpaperState,
   pickWallpaperFolder,
   setDesktopWallpaper,
   setDesktopWallpaperState,
   setMonitorWallpaper,
   setWallpaperDirectory,
+  type WallpaperEntry,
 } from '../services/hostBridge';
+import {
+  applyThemeFromImageSrc,
+  applyThemeModeFallback,
+  applyThemePalette,
+} from '../services/palette';
 
 export interface WallpaperViewProps {
   wallpapers: WallpaperEntry[];
@@ -180,7 +181,7 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
 
   const filteredWallpapers = useMemo(() => {
     let list = wallpapers.filter((w) =>
-      w.name.toLowerCase().includes(searchQuery.trim().toLowerCase())
+      w.name.toLowerCase().includes(searchQuery.trim().toLowerCase()),
     );
     if (filterFavoritesOnly) {
       list = list.filter((w) => isFavorite(w.path));
@@ -273,18 +274,10 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
         if (themeRequestRef.current !== token) {
           return;
         }
-        applyThemeModeFallback(
-          targetThemeMode,
-          settings.glassOpacity,
-          settings.glassBlurStrength
-        );
+        applyThemeModeFallback(targetThemeMode, settings.glassOpacity, settings.glassBlurStrength);
       }
     } else {
-      applyThemeModeFallback(
-        settings.themeMode,
-        settings.glassOpacity,
-        settings.glassBlurStrength
-      );
+      applyThemeModeFallback(settings.themeMode, settings.glassOpacity, settings.glassBlurStrength);
     }
 
     try {
@@ -316,11 +309,7 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
         return;
       }
     }
-    applyThemeModeFallback(
-      mode,
-      settings.glassOpacity,
-      settings.glassBlurStrength
-    );
+    applyThemeModeFallback(mode, settings.glassOpacity, settings.glassBlurStrength);
   };
 
   const handleBrowseFolder = async () => {
@@ -354,14 +343,6 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
     if (!path) return null;
     const normalized = path.replace(/\//g, '\\').toLowerCase();
     return wallpapers.find((w) => w.path.replace(/\//g, '\\').toLowerCase() === normalized) ?? null;
-  };
-
-  const handleAssignMonitor = async (monitorId: string) => {
-    if (!activeWallpaper) return;
-    setBusyMonitorId(monitorId);
-    await setMonitorWallpaper(monitorId, activeWallpaper.path);
-    await refreshDesktopState();
-    setBusyMonitorId(null);
   };
 
   const handleToggleSlideshow = async (enabled: boolean) => {
@@ -573,8 +554,7 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
                 style={{
                   background: entry.data_url ? undefined : fallbackBg,
                   transform: 'scale(1)',
-                  transition:
-                    'transform 200ms ease, box-shadow 250ms ease, opacity 300ms ease',
+                  transition: 'transform 200ms ease, box-shadow 250ms ease, opacity 300ms ease',
                   boxShadow: isActive
                     ? '0 0 0 2px var(--theme-accent, #A29BFE), 0 0 18px -2px var(--theme-accent, rgba(162, 155, 254, 0.55))'
                     : '0 4px 12px rgba(0, 0, 0, 0.22)',
@@ -648,9 +628,7 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
                 {/* Subtle bottom scrim & friendly wallpaper name (only shown on hover or when active) */}
                 <div
                   className={`absolute inset-x-0 bottom-0 px-3 py-2 bg-gradient-to-t from-black/75 via-black/35 to-transparent flex items-end justify-between transition-opacity duration-200 pointer-events-none ${
-                    isActive
-                      ? 'opacity-100'
-                      : 'opacity-0 group-hover:opacity-100'
+                    isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                   }`}
                 >
                   <span className="text-[11px] font-medium text-white/95 truncate tracking-tight">
@@ -679,249 +657,266 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
             onClick={() => setShowPerMonitor((prev) => !prev)}
             className="w-full flex items-center justify-between px-3 py-2 pointer-events-auto cursor-pointer"
           >
-          <span className="flex items-center gap-2">
-            <MonitorIcon
-              className="w-3.5 h-3.5"
-              strokeWidth={1.9}
-              style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }}
-            />
-            <span
-              className="text-[11px] font-semibold tracking-tight"
-              style={{ color: 'var(--theme-text-primary, #F1F2F6)' }}
-            >
-              Per-Monitor Wallpaper
-            </span>
-            <span
-              className="px-1.5 py-0.5 rounded-full text-[9px] font-mono font-bold tracking-wider"
-              style={{
-                background: 'var(--theme-track, rgba(255, 255, 255, 0.12))',
-                color: 'var(--theme-accent, #A29BFE)',
-              }}
-            >
-              EXPERIMENTAL
-            </span>
-          </span>
-          {showPerMonitor ? (
-            <ChevronDown className="w-3.5 h-3.5" style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }} />
-          ) : (
-            <ChevronRight className="w-3.5 h-3.5" style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }} />
-          )}
-        </button>
-
-        {showPerMonitor && (
-          <div className="px-3 pb-3 flex flex-col gap-2">
-            {!desktopState ? (
-              <span className="text-[11px]" style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }}>
-                Reading display configuration…
+            <span className="flex items-center gap-2">
+              <MonitorIcon
+                className="w-3.5 h-3.5"
+                strokeWidth={1.9}
+                style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }}
+              />
+              <span
+                className="text-[11px] font-semibold tracking-tight"
+                style={{ color: 'var(--theme-text-primary, #F1F2F6)' }}
+              >
+                Per-Monitor Wallpaper
               </span>
-            ) : !desktopState.per_monitor_supported ? (
-              <div
-                className="flex items-start gap-2 rounded-lg px-2.5 py-2"
+              <span
+                className="px-1.5 py-0.5 rounded-full text-[9px] font-mono font-bold tracking-wider"
                 style={{
-                  background: 'var(--theme-track, rgba(255, 255, 255, 0.08))',
-                  color: 'var(--theme-text-secondary, #9E9EA7)',
+                  background: 'var(--theme-track, rgba(255, 255, 255, 0.12))',
+                  color: 'var(--theme-accent, #A29BFE)',
                 }}
               >
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-[1px]" />
-                <span className="text-[11px]">
-                  Per-monitor wallpaper is not supported on this Windows build.
-                </span>
-              </div>
+                EXPERIMENTAL
+              </span>
+            </span>
+            {showPerMonitor ? (
+              <ChevronDown
+                className="w-3.5 h-3.5"
+                style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }}
+              />
             ) : (
-              <>
-                <div className="flex flex-col gap-1.5">
-                  {desktopState.monitors.map((monitor) => {
-                    const preview = entryForPath(monitor.path);
-                    const busy = busyMonitorId === monitor.id;
-                    return (
-                      <div
-                        key={monitor.id}
-                        className="flex items-center gap-2 rounded-lg px-2 py-1.5"
-                        style={{
-                          background: 'var(--theme-card, rgba(255, 255, 255, 0.03))',
-                          border: '1px solid var(--theme-border, rgba(255, 255, 255, 0.07))',
-                        }}
-                      >
+              <ChevronRight
+                className="w-3.5 h-3.5"
+                style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }}
+              />
+            )}
+          </button>
+
+          {showPerMonitor && (
+            <div className="px-3 pb-3 flex flex-col gap-2">
+              {!desktopState ? (
+                <span
+                  className="text-[11px]"
+                  style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }}
+                >
+                  Reading display configuration…
+                </span>
+              ) : !desktopState.per_monitor_supported ? (
+                <div
+                  className="flex items-start gap-2 rounded-lg px-2.5 py-2"
+                  style={{
+                    background: 'var(--theme-track, rgba(255, 255, 255, 0.08))',
+                    color: 'var(--theme-text-secondary, #9E9EA7)',
+                  }}
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-[1px]" />
+                  <span className="text-[11px]">
+                    Per-monitor wallpaper is not supported on this Windows build.
+                  </span>
+                </div>
+              ) : (
+                <>
+                  <div className="flex flex-col gap-1.5">
+                    {desktopState.monitors.map((monitor) => {
+                      const preview = entryForPath(monitor.path);
+                      const busy = busyMonitorId === monitor.id;
+                      return (
                         <div
-                          className="w-12 h-7 rounded-md overflow-hidden shrink-0 flex items-center justify-center"
+                          key={monitor.id}
+                          className="flex items-center gap-2 rounded-lg px-2 py-1.5"
                           style={{
-                            background: preview?.data_url
-                              ? undefined
-                              : 'var(--theme-track, rgba(255, 255, 255, 0.1))',
-                            border: '1px solid var(--theme-border, rgba(255, 255, 255, 0.08))',
+                            background: 'var(--theme-card, rgba(255, 255, 255, 0.03))',
+                            border: '1px solid var(--theme-border, rgba(255, 255, 255, 0.07))',
                           }}
                         >
-                          {preview?.data_url ? (
-                            <img
-                              src={preview.data_url}
-                              alt={monitor.label}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <MonitorIcon className="w-3.5 h-3.5 opacity-50" />
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0 flex flex-col">
-                          <span
-                            className="text-[11px] font-medium truncate"
-                            style={{ color: 'var(--theme-text-primary, #F1F2F6)' }}
-                          >
-                            {monitor.label}
-                          </span>
-                          <span
-                            className="text-[10px] truncate"
-                            style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }}
-                          >
-                            {preview
-                              ? `Current: ${preview.name}`
-                              : monitor.path
-                                ? `Current: ${fileNameFromPath(monitor.path)}`
-                                : 'No wallpaper set'}
-                          </span>
-                        </div>
-                        <div className="relative">
-                          <button
-                            type="button"
-                            data-tauri-drag-region="false"
-                            disabled={busy}
-                            onClick={() => setPickingMonitorId(pickingMonitorId === monitor.id ? null : monitor.id)}
-                            title={`Select a specific wallpaper for ${monitor.label}`}
-                            className="px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all active:scale-95 pointer-events-auto cursor-pointer"
+                          <div
+                            className="w-12 h-7 rounded-md overflow-hidden shrink-0 flex items-center justify-center"
                             style={{
-                              background: 'var(--theme-accent, #74a86c)',
-                              color: '#11111b',
+                              background: preview?.data_url
+                                ? undefined
+                                : 'var(--theme-track, rgba(255, 255, 255, 0.1))',
+                              border: '1px solid var(--theme-border, rgba(255, 255, 255, 0.08))',
                             }}
                           >
-                            {busy ? 'Applying…' : 'Select image'}
-                          </button>
-
-                          {/* Per-Monitor Image Picker Dropdown */}
-                          {pickingMonitorId === monitor.id && (
-                            <div
-                              data-tauri-drag-region="false"
-                              className="absolute right-0 bottom-full mb-1.5 z-50 w-72 max-h-60 overflow-y-auto rounded-xl p-2.5 bento-card shadow-2xl border flex flex-col gap-2 bg-[#18171c]/95 backdrop-blur-xl pointer-events-auto"
+                            {preview?.data_url ? (
+                              <img
+                                src={preview.data_url}
+                                alt={monitor.label}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <MonitorIcon className="w-3.5 h-3.5 opacity-50" />
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0 flex flex-col">
+                            <span
+                              className="text-[11px] font-medium truncate"
+                              style={{ color: 'var(--theme-text-primary, #F1F2F6)' }}
                             >
-                              <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-[var(--theme-text-secondary)] pb-1 border-b border-white/10">
-                                <span>Wallpapers for {monitor.label}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => setPickingMonitorId(null)}
-                                  className="hover:text-white p-0.5 text-xs cursor-pointer"
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                              <div className="grid grid-cols-2 gap-1.5 max-h-44 overflow-y-auto pr-0.5">
-                                {wallpapers.map((wp) => (
+                              {monitor.label}
+                            </span>
+                            <span
+                              className="text-[10px] truncate"
+                              style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }}
+                            >
+                              {preview
+                                ? `Current: ${preview.name}`
+                                : monitor.path
+                                  ? `Current: ${fileNameFromPath(monitor.path)}`
+                                  : 'No wallpaper set'}
+                            </span>
+                          </div>
+                          <div className="relative">
+                            <button
+                              type="button"
+                              data-tauri-drag-region="false"
+                              disabled={busy}
+                              onClick={() =>
+                                setPickingMonitorId(
+                                  pickingMonitorId === monitor.id ? null : monitor.id,
+                                )
+                              }
+                              title={`Select a specific wallpaper for ${monitor.label}`}
+                              className="px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all active:scale-95 pointer-events-auto cursor-pointer"
+                              style={{
+                                background: 'var(--theme-accent, #74a86c)',
+                                color: '#11111b',
+                              }}
+                            >
+                              {busy ? 'Applying…' : 'Select image'}
+                            </button>
+
+                            {/* Per-Monitor Image Picker Dropdown */}
+                            {pickingMonitorId === monitor.id && (
+                              <div
+                                data-tauri-drag-region="false"
+                                className="absolute right-0 bottom-full mb-1.5 z-50 w-72 max-h-60 overflow-y-auto rounded-xl p-2.5 bento-card shadow-2xl border flex flex-col gap-2 bg-[#18171c]/95 backdrop-blur-xl pointer-events-auto"
+                              >
+                                <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-[var(--theme-text-secondary)] pb-1 border-b border-white/10">
+                                  <span>Wallpapers for {monitor.label}</span>
                                   <button
-                                    key={wp.path}
                                     type="button"
-                                    onClick={async () => {
-                                      setPickingMonitorId(null);
-                                      setBusyMonitorId(monitor.id);
-                                      await setMonitorWallpaper(monitor.id, wp.path);
-                                      await refreshDesktopState();
-                                      setBusyMonitorId(null);
-                                    }}
-                                    className="flex flex-col rounded-lg overflow-hidden border border-white/10 hover:border-[var(--theme-accent)] transition-all p-1 text-left cursor-pointer group hover:bg-white/[0.04]"
+                                    onClick={() => setPickingMonitorId(null)}
+                                    className="hover:text-white p-0.5 text-xs cursor-pointer"
                                   >
-                                    <div className="w-full h-14 rounded overflow-hidden bg-black/40">
-                                      {wp.data_url ? (
-                                        <img src={wp.data_url} alt={wp.name} className="w-full h-full object-cover" />
-                                      ) : null}
-                                    </div>
-                                    <span className="text-[9px] font-medium truncate mt-1 text-[var(--theme-text-primary)]">
-                                      {wp.name}
-                                    </span>
+                                    ✕
                                   </button>
-                                ))}
+                                </div>
+                                <div className="grid grid-cols-2 gap-1.5 max-h-44 overflow-y-auto pr-0.5">
+                                  {wallpapers.map((wp) => (
+                                    <button
+                                      key={wp.path}
+                                      type="button"
+                                      onClick={async () => {
+                                        setPickingMonitorId(null);
+                                        setBusyMonitorId(monitor.id);
+                                        await setMonitorWallpaper(monitor.id, wp.path);
+                                        await refreshDesktopState();
+                                        setBusyMonitorId(null);
+                                      }}
+                                      className="flex flex-col rounded-lg overflow-hidden border border-white/10 hover:border-[var(--theme-accent)] transition-all p-1 text-left cursor-pointer group hover:bg-white/[0.04]"
+                                    >
+                                      <div className="w-full h-14 rounded overflow-hidden bg-black/40">
+                                        {wp.data_url ? (
+                                          <img
+                                            src={wp.data_url}
+                                            alt={wp.name}
+                                            className="w-full h-full object-cover"
+                                          />
+                                        ) : null}
+                                      </div>
+                                      <span className="text-[9px] font-medium truncate mt-1 text-[var(--theme-text-primary)]">
+                                        {wp.name}
+                                      </span>
+                                    </button>
+                                  ))}
+                                </div>
                               </div>
-                            </div>
-                          )}
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
 
-                <div className="flex items-center gap-2 flex-wrap pt-0.5">
-                  <button
-                    type="button"
-                    data-tauri-drag-region="false"
-                    onClick={() => handleToggleSlideshow(!desktopState.slideshow_enabled)}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium transition-all active:scale-95 pointer-events-auto cursor-pointer"
-                    style={{
-                      background: desktopState.slideshow_enabled
-                        ? 'var(--theme-accent, #A29BFE)'
-                        : 'var(--theme-card, rgba(255, 255, 255, 0.06))',
-                      color: desktopState.slideshow_enabled
-                        ? '#11111B'
-                        : 'var(--theme-text-secondary, #9E9EA7)',
-                      border: '1px solid var(--theme-border, rgba(255, 255, 255, 0.07))',
-                    }}
-                  >
-                    {desktopState.slideshow_enabled ? (
-                      <Pause className="w-3 h-3" />
-                    ) : (
-                      <Play className="w-3 h-3" />
-                    )}
-                    <span>{desktopState.slideshow_enabled ? 'Stop' : 'Start'} slideshow</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    data-tauri-drag-region="false"
-                    onClick={handleToggleShuffle}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium transition-all active:scale-95 pointer-events-auto cursor-pointer"
-                    style={{
-                      background: desktopState.shuffle
-                        ? 'var(--theme-track, rgba(255, 255, 255, 0.12))'
-                        : 'var(--theme-card, rgba(255, 255, 255, 0.06))',
-                      color: desktopState.shuffle
-                        ? 'var(--theme-accent, #A29BFE)'
-                        : 'var(--theme-text-secondary, #9E9EA7)',
-                      border: `1px solid ${
-                        desktopState.shuffle
-                          ? 'var(--theme-accent, #A29BFE)'
-                          : 'var(--theme-border, rgba(255, 255, 255, 0.07))'
-                      }`,
-                    }}
-                  >
-                    <Shuffle className="w-3 h-3" />
-                    <span>Shuffle</span>
-                  </button>
-
-                  <label
-                    className="flex items-center gap-1.5 text-[10px]"
-                    style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }}
-                  >
-                    <span>Every</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={1440}
+                  <div className="flex items-center gap-2 flex-wrap pt-0.5">
+                    <button
+                      type="button"
                       data-tauri-drag-region="false"
-                      value={slideshowMinutes}
-                      onChange={(e) => {
-                        const parsed = Number(e.target.value);
-                        setSlideshowMinutes(Number.isFinite(parsed) ? parsed : 1);
-                      }}
-                      onBlur={commitSlideshowMinutes}
-                      className="w-14 px-1.5 py-0.5 rounded-md text-[10px] text-center focus:outline-none pointer-events-auto"
+                      onClick={() => handleToggleSlideshow(!desktopState.slideshow_enabled)}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium transition-all active:scale-95 pointer-events-auto cursor-pointer"
                       style={{
-                        background: 'transparent',
-                        border: '1px solid var(--theme-border, rgba(255, 255, 255, 0.12))',
-                        color: 'var(--theme-text-primary, #F1F2F6)',
+                        background: desktopState.slideshow_enabled
+                          ? 'var(--theme-accent, #A29BFE)'
+                          : 'var(--theme-card, rgba(255, 255, 255, 0.06))',
+                        color: desktopState.slideshow_enabled
+                          ? '#11111B'
+                          : 'var(--theme-text-secondary, #9E9EA7)',
+                        border: '1px solid var(--theme-border, rgba(255, 255, 255, 0.07))',
                       }}
-                    />
-                    <span>min</span>
-                  </label>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-      </div>
+                    >
+                      {desktopState.slideshow_enabled ? (
+                        <Pause className="w-3 h-3" />
+                      ) : (
+                        <Play className="w-3 h-3" />
+                      )}
+                      <span>{desktopState.slideshow_enabled ? 'Stop' : 'Start'} slideshow</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      data-tauri-drag-region="false"
+                      onClick={handleToggleShuffle}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium transition-all active:scale-95 pointer-events-auto cursor-pointer"
+                      style={{
+                        background: desktopState.shuffle
+                          ? 'var(--theme-track, rgba(255, 255, 255, 0.12))'
+                          : 'var(--theme-card, rgba(255, 255, 255, 0.06))',
+                        color: desktopState.shuffle
+                          ? 'var(--theme-accent, #A29BFE)'
+                          : 'var(--theme-text-secondary, #9E9EA7)',
+                        border: `1px solid ${
+                          desktopState.shuffle
+                            ? 'var(--theme-accent, #A29BFE)'
+                            : 'var(--theme-border, rgba(255, 255, 255, 0.07))'
+                        }`,
+                      }}
+                    >
+                      <Shuffle className="w-3 h-3" />
+                      <span>Shuffle</span>
+                    </button>
+
+                    <label
+                      className="flex items-center gap-1.5 text-[10px]"
+                      style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }}
+                    >
+                      <span>Every</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={1440}
+                        data-tauri-drag-region="false"
+                        value={slideshowMinutes}
+                        onChange={(e) => {
+                          const parsed = Number(e.target.value);
+                          setSlideshowMinutes(Number.isFinite(parsed) ? parsed : 1);
+                        }}
+                        onBlur={commitSlideshowMinutes}
+                        className="w-14 px-1.5 py-0.5 rounded-md text-[10px] text-center focus:outline-none pointer-events-auto"
+                        style={{
+                          background: 'transparent',
+                          border: '1px solid var(--theme-border, rgba(255, 255, 255, 0.12))',
+                          color: 'var(--theme-text-primary, #F1F2F6)',
+                        }}
+                      />
+                      <span>min</span>
+                    </label>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

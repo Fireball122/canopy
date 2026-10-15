@@ -8,9 +8,7 @@ export type ThemePreset = 'canopy' | 'adaptive' | 'dark' | 'light' | 'auto';
 export function getLuminance(r: number, g: number, b: number): number {
   const [rs, gs, bs] = [r, g, b].map((channel) => {
     const clamped = Math.max(0, Math.min(255, channel)) / 255;
-    return clamped <= 0.03928
-      ? clamped / 12.92
-      : Math.pow((clamped + 0.055) / 1.055, 2.4);
+    return clamped <= 0.03928 ? clamped / 12.92 : ((clamped + 0.055) / 1.055) ** 2.4;
   });
   return 0.2126 * rs + 0.7152 * gs + 0.0722 * bs;
 }
@@ -68,24 +66,32 @@ export function hslToRgb(h: number, s: number, l: number): RGBTuple {
   let b = 0;
 
   if (h < 60) {
-    r = c; g = x; b = 0;
+    r = c;
+    g = x;
+    b = 0;
   } else if (h < 120) {
-    r = x; g = c; b = 0;
+    r = x;
+    g = c;
+    b = 0;
   } else if (h < 180) {
-    r = 0; g = c; b = x;
+    r = 0;
+    g = c;
+    b = x;
   } else if (h < 240) {
-    r = 0; g = x; b = c;
+    r = 0;
+    g = x;
+    b = c;
   } else if (h < 300) {
-    r = x; g = 0; b = c;
+    r = x;
+    g = 0;
+    b = c;
   } else {
-    r = c; g = 0; b = x;
+    r = c;
+    g = 0;
+    b = x;
   }
 
-  return [
-    Math.round((r + m) * 255),
-    Math.round((g + m) * 255),
-    Math.round((b + m) * 255),
-  ];
+  return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
 }
 
 // ---------------------------------------------------------------------------
@@ -163,7 +169,7 @@ function applyThemeVariables(vars: {
 export function applyThemeModeFallback(
   themeMode: string = 'canopy',
   glassOpacity?: number,
-  glassBlurStrength?: number
+  glassBlurStrength?: number,
 ): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
@@ -192,7 +198,7 @@ export function applyThemeModeFallback(
  */
 export function applyThemePalette(
   imgElement: HTMLImageElement,
-  themeMode: string = 'adaptive'
+  themeMode: string = 'adaptive',
 ): void {
   if (typeof document === 'undefined') return;
 
@@ -249,7 +255,7 @@ export function applyThemePalette(
       const [h, s, l] = rgbToHsl(r, g, b);
 
       // Filter out neutral grays / blacks / whites for accent extraction
-      if (s >= 0.16 && l >= 0.12 && l <= 0.90) {
+      if (s >= 0.16 && l >= 0.12 && l <= 0.9) {
         // Shift hue so 0 is centered around Red (345..15)
         const shiftedHue = (h + 15) % 360;
         const bucketIndex = Math.floor(shiftedHue / 30);
@@ -347,7 +353,7 @@ export function applyThemePalette(
 
 export async function applyThemeFromImageSrc(
   imageSrc: string,
-  themeMode: string = 'adaptive'
+  themeMode: string = 'adaptive',
 ): Promise<void> {
   if (typeof window === 'undefined' || !imageSrc) {
     applyThemeModeFallback(themeMode);

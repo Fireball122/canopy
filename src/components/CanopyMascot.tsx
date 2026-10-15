@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import type React from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSettings } from '../context/SettingsContext';
 
 export interface CanopyMascotProps {
@@ -111,7 +112,7 @@ export const CanopyMascot: React.FC<CanopyMascotProps> = ({
         title={isPlaying ? 'Mascot dancing' : 'Mascot resting'}
       >
         <img
-          src={isPlaying ? activeGifUrl : (frozenGifDataUrl || activeGifUrl)}
+          src={isPlaying ? activeGifUrl : frozenGifDataUrl || activeGifUrl}
           alt="Canopy Mascot"
           className="max-h-full max-w-full h-full w-auto object-contain rounded-xl drop-shadow-md transition-all duration-300"
           style={{ opacity: isPlaying ? 1 : 0.85 }}
@@ -130,11 +131,7 @@ export const CanopyMascot: React.FC<CanopyMascotProps> = ({
         window.setTimeout(() => setIsWiggling(false), 700);
       }}
       className={`relative flex flex-col items-center justify-center select-none pointer-events-auto cursor-pointer group h-full max-h-full overflow-hidden ${className}`}
-      title={
-        isPlaying
-          ? 'Capi is dancing to your music!'
-          : 'Capi is resting (click to bounce!)'
-      }
+      title={isPlaying ? 'Capi is dancing to your music!' : 'Capi is resting (click to bounce!)'}
     >
       {/* Ambient soft circular glow behind Capi (strictly circular, never clips) */}
       {showAmbientGlow && (
@@ -169,7 +166,6 @@ export const CanopyMascot: React.FC<CanopyMascotProps> = ({
           draggable={false}
         />
       </div>
-
     </div>
   );
 };

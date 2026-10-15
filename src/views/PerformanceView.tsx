@@ -1,4 +1,3 @@
-import React, { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   ArrowDown,
@@ -9,9 +8,10 @@ import {
   HardDrive,
   Layers,
   MemoryStick,
-  Wifi,
 } from 'lucide-react';
-import { ProcessEntry, SystemStats } from '../services/hostBridge';
+import type React from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import type { ProcessEntry, SystemStats } from '../services/hostBridge';
 
 export interface PerformanceViewProps {
   stats: SystemStats;
@@ -63,7 +63,10 @@ const ConcentricDualArcGauge: React.FC<ConcentricGaugeProps> = ({
       }}
     >
       {/* Concentric Dual-Arc SVG */}
-      <div className="relative flex items-center justify-center my-auto" style={{ width: size, height: size }}>
+      <div
+        className="relative flex items-center justify-center my-auto"
+        style={{ width: size, height: size }}
+      >
         <svg
           width={size}
           height={size}
@@ -202,10 +205,9 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
   const [cpuHistory, setCpuHistory] = useState<number[]>(() => new Array(30).fill(0));
   const [ramHistory, setRamHistory] = useState<number[]>(() => new Array(30).fill(0));
   const [netDownHistory, setNetDownHistory] = useState<number[]>(() => new Array(30).fill(0));
-  const [netUpHistory, setNetUpHistory] = useState<number[]>(() => new Array(30).fill(0));
-
-  const gpuTempC = Math.round(stats.gpu_temp_c || 54);
-  const gpuUsage = Math.round(stats.gpu_usage ?? 4);
+  const gpuAvailable = stats.gpu_usage != null && stats.gpu_temp_c != null;
+  const gpuTempC = stats.gpu_temp_c != null ? Math.round(stats.gpu_temp_c) : 0;
+  const gpuUsage = stats.gpu_usage != null ? Math.round(stats.gpu_usage) : 0;
   const cpuTempC = Math.round(stats.cpu_temp_c || 41);
   const cpuUsage = Math.round(stats.cpu_usage || 0);
   const ramUsage = Math.round(stats.ram_usage || 0);
@@ -225,20 +227,26 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
   useEffect(() => {
     setCpuHistory((prev) => [...prev.slice(1), cpuUsage]);
     setRamHistory((prev) => [...prev.slice(1), ramUsage]);
-    setNetDownHistory((prev) => [...prev.slice(1), Math.min(100, Math.round((netDownKbps / 1024) * 10))]);
-    setNetUpHistory((prev) => [...prev.slice(1), Math.min(100, Math.round((netUpKbps / 1024) * 10))]);
-  }, [cpuUsage, ramUsage, netDownKbps, netUpKbps]);
+    setNetDownHistory((prev) => [
+      ...prev.slice(1),
+      Math.min(100, Math.round((netDownKbps / 1024) * 10)),
+    ]);
+  }, [cpuUsage, ramUsage, netDownKbps]);
   const downFormatted =
     netDownKbps >= 1024
       ? `${(netDownKbps / 1024).toFixed(1)} MB/s`
       : `${netDownKbps.toFixed(1)} KB/s`;
   const upFormatted =
-    netUpKbps >= 1024
-      ? `${(netUpKbps / 1024).toFixed(1)} MB/s`
-      : `${netUpKbps.toFixed(1)} KB/s`;
+    netUpKbps >= 1024 ? `${(netUpKbps / 1024).toFixed(1)} MB/s` : `${netUpKbps.toFixed(1)} KB/s`;
 
-  const downBarPercent = Math.min(100, Math.max(6, Math.round((Math.log10(netDownKbps + 1) / 5) * 100)));
-  const upBarPercent = Math.min(100, Math.max(6, Math.round((Math.log10(netUpKbps + 1) / 5) * 100)));
+  const downBarPercent = Math.min(
+    100,
+    Math.max(6, Math.round((Math.log10(netDownKbps + 1) / 5) * 100)),
+  );
+  const upBarPercent = Math.min(
+    100,
+    Math.max(6, Math.round((Math.log10(netUpKbps + 1) / 5) * 100)),
+  );
   // Derive 8-16 logical core utilization bars from stats.core_usages or realistic distribution
   const coreUsages: number[] = useMemo(() => {
     if (Array.isArray(stats.core_usages) && stats.core_usages.length > 0) {
@@ -247,7 +255,7 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
     const base = stats.cpu_usage || 18;
     const offsets = [6, -4, 11, -7, 3, -2, 8, -5, 4, -6, 9, -3];
     return offsets.map((offset, idx) =>
-      Math.min(100, Math.max(2, Math.round(base + offset + ((idx % 3) - 1) * 2)))
+      Math.min(100, Math.max(2, Math.round(base + offset + ((idx % 3) - 1) * 2))),
     );
   }, [stats.core_usages, stats.cpu_usage]);
 
@@ -303,9 +311,9 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
           innerPercent={Math.min(100, (gpuTempC / 100) * 100)}
           outerColor="var(--theme-accent, #cba6f7)"
           innerColor="#89dceb"
-          centerValue={`${gpuTempC}°C`}
-          centerSublabel="GPU temp"
-          pillText={`${gpuUsage}% Usage`}
+          centerValue={gpuAvailable ? `${gpuTempC}°C` : 'N/A'}
+          centerSublabel={gpuAvailable ? 'GPU temp' : 'GPU telemetry unavailable'}
+          pillText={gpuAvailable ? `${gpuUsage}% Usage` : 'No GPU data'}
           icon={
             <Activity
               className="w-4 h-4"
@@ -361,15 +369,26 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
         }}
       >
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-mono font-medium text-[var(--theme-text-secondary)]">CPU Activity</span>
-          <SparklineMini data={cpuHistory} color="var(--theme-accent, #cba6f7)" width={90} height={20} />
+          <span className="text-[10px] font-mono font-medium text-[var(--theme-text-secondary)]">
+            CPU Activity
+          </span>
+          <SparklineMini
+            data={cpuHistory}
+            color="var(--theme-accent, #cba6f7)"
+            width={90}
+            height={20}
+          />
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-mono font-medium text-[var(--theme-text-secondary)]">Memory Load</span>
+          <span className="text-[10px] font-mono font-medium text-[var(--theme-text-secondary)]">
+            Memory Load
+          </span>
           <SparklineMini data={ramHistory} color="#a6e3a1" width={90} height={20} />
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-mono font-medium text-[var(--theme-text-secondary)]">Network I/O</span>
+          <span className="text-[10px] font-mono font-medium text-[var(--theme-text-secondary)]">
+            Network I/O
+          </span>
           <SparklineMini data={netDownHistory} color="#89dceb" width={90} height={20} />
         </div>
       </div>
@@ -412,7 +431,8 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
                 className="h-full rounded-full transition-all duration-300"
                 style={{
                   width: `${downBarPercent}%`,
-                  background: 'linear-gradient(90deg, #89dceb 0%, var(--theme-accent, #cba6f7) 100%)',
+                  background:
+                    'linear-gradient(90deg, #89dceb 0%, var(--theme-accent, #cba6f7) 100%)',
                 }}
               />
             </div>
@@ -448,7 +468,8 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
                 className="h-full rounded-full transition-all duration-300"
                 style={{
                   width: `${upBarPercent}%`,
-                  background: 'linear-gradient(90deg, #a6e3a1 0%, var(--theme-accent, #cba6f7) 100%)',
+                  background:
+                    'linear-gradient(90deg, #a6e3a1 0%, var(--theme-accent, #cba6f7) 100%)',
                 }}
               />
             </div>
@@ -570,8 +591,7 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
             >
               <span className="flex items-center gap-1">
                 <MemoryStick className="w-3 h-3 text-[#89dceb]" />
-                RAM: {ramUsedGb.toFixed(1)} / {ramTotalGb.toFixed(1)} GiB (
-                {ramUsage}%)
+                RAM: {ramUsedGb.toFixed(1)} / {ramTotalGb.toFixed(1)} GiB ({ramUsage}%)
               </span>
               <span className="flex items-center gap-1">
                 <HardDrive className="w-3 h-3 text-[#a6e3a1]" />
@@ -600,7 +620,7 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
                 className="text-[10px] font-mono"
                 style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))' }}
               >
-                {stats.username || 'CEO'}@{stats.hostname}
+                {stats.username || 'user'}@{stats.hostname}
               </span>
             </div>
 

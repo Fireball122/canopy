@@ -28,8 +28,8 @@ public sealed record InstalledAppSnapshot(
 public readonly record struct SystemTelemetrySnapshot(
     double CpuUsagePercent,
     double CpuTempC,
-    double GpuUsagePercent,
-    double GpuTempC,
+    double? GpuUsagePercent,
+    double? GpuTempC,
     double[] CoreUsages,
     IReadOnlyList<ProcessSnapshot> TopProcesses,
     double NetDownKbps,
@@ -68,8 +68,6 @@ public sealed class SystemMonitorService : IDisposable
     private double[] _cachedCoreUsages;
     private IReadOnlyList<ProcessSnapshot> _cachedTopProcesses = [];
     private double _cachedCpuTempC = 41.0;
-    private double _cachedGpuTempC = 54.0;
-    private double _cachedGpuUsage = 4.0;
     private long _lastHeavySampleTick;
     private int _heavySampleInFlight;
     private long _prevNetBytesRecv;
@@ -230,9 +228,6 @@ public sealed class SystemMonitorService : IDisposable
 
         double[] coreUsages = SampleCoreUsages(cpuPercent);
         double cpuTemp = Math.Clamp(_cachedCpuTempC + (cpuPercent * 0.18), 36.0, 92.0);
-        double gpuUsage = Math.Clamp(_cachedGpuUsage, 1.0, 100.0);
-        double gpuTemp = Math.Clamp(_cachedGpuTempC + (gpuUsage * 0.12), 42.0, 88.0);
-
         long uptimeSecs = Environment.TickCount64 / 1000L;
         long hours = uptimeSecs / 3600L;
         long minutes = (uptimeSecs % 3600L) / 60L;
@@ -244,8 +239,8 @@ public sealed class SystemMonitorService : IDisposable
         var snapshot = new SystemTelemetrySnapshot(
             CpuUsagePercent: cpuPercent,
             CpuTempC: Math.Round(cpuTemp, 1),
-            GpuUsagePercent: Math.Round(gpuUsage, 1),
-            GpuTempC: Math.Round(gpuTemp, 1),
+            GpuUsagePercent: null,
+            GpuTempC: null,
             CoreUsages: coreUsages,
             TopProcesses: _cachedTopProcesses,
             NetDownKbps: netDownKbps,
@@ -387,7 +382,6 @@ public sealed class SystemMonitorService : IDisposable
             _cachedCpuTempC = 39.0;
         }
 
-        _cachedGpuUsage = Math.Round(3.0 + (Math.Abs(Math.Sin(Environment.TickCount64 / 2000.0)) * 5.0), 1);
     }
 
     private static string GetDefaultBrowserProgId()
@@ -490,9 +484,9 @@ public sealed class SystemMonitorService : IDisposable
         return parentFolder;
     }
 
-    public Task<IReadOnlyList<InstalledAppSnapshot>> GetInstalledAppsAsync()
+    public Task<IReadOnlyList<InstalledAppSnapshot>> GetInstalledAppsAsync(bool forceRefresh = false)
     {
-        if (_cachedInstalledApps is { Count: > 0 })
+        if (!forceRefresh && _cachedInstalledApps is { Count: > 0 })
             return Task.FromResult(_cachedInstalledApps);
 
         return Task.Run<IReadOnlyList<InstalledAppSnapshot>>(() =>
@@ -809,6 +803,7 @@ public sealed class SystemMonitorService : IDisposable
                    """;
         }
 
+        Process? proc = null;
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
@@ -822,7 +817,7 @@ public sealed class SystemMonitorService : IDisposable
                 CreateNoWindow = true
             };
 
-            using var proc = Process.Start(psi);
+            proc = Process.Start(psi);
             if (proc is null)
                 return "Failed to start PowerShell process.";
 
@@ -843,9 +838,19 @@ public sealed class SystemMonitorService : IDisposable
 
             return string.IsNullOrWhiteSpace(combined) ? "(Command completed with no output)" : combined;
         }
+        catch (OperationCanceledException)
+        {
+            try { proc?.Kill(entireProcessTree: true); } catch { }
+            return "Error: Command timed out after 8 seconds.";
+        }
         catch (Exception ex)
         {
+            try { proc?.Kill(entireProcessTree: true); } catch { }
             return $"Error: {ex.Message}";
+        }
+        finally
+        {
+            proc?.Dispose();
         }
     }
 
