@@ -1,0 +1,57 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Canopy"
+           Manufacturer="Canopy Shell"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="4C6D518F-72E6-407F-8BC1-B071536E489E"
+           Scope="perUser">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Standard Windows Control Center Icon in Installed Apps -->
+    <Icon Id="CanopyIcon" SourceFile="$(var.SourceDir)\app.ico" />
+    <Property Id="ARPPRODUCTICON" Value="CanopyIcon" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/Fireball122/canopy" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/Fireball122/canopy" />
+
+    <!-- Standard Per-User Installation Directory: %LOCALAPPDATA%\Programs\Canopy -->
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="Canopy" />
+      </Directory>
+    </StandardDirectory>
+
+    <!-- Start Menu and Desktop Shortcuts -->
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="ApplicationShortcut" Guid="8FA8A8B7-93C0-466D-A7B8-96C4E1564C2E">
+        <Shortcut Id="ApplicationStartMenuShortcut"
+                  Name="Canopy"
+                  Description="Fluid Top-Drop Control Center and Wallpaper Switcher"
+                  Target="[INSTALLFOLDER]Canopy.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="CanopyIcon" />
+        <RemoveFolder Id="CleanUpShortCut" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\CanopyShell\Canopy" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder">
+      <Component Id="DesktopShortcutComponent" Guid="E67F1290-7F89-4672-91B1-18F9527D6E12">
+        <Shortcut Id="ApplicationDesktopShortcut"
+                  Name="Canopy"
+                  Description="Fluid Top-Drop Control Center and Wallpaper Switcher"
+                  Target="[INSTALLFOLDER]Canopy.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="CanopyIcon" />
+        <RegistryValue Root="HKCU" Key="Software\CanopyShell\Canopy" Name="desktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <!-- ComponentGroup ProductComponents is provided by the generated payload fragment -->
+    <Feature Id="ProductFeature" Title="Canopy" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+      <ComponentRef Id="ApplicationShortcut" />
+      <ComponentRef Id="DesktopShortcutComponent" />
+    </Feature>
+  </Package>
+</Wix>

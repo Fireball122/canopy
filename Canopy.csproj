@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>Canopy</RootNamespace>
+    <AssemblyName>Canopy</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Optimize>true</Optimize>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <NoWarn>$(NoWarn);CA1707;CA1401;CA1305;CA1304;CA1310;CA1822;CA1806;CA1805;CA1838;CA2101;CA1001;CA2201;CA1711</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="8.0.0" />
+    <PackageReference Include="System.Management" Version="8.0.0" />
+  </ItemGroup>
+
+
+  <ItemGroup>
+    <None Include="app.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Frontend inputs that invalidate the compiled Vite bundle -->
+  <ItemGroup>
+    <FrontendSource Include="src\**\*" />
+    <FrontendSource Include="index.html;package.json;package-lock.json;tsconfig.json;vite.config.ts;tailwind.config.js;postcss.config.js" />
+  </ItemGroup>
+
+  <!--
+    Rebuilds the React bundle whenever a frontend source is newer than dist\index.html.
+    Without this, `dotnet publish` happily ships a stale UI: exactly how a broken bundle
+    (an undefined import that blanked the panel) reached production.
+    Set -p:SkipFrontendBuild=true to bypass on machines without Node.
+  -->
+  <Target Name="BuildFrontend"
+          BeforeTargets="AssignTargetPaths"
+          Inputs="@(FrontendSource)"
+          Outputs="$(MSBuildProjectDirectory)\dist\index.html"
+          Condition="'$(SkipFrontendBuild)' != 'true' And Exists('$(MSBuildProjectDirectory)\package.json')">
+    <Message Importance="high" Text="Frontend sources changed - running npm run build (typecheck + vite build)" />
+    <Exec Command="npm run build" WorkingDirectory="$(MSBuildProjectDirectory)" />
+  </Target>
+
+  <!-- Collected after the frontend build so freshly emitted hashed assets are copied out. -->
+  <Target Name="CollectFrontendBundle" DependsOnTargets="BuildFrontend" BeforeTargets="AssignTargetPaths">
+    <ItemGroup>
+      <None Include="dist\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
+</Project>

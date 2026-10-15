@@ -1,0 +1,48 @@
+# Build and output artifacts
+bin/
+obj/
+dist/
+dist-installer/
+publish/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Visual Studio & IDEs
+.vs/
+*.user
+*.userosscache
+*.suo
+*.userprefs
+*.pidb
+*.booproj
+*.svclog
+*.wixpdb
+
+# Logs & Temporary files
+*.log
+error.log
+*.tmp
+*.bak
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+
+# OS Generated
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# WebView2 Runtime profile / cache
+WebView2Data/
+EBWebView/
+
+# User Wallpapers and Personal Settings
+Wallpapers/
+*.local.*
+settings.json

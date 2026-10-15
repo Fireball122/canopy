@@ -1,0 +1,93 @@
+name: Release Canopy
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g. 1.0.0)'
+        required: true
+        default: '1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Release Windows Package
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js (Frontend)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Install WiX Toolset v4
+        run: dotnet tool install --global wix --version 4.0.5
+
+      - name: Determine Version
+        id: get_version
+        shell: pwsh
+        run: |
+          $ver = "${{ github.event.inputs.version }}"
+          if (-not $ver) {
+            $ver = "${{ github.ref_name }}".TrimStart('v')
+          }
+          if (-not $ver) { $ver = "1.0.0" }
+          Write-Output "VERSION=$ver" >> $env:GITHUB_OUTPUT
+          Write-Host "Releasing version: $ver"
+
+      - name: Install Frontend Dependencies & Build
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build MSI Installer
+        shell: pwsh
+        run: |
+          ./installer/build-msi.ps1 -Version "${{ steps.get_version.outputs.VERSION }}" -Configuration Release
+
+      - name: Build Portable Zip
+        shell: pwsh
+        run: |
+          ./build-portable.ps1 -Version "${{ steps.get_version.outputs.VERSION }}" -Configuration Release
+
+      - name: Generate Checksums
+        shell: pwsh
+        run: |
+          cd dist-installer
+          $files = Get-ChildItem -File | Where-Object { $_.Name -like "Canopy-*" }
+          $lines = @()
+          foreach ($f in $files) {
+            $hash = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
+            $lines += "$hash  $($f.Name)"
+          }
+          $lines | Set-Content -Path "checksums-sha256.txt" -Encoding UTF8
+          Get-Content "checksums-sha256.txt"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist-installer/Canopy-*.msi
+            dist-installer/Canopy-*.zip
+            dist-installer/checksums-sha256.txt
+          generate_release_notes: true
+          draft: false
+          prerelease: false
