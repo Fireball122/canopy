@@ -37,6 +37,13 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
 
 Copy-Item (Join-Path $ProjectRoot "app.ico") (Join-Path $PublishDir "app.ico") -Force
 
+# Ensure dist/ frontend bundle is explicitly included in MSI payload
+$distSource = Join-Path $ProjectRoot "dist"
+$distDest = Join-Path $PublishDir "dist"
+if (Test-Path $distSource) {
+    Copy-Item $distSource $distDest -Recurse -Force
+}
+
 # Ensure x64 WebView2Loader.dll is in both root and runtimes\win-x64\native for robust native loading
 $nativeLoader = Join-Path $PublishDir "runtimes\win-x64\native\WebView2Loader.dll"
 $rootLoader = Join-Path $PublishDir "WebView2Loader.dll"

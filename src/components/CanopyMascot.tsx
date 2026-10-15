@@ -18,6 +18,11 @@ const CAPI_FRAMES = [
   '/capi_5.png',
   '/capi_6.png',
   '/capi_7.png',
+  '/capi_8.png',
+  '/capi_9.png',
+  '/capi_10.png',
+  '/capi_11.png',
+  '/capi_12.png',
 ];
 
 /**

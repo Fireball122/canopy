@@ -23,6 +23,13 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
 # Make sure app.ico is included
 Copy-Item (Join-Path $ScriptDir "app.ico") (Join-Path $PublishDir "app.ico") -Force
 
+# Ensure dist/ frontend bundle is included in portable payload
+$distSource = Join-Path $ScriptDir "dist"
+$distDest = Join-Path $PublishDir "dist"
+if (Test-Path $distSource) {
+    Copy-Item $distSource $distDest -Recurse -Force
+}
+
 # Ensure x64 WebView2Loader.dll is in publish root alongside Canopy.exe for portable launch
 $nativeLoader = Join-Path $PublishDir "runtimes\win-x64\native\WebView2Loader.dll"
 $rootLoader = Join-Path $PublishDir "WebView2Loader.dll"

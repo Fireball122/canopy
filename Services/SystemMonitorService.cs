@@ -963,6 +963,31 @@ public sealed class SystemMonitorService : IDisposable
             }
             catch { }
         }
+
+        try
+        {
+            using var baseKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}");
+            if (baseKey is not null)
+            {
+                foreach (string sub in baseKey.GetSubKeyNames())
+                {
+                    if (sub.Length == 4 && char.IsDigit(sub[0]))
+                    {
+                        using var cardKey = baseKey.OpenSubKey(sub);
+                        string? desc = cardKey?.GetValue("DriverDesc") as string;
+                        if (!string.IsNullOrWhiteSpace(desc) &&
+                            !desc.Contains("Basic", StringComparison.OrdinalIgnoreCase) &&
+                            !desc.Contains("Virtual", StringComparison.OrdinalIgnoreCase))
+                        {
+                            _staticGpuName = desc.Trim();
+                            return _staticGpuName;
+                        }
+                    }
+                }
+            }
+        }
+        catch { }
+
         return "DirectX 3D Video Controller";
     }
 

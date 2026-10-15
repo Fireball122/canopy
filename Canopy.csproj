@@ -55,7 +55,7 @@
   <!-- Collected after the frontend build so freshly emitted hashed assets are copied out. -->
   <Target Name="CollectFrontendBundle" DependsOnTargets="BuildFrontend" BeforeTargets="AssignTargetPaths">
     <ItemGroup>
-      <None Include="dist\**\*" CopyToOutputDirectory="PreserveNewest" />
+      <None Include="dist\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     </ItemGroup>
   </Target>
 </Project>

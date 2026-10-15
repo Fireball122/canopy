@@ -26,16 +26,17 @@ PrivilegesRequired=lowest
 OutputDir=..\dist-installer
 OutputBaseFilename=Canopy-v{#MyAppVersion}-Setup
 SetupIconFile=..\app.ico
+UninstallDisplayIcon={app}\app.ico
+UninstallDisplayName={#MyAppName} Control Center
 WizardImageFile=wizard_banner.bmp
 WizardSmallImageFile=wizard_logo.bmp
 InfoBeforeFile=info.txt
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
-WizardResizable=no
 CloseApplications=yes
 RestartApplications=no
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesInstallIn64BitMode=x64compatible
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -56,6 +57,7 @@ Source: "..\app.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\app.ico"
+Name: "{autoprograms}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"; IconFilename: "{app}\app.ico"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; IconFilename: "{app}\app.ico"
 
 [Registry]
@@ -63,3 +65,18 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[UninstallDelete]
+Type: files; Name: "{app}\*.log"
+Type: files; Name: "{app}\*.tmp"
+Type: filesandordirs; Name: "{app}\dist"
+
+[Code]
+function InitializeUninstall(): Boolean;
+var
+  ErrorCode: Integer;
+begin
+  // Terminate any running Canopy instance before uninstalling so files are cleanly removed
+  ShellExec('open', 'taskkill.exe', '/f /im Canopy.exe', '', SW_HIDE, ewWaitUntilTerminated, ErrorCode);
+  Result := True;
+end;

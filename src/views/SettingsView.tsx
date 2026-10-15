@@ -541,8 +541,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </SettingRow>
 
             <SettingRow
-              title="Show Developer Console"
-              description="Interactive PowerShell shell tab"
+              title="Developer Tab"
+              description="Show Developer PowerShell console & system fastfetch tab"
             >
               <ToggleSwitch
                 checked={settings.showTerminalTab}
