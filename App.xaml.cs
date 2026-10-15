@@ -11,9 +11,11 @@ public partial class App : Application
 {
     private const string MutexName = @"Local\Canopy_ZeroNotchOverlay_SingleInstance_v1";
     private const string ExpandEventName = @"Local\Canopy_ZeroNotchOverlay_ExpandEvent_v1";
+    private const string TestNotifyEventName = @"Local\Canopy_ZeroNotchOverlay_TestNotifyEvent_v1";
     private readonly DiagnosticsLog _log = new();
     private Mutex? _singleInstanceMutex;
     private EventWaitHandle? _expandEvent;
+    private EventWaitHandle? _testNotifyEvent;
     private CancellationTokenSource? _ipcCts;
     private bool _ownsMutex;
 
@@ -36,6 +38,20 @@ public partial class App : Application
         _singleInstanceMutex = new Mutex(initiallyOwned: true, MutexName, out _ownsMutex);
         if (!_ownsMutex)
         {
+            if (HasArgument(e.Args, "--test-notify"))
+            {
+                try
+                {
+                    using var notifyHandle = EventWaitHandle.OpenExisting(TestNotifyEventName);
+                    notifyHandle.Set();
+                }
+                catch
+                {
+                }
+                Shutdown(0);
+                return;
+            }
+
             // Hand the launch over to the instance that already owns the mutex. `--hidden` launches
             // (autostart) must not pop the panel, everything else does.
             BringExistingInstanceForward(requestExpand: !HasArgument(e.Args, "--hidden"));
@@ -82,6 +98,7 @@ public partial class App : Application
         try
         {
             _expandEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ExpandEventName);
+            _testNotifyEvent = new EventWaitHandle(false, EventResetMode.AutoReset, TestNotifyEventName);
         }
         catch (Exception ex)
         {
@@ -144,12 +161,12 @@ public partial class App : Application
             }
         }
     }
-
     private void StartExpandSignalListener(MainWindow mainWindow)
     {
         try
         {
             _expandEvent ??= new EventWaitHandle(false, EventResetMode.AutoReset, ExpandEventName);
+            _testNotifyEvent ??= new EventWaitHandle(false, EventResetMode.AutoReset, TestNotifyEventName);
             _ipcCts = new CancellationTokenSource();
             CancellationToken token = _ipcCts.Token;
 
@@ -157,10 +174,26 @@ public partial class App : Application
             {
                 while (!token.IsCancellationRequested)
                 {
-                    int index = WaitHandle.WaitAny([_expandEvent, token.WaitHandle]);
+                    int index = WaitHandle.WaitAny([_expandEvent, _testNotifyEvent, token.WaitHandle]);
                     if (index == 0)
                     {
                         mainWindow.Dispatcher.InvokeAsync(mainWindow.ExpandWithPreviewGrace);
+                    }
+                    else if (index == 1)
+                    {
+                        mainWindow.Dispatcher.InvokeAsync(() =>
+                        {
+                            try
+                            {
+                                NotificationWindow.ShowNotification(
+                                    "Canopy Reminder: Raindrop to Pill Capsule alert working seamlessly!",
+                                    "Canopy Reminder");
+                            }
+                            catch (Exception ex)
+                            {
+                                LogFatalError("TestNotify IPC", ex);
+                            }
+                        });
                     }
                     else
                     {
@@ -181,6 +214,7 @@ public partial class App : Application
         LogFatalError("Dispatcher Unhandled", e.Exception);
         e.Handled = true;
     }
+
     private static void LogFatalError(string category, object? exceptionObject)
     {
         try
@@ -196,12 +230,12 @@ public partial class App : Application
         {
         }
     }
-
     protected override void OnExit(ExitEventArgs e)
     {
         _ipcCts?.Cancel();
         _ipcCts?.Dispose();
         _expandEvent?.Dispose();
+        _testNotifyEvent?.Dispose();
 
         if (_singleInstanceMutex is not null)
         {
