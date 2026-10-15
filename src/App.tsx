@@ -75,7 +75,6 @@ import {
   setDesktopWallpaper,
   setDropdownOpen,
   setMasterVolume,
-  setResizing,
   setTopHoverTrigger,
   setWindowSize,
   type WallpaperEntry,
@@ -446,8 +445,6 @@ const CanopyShellContent: React.FC = () => {
     }, 5000);
   }, []);
 
-  const rafIdRef = useRef<number | null>(null);
-
   // Restore custom window dimensions if configured
   useEffect(() => {
     const scale = settings.appScale || 1.0;
@@ -457,52 +454,6 @@ const CanopyShellContent: React.FC = () => {
       setWindowSize(w, h).catch(() => {});
     }
   }, [settings.appScale]);
-
-  const handleResizeStart = useCallback(
-    (e: React.PointerEvent, _corner: 'se' | 'sw') => {
-      e.preventDefault();
-      e.stopPropagation();
-      setResizing(true).catch(() => {});
-
-      const startY = e.clientY;
-      const initialScale = settings.appScale || 1.0;
-      let lastTargetScale = initialScale;
-
-      const onPointerMove = (moveEv: PointerEvent) => {
-        const deltaY = moveEv.clientY - startY;
-        const deltaScale = deltaY / 420;
-        const newScale = Number(
-          Math.max(0.75, Math.min(1.35, initialScale + deltaScale)).toFixed(3),
-        );
-        lastTargetScale = newScale;
-
-        const targetW = Math.round(850 * newScale);
-        const targetH = Math.round(430 * newScale);
-
-        if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
-        rafIdRef.current = requestAnimationFrame(() => {
-          setWindowSize(targetW, targetH).catch(() => {});
-        });
-      };
-
-      const onPointerUp = () => {
-        window.removeEventListener('pointermove', onPointerMove);
-        window.removeEventListener('pointerup', onPointerUp);
-        setResizing(false).catch(() => {});
-        const finalW = Math.round(850 * lastTargetScale);
-        const finalH = Math.round(430 * lastTargetScale);
-        updateSettings({
-          appScale: lastTargetScale,
-          appWidth: finalW,
-          appHeight: finalH,
-        });
-      };
-
-      window.addEventListener('pointermove', onPointerMove);
-      window.addEventListener('pointerup', onPointerUp);
-    },
-    [settings.appScale, updateSettings],
-  );
 
   useEffect(() => {
     const onBridgeError = (event: Event) => {
@@ -1958,39 +1909,6 @@ const CanopyShellContent: React.FC = () => {
             />
           )}
         </main>
-
-        {/* Interactive Corner Resize Grips (Off by default, enabled in Settings) */}
-        {settings.enableCornerResizeTabs && (
-          <>
-            <div
-              onPointerDown={(e) => handleResizeStart(e, 'sw')}
-              className="absolute bottom-1 left-1.5 w-6 h-6 flex items-end justify-start p-1 z-50 cursor-sw-resize group pointer-events-auto select-none"
-              title="Drag to resize Canopy"
-            >
-              <svg
-                className="w-3.5 h-3.5 opacity-40 group-hover:opacity-100 group-hover:scale-110 transition-all text-[var(--theme-accent)]"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-                style={{ transform: 'scaleX(-1)' }}
-              >
-                <path d="M14 14H12V12H14V14ZM14 10H12V8H14V10ZM10 14H8V12H10V14ZM14 6H12V4H14V6ZM6 14H4V12H6V14ZM10 10H8V8H10V10Z" />
-              </svg>
-            </div>
-            <div
-              onPointerDown={(e) => handleResizeStart(e, 'se')}
-              className="absolute bottom-1 right-1.5 w-6 h-6 flex items-end justify-end p-1 z-50 cursor-se-resize group pointer-events-auto select-none"
-              title="Drag to resize Canopy"
-            >
-              <svg
-                className="w-3.5 h-3.5 opacity-40 group-hover:opacity-100 group-hover:scale-110 transition-all text-[var(--theme-accent)]"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-              >
-                <path d="M14 14H12V12H14V14ZM14 10H12V8H14V10ZM10 14H8V12H10V14ZM14 6H12V4H14V6ZM6 14H4V12H6V14ZM10 10H8V8H10V10Z" />
-              </svg>
-            </div>
-          </>
-        )}
       </div>
 
       {/* Search / Command Palette Overlay (printable key opens, Esc closes, Enter runs) */}

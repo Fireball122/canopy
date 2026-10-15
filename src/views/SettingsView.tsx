@@ -743,16 +743,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               />
             </SettingRow>
 
-            <SettingRow
-              title="Corner Resize Grips"
-              description="Draggable corner tabs to resize application dimensions"
-            >
-              <ToggleSwitch
-                checked={settings.enableCornerResizeTabs}
-                onChange={(val) => updateSettings({ enableCornerResizeTabs: val })}
-              />
-            </SettingRow>
-
             {/* Uniform Application Scaling Slider (Locked 850x430 Aspect Ratio) */}
             <div className="flex flex-col gap-1.5 pt-1 border-t border-[var(--theme-border)]">
               <div className="flex items-center justify-between">
