@@ -863,6 +863,10 @@ export async function setWindowSize(width: number, height: number): Promise<void
   );
 }
 
+export async function setResizing(resizing: boolean): Promise<void> {
+  await invokeBridge<unknown>('set_resizing', { resizing }, () => undefined);
+}
+
 export async function notifyTabSwitched(): Promise<void> {
   await invokeBridge<unknown>('tab_changed', undefined, () => undefined);
 }

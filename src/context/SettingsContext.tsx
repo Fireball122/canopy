@@ -76,6 +76,7 @@ export interface CanopySettings {
   diagnosticLogging: boolean; // default false
   showBatteryChip: boolean; // default true
   enableCornerResizeTabs: boolean; // default false (resizable corner grips)
+  appScale: number; // 0.75 to 1.35 (default 1.0, scales both width and height proportionately)
   appWidth: number; // 700 to 1400 (default 850)
   appHeight: number; // 360 to 750 (default 430)
 
@@ -148,6 +149,7 @@ export const DEFAULT_SETTINGS: CanopySettings = {
   hideDebounceMs: 200,
   globalHotkey: 'Win+`',
   enableCornerResizeTabs: false,
+  appScale: 1.0,
   appWidth: 850,
   appHeight: 430,
 };

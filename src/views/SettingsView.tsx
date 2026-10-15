@@ -261,6 +261,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [availableApps, setAvailableApps] = useState<InstalledAppItem[]>([]);
   const [appSearchQuery, setAppSearchQuery] = useState<string>('');
   const [loadingApps, setLoadingApps] = useState<boolean>(false);
+  const gifInputRef = useRef<HTMLInputElement | null>(null);
+  const [customGifUrlInput, setCustomGifUrlInput] = useState<string>(
+    settings.customMascotGifUrl || '',
+  );
+
+  const handleGifUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        updateSettings({ customMascotGifUrl: reader.result, mascotMode: 'gif' });
+        setCustomGifUrlInput('');
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
 
   const openAppPickerForSlot = async (slotIdx: number) => {
     setPickerSlotIndex(slotIdx);
@@ -586,6 +604,108 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               />
             </SettingRow>
 
+            {/* Custom Mascot GIF Manager */}
+            {settings.mascotMode === 'gif' && (
+              <div
+                className="p-3 rounded-xl border flex flex-col gap-2.5 animate-in fade-in duration-200"
+                style={{
+                  background: 'var(--theme-track, rgba(255, 255, 255, 0.04))',
+                  borderColor: 'var(--theme-accent, #cba6f7)',
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <span
+                    className="text-xs font-semibold"
+                    style={{ color: 'var(--theme-text-primary)' }}
+                  >
+                    Custom Mascot GIF
+                  </span>
+                  {settings.customMascotGifUrl && (
+                    <button
+                      type="button"
+                      data-tauri-drag-region="false"
+                      onClick={() => updateSettings({ customMascotGifUrl: '' })}
+                      className="text-[10px] text-red-400 hover:text-red-300 transition-colors pointer-events-auto cursor-pointer"
+                    >
+                      Clear GIF
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="w-14 h-14 rounded-xl border border-white/10 bg-black/30 flex items-center justify-center shrink-0 overflow-hidden relative group">
+                    {settings.customMascotGifUrl ? (
+                      <img
+                        src={settings.customMascotGifUrl}
+                        alt="Custom mascot preview"
+                        className="w-full h-full object-contain"
+                      />
+                    ) : (
+                      <Upload className="w-5 h-5 text-white/30" />
+                    )}
+                  </div>
+
+                  <div className="flex-1 flex flex-col gap-1.5 min-w-0">
+                    <input
+                      ref={gifInputRef}
+                      type="file"
+                      accept="image/gif,image/webp,image/png,image/jpeg"
+                      data-tauri-drag-region="false"
+                      onChange={handleGifUpload}
+                      className="hidden"
+                    />
+
+                    <button
+                      type="button"
+                      data-tauri-drag-region="false"
+                      onClick={() => gifInputRef.current?.click()}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 border transition-all active:scale-95 pointer-events-auto cursor-pointer"
+                      style={{
+                        background: 'var(--theme-accent, #cba6f7)',
+                        borderColor: 'var(--theme-accent, #cba6f7)',
+                        color: '#11111b',
+                      }}
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>
+                        {settings.customMascotGifUrl ? 'Change GIF File…' : 'Upload GIF File…'}
+                      </span>
+                    </button>
+
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        data-tauri-drag-region="false"
+                        value={customGifUrlInput}
+                        onChange={(e) => setCustomGifUrlInput(e.target.value)}
+                        onBlur={() => {
+                          if (customGifUrlInput.trim()) {
+                            updateSettings({ customMascotGifUrl: customGifUrlInput.trim() });
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && customGifUrlInput.trim()) {
+                            updateSettings({ customMascotGifUrl: customGifUrlInput.trim() });
+                          }
+                        }}
+                        placeholder="Or paste online GIF URL..."
+                        className="w-full px-2 py-1 rounded-lg text-[10px] border bg-black/20 focus:outline-none pointer-events-auto"
+                        style={{
+                          borderColor: 'var(--theme-border)',
+                          color: 'var(--theme-text-primary)',
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-[10px] text-[var(--theme-text-secondary)]">
+                  Supports animated .gif and .webp. Plays rhythmically in the media panel and
+                  dashboard.
+                </div>
+              </div>
+            )}
+
             <SettingRow title="Show Apps Tab" description="Windows start menu app launcher tab">
               <ToggleSwitch
                 checked={settings.showAppsTab}
@@ -632,6 +752,66 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 onChange={(val) => updateSettings({ enableCornerResizeTabs: val })}
               />
             </SettingRow>
+
+            {/* Uniform Application Scaling Slider (Locked 850x430 Aspect Ratio) */}
+            <div className="flex flex-col gap-1.5 pt-1 border-t border-[var(--theme-border)]">
+              <div className="flex items-center justify-between">
+                <div className="flex flex-col">
+                  <div
+                    className="text-xs font-medium"
+                    style={{ color: 'var(--theme-text-primary)' }}
+                  >
+                    Application Scale
+                  </div>
+                  <div className="text-[10px] text-[var(--theme-text-secondary)]">
+                    Scales the entire application up or down proportionally
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span
+                    className="text-[10px] font-mono font-semibold"
+                    style={{ color: 'var(--theme-accent)' }}
+                  >
+                    {Math.round((settings.appScale || 1.0) * 100)}%
+                  </span>
+                  <button
+                    type="button"
+                    data-tauri-drag-region="false"
+                    onClick={() => {
+                      updateSettings({
+                        appScale: 1.0,
+                        appWidth: 850,
+                        appHeight: 430,
+                      });
+                    }}
+                    className="px-2 py-0.5 rounded text-[10px] font-mono border hover:bg-white/10 transition-all pointer-events-auto cursor-pointer"
+                    style={{
+                      borderColor: 'var(--theme-border)',
+                      color: 'var(--theme-text-secondary)',
+                    }}
+                    title="Reset to 100% scale (850x430)"
+                  >
+                    Reset (100%)
+                  </button>
+                </div>
+              </div>
+              <input
+                type="range"
+                min={75}
+                max={135}
+                step={5}
+                value={Math.round((settings.appScale || 1.0) * 100)}
+                onChange={(e) => {
+                  const newScale = Number((Number(e.target.value) / 100).toFixed(2));
+                  updateSettings({
+                    appScale: newScale,
+                    appWidth: Math.round(850 * newScale),
+                    appHeight: Math.round(430 * newScale),
+                  });
+                }}
+                className="w-full accent-[var(--theme-accent)] h-1.5 rounded-lg appearance-none cursor-pointer bg-[var(--theme-track)]"
+              />
+            </div>
 
             {/* Quick Launch Dock App Slots */}
             <div className="flex flex-col gap-2 pt-2 border-t border-[var(--theme-border)]">

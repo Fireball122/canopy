@@ -75,6 +75,7 @@ import {
   setDesktopWallpaper,
   setDropdownOpen,
   setMasterVolume,
+  setResizing,
   setTopHoverTrigger,
   setWindowSize,
   type WallpaperEntry,
@@ -445,47 +446,62 @@ const CanopyShellContent: React.FC = () => {
     }, 5000);
   }, []);
 
-  // Restore custom window dimensions if set
+  const rafIdRef = useRef<number | null>(null);
+
+  // Restore custom window dimensions if configured
   useEffect(() => {
-    if (
-      settings.appWidth &&
-      settings.appHeight &&
-      (settings.appWidth !== 850 || settings.appHeight !== 430)
-    ) {
-      setWindowSize(settings.appWidth, settings.appHeight).catch(() => {});
+    const scale = settings.appScale || 1.0;
+    const w = Math.round(850 * scale);
+    const h = Math.round(430 * scale);
+    if (w !== 850 || h !== 430) {
+      setWindowSize(w, h).catch(() => {});
     }
-  }, [settings.appWidth, settings.appHeight]);
+  }, [settings.appScale]);
 
   const handleResizeStart = useCallback(
-    (e: React.PointerEvent, corner: 'se' | 'sw') => {
+    (e: React.PointerEvent, _corner: 'se' | 'sw') => {
       e.preventDefault();
       e.stopPropagation();
-      const startX = e.clientX;
+      setResizing(true).catch(() => {});
+
       const startY = e.clientY;
-      const initialWidth = settings.appWidth || 850;
-      const initialHeight = settings.appHeight || 430;
+      const initialScale = settings.appScale || 1.0;
+      let lastTargetScale = initialScale;
 
       const onPointerMove = (moveEv: PointerEvent) => {
-        const deltaX = moveEv.clientX - startX;
         const deltaY = moveEv.clientY - startY;
-        const newHeight = Math.max(360, Math.min(850, Math.round(initialHeight + deltaY)));
-        const newWidth = Math.max(
-          700,
-          Math.min(1450, Math.round(initialWidth + (corner === 'se' ? deltaX * 2 : -deltaX * 2))),
+        const deltaScale = deltaY / 420;
+        const newScale = Number(
+          Math.max(0.75, Math.min(1.35, initialScale + deltaScale)).toFixed(3),
         );
-        setWindowSize(newWidth, newHeight).catch(() => {});
-        updateSettings({ appWidth: newWidth, appHeight: newHeight });
+        lastTargetScale = newScale;
+
+        const targetW = Math.round(850 * newScale);
+        const targetH = Math.round(430 * newScale);
+
+        if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = requestAnimationFrame(() => {
+          setWindowSize(targetW, targetH).catch(() => {});
+        });
       };
 
       const onPointerUp = () => {
         window.removeEventListener('pointermove', onPointerMove);
         window.removeEventListener('pointerup', onPointerUp);
+        setResizing(false).catch(() => {});
+        const finalW = Math.round(850 * lastTargetScale);
+        const finalH = Math.round(430 * lastTargetScale);
+        updateSettings({
+          appScale: lastTargetScale,
+          appWidth: finalW,
+          appHeight: finalH,
+        });
       };
 
       window.addEventListener('pointermove', onPointerMove);
       window.addEventListener('pointerup', onPointerUp);
     },
-    [settings.appWidth, settings.appHeight, updateSettings],
+    [settings.appScale, updateSettings],
   );
 
   useEffect(() => {

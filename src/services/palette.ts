@@ -263,8 +263,8 @@ export function applyThemePalette(
         const bucketIndex = Math.floor(shiftedHue / 30);
         // Weight by saturation and distance from extreme lightness
         const weight = s * (1.0 - Math.abs(l - 0.5));
+        bucketHues[bucketIndex] += shiftedHue * weight;
         bucketWeights[bucketIndex] += weight;
-        bucketHues[bucketIndex] += h * weight;
         bucketSats[bucketIndex] += s * weight;
         bucketCounts[bucketIndex]++;
       }
@@ -326,16 +326,17 @@ export function applyThemePalette(
       return;
     }
 
-    let accentH = bucketHues[bestBucket] / bucketWeights[bestBucket];
+    const avgShifted = bucketHues[bestBucket] / bucketWeights[bestBucket];
+    let accentH = (avgShifted - 15 + 360) % 360;
     let accentS = Math.min(
       0.95,
       Math.max(0.65, bucketSats[bestBucket] / bucketWeights[bestBucket]),
     );
 
     // If red channel strongly dominates, prevent snapping into magenta/pink
-    const isRedDominated = avgR > avgG * 1.35 && avgR > avgB * 1.25;
-    if (isRedDominated && (accentH > 320 || accentH < 35)) {
-      if (accentH > 320 && accentH < 350) accentH = 355;
+    const isRedDominated = avgR > avgG * 1.25 && avgR > avgB * 1.2;
+    if (isRedDominated && (accentH > 315 || accentH < 35 || (accentH >= 160 && accentH <= 210))) {
+      accentH = accentH > 315 || accentH < 35 ? (accentH > 315 ? 355 : accentH) : 355;
     }
 
     const isRedHue = accentH >= 340 || accentH <= 22;

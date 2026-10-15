@@ -47,6 +47,7 @@ public partial class MainWindow : Window
     private bool _webViewReady;
     private readonly bool _startExpanded;
     private volatile bool _isSuspending;
+    private volatile bool _isResizingWindow;
     private DateTime _ignoreAutoHideUntilUtc = DateTime.MinValue;
     private int _currentBrightness = 80;
     private bool _topHoverTriggerEnabled = true;
@@ -774,6 +775,19 @@ public partial class MainWindow : Window
                     }
                 }
                 return false;
+            }
+
+            case "set_resizing":
+            {
+                if (args.ValueKind == JsonValueKind.Object && args.TryGetProperty("resizing", out JsonElement resEl))
+                {
+                    _isResizingWindow = resEl.GetBoolean();
+                    if (_isResizingWindow && _hideDebounceTimer.IsEnabled)
+                    {
+                        _hideDebounceTimer.Stop();
+                    }
+                }
+                return _isResizingWindow;
             }
 
             case "set_launch_on_startup":
@@ -1697,6 +1711,15 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (_isResizingWindow)
+        {
+            if (_hideDebounceTimer.IsEnabled)
+            {
+                _hideDebounceTimer.Stop();
+            }
+            return;
+        }
+
         bool isInsideCard = IsCursorInsideWindow(cursor);
         if (isInsideCard || inTopTriggerZone)
         {
@@ -1742,7 +1765,7 @@ public partial class MainWindow : Window
     private void OnHideDebounceTimerTick(object? sender, EventArgs e)
     {
         _hideDebounceTimer.Stop();
-        if (!_isExpanded)
+        if (_isResizingWindow || !_isExpanded)
             return;
 
         if (Win32.GetCursorPos(out Win32.POINT cursor))

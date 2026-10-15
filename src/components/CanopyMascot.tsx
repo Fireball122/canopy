@@ -68,9 +68,10 @@ export const CanopyMascot: React.FC<CanopyMascotProps> = ({
     if (lastSampledGifRef.current === activeGifUrl && frozenGifDataUrl) {
       return;
     }
-
     const img = new Image();
-    img.crossOrigin = 'anonymous';
+    if (activeGifUrl.startsWith('http://') || activeGifUrl.startsWith('https://')) {
+      img.crossOrigin = 'anonymous';
+    }
     img.onload = () => {
       try {
         const canvas = document.createElement('canvas');
@@ -82,12 +83,17 @@ export const CanopyMascot: React.FC<CanopyMascotProps> = ({
           const dataUrl = canvas.toDataURL('image/png');
           setFrozenGifDataUrl(dataUrl);
           lastSampledGifRef.current = activeGifUrl;
+          return;
         }
       } catch {
-        setCustomGifError(true);
+        // If canvas export is blocked, fall back to displaying the gif directly without breaking playback
       }
+      setFrozenGifDataUrl(activeGifUrl);
+      lastSampledGifRef.current = activeGifUrl;
     };
-    img.onerror = () => setCustomGifError(true);
+    img.onerror = () => {
+      setCustomGifError(true);
+    };
     img.src = activeGifUrl;
   }, [activeGifUrl, frozenGifDataUrl]);
 
@@ -110,7 +116,7 @@ export const CanopyMascot: React.FC<CanopyMascotProps> = ({
   }
 
   // User configured a custom GIF
-  if (useCustomGif && (settings.mascotMode === 'gif' || settings.customMascotGifUrl)) {
+  if (useCustomGif && settings.mascotMode === 'gif') {
     return (
       <div
         className={`relative flex items-center justify-center select-none pointer-events-auto h-full max-h-full overflow-hidden ${className}`}
