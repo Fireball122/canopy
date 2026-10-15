@@ -43,7 +43,9 @@ public readonly record struct SystemTelemetrySnapshot(
     string UptimeFormatted,
     string Hostname,
     string OsName,
-    string Username);
+    string Username,
+    string? GpuName = null,
+    string? CpuName = null);
 
 /// <summary>
 /// Polls CPU, per-core usage, top processes, GPU/CPU temps, RAM, Disk, Uptime, and Host telemetry.
@@ -77,10 +79,25 @@ public sealed class SystemMonitorService : IDisposable
     private double _lastNetUpKbps = 14.2;
     private IReadOnlyList<InstalledAppSnapshot>? _cachedInstalledApps;
     private readonly Dictionary<int, (TimeSpan TotalTime, long SampleTick)> _processCpuHistory = new();
+    private double? _cachedGpuUsage;
+    private double? _cachedGpuTempC;
+    private static string? _staticGpuName;
+    private static string? _staticCpuName;
+    private static readonly string? NvidiaSmiPath = FindNvidiaSmi();
+
+    private static string? FindNvidiaSmi()
+    {
+        string sys32 = Path.Combine(Environment.SystemDirectory, "nvidia-smi.exe");
+        if (File.Exists(sys32)) return sys32;
+        string nvsmi = @"C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe";
+        if (File.Exists(nvsmi)) return nvsmi;
+        return null;
+    }
+
 
     public SystemMonitorService()
     {
-        int coreCount = Math.Clamp(Environment.ProcessorCount, 4, 32);
+        int coreCount = Math.Max(1, Environment.ProcessorCount);
         _cachedCoreUsages = new double[coreCount];
         PrimeSystemTimes();
         PrimeNetworkBytes();
@@ -98,7 +115,7 @@ public sealed class SystemMonitorService : IDisposable
             _ = cpu.NextValue();
             _ = mem.NextValue();
 
-            int coreCount = Math.Clamp(Environment.ProcessorCount, 4, 32);
+            int coreCount = Math.Max(1, Environment.ProcessorCount);
             var cores = new List<PerformanceCounter>(coreCount);
             for (int i = 0; i < coreCount; i++)
             {
@@ -110,7 +127,16 @@ public sealed class SystemMonitorService : IDisposable
                 }
                 catch
                 {
-                    break;
+                    try
+                    {
+                        var coreCounter = new PerformanceCounter("Processor Information", "% Processor Time", $"0,{i}", true);
+                        _ = coreCounter.NextValue();
+                        cores.Add(coreCounter);
+                    }
+                    catch
+                    {
+                        break;
+                    }
                 }
             }
 
@@ -239,8 +265,8 @@ public sealed class SystemMonitorService : IDisposable
         var snapshot = new SystemTelemetrySnapshot(
             CpuUsagePercent: cpuPercent,
             CpuTempC: Math.Round(cpuTemp, 1),
-            GpuUsagePercent: null,
-            GpuTempC: null,
+            GpuUsagePercent: _cachedGpuUsage,
+            GpuTempC: _cachedGpuTempC,
             CoreUsages: coreUsages,
             TopProcesses: _cachedTopProcesses,
             NetDownKbps: netDownKbps,
@@ -254,7 +280,9 @@ public sealed class SystemMonitorService : IDisposable
             UptimeFormatted: uptimeFormatted,
             Hostname: hostname,
             OsName: "Windows 11",
-            Username: username);
+            Username: username,
+            GpuName: _staticGpuName,
+            CpuName: _staticCpuName);
         _lastSnapshot = snapshot;
         return snapshot;
     }
@@ -381,9 +409,120 @@ public sealed class SystemMonitorService : IDisposable
         {
             _cachedCpuTempC = 39.0;
         }
-
+        RefreshGpuTelemetry();
     }
 
+    private void RefreshGpuTelemetry()
+    {
+        if (NvidiaSmiPath is not null)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo(NvidiaSmiPath, "--query-gpu=utilization.gpu,temperature.gpu,name --format=csv,noheader,nounits")
+                {
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                using var proc = Process.Start(psi);
+                if (proc is not null)
+                {
+                    string output = proc.StandardOutput.ReadToEnd();
+                    proc.WaitForExit();
+                    if (!string.IsNullOrWhiteSpace(output))
+                    {
+                        var parts = output.Split(',', StringSplitOptions.TrimEntries);
+                        if (parts.Length >= 2 && double.TryParse(parts[0], System.Globalization.CultureInfo.InvariantCulture, out double usage))
+                        {
+                            _cachedGpuUsage = Math.Clamp(usage, 0.0, 100.0);
+                        }
+                        if (parts.Length >= 2 && double.TryParse(parts[1], System.Globalization.CultureInfo.InvariantCulture, out double temp))
+                        {
+                            _cachedGpuTempC = temp;
+                        }
+                        if (parts.Length >= 3 && !string.IsNullOrWhiteSpace(parts[2]))
+                        {
+                            _staticGpuName = parts[2];
+                        }
+                        return;
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        try
+        {
+            using var searcher = new ManagementObjectSearcher(@"root\CIMV2", "SELECT UtilizationPercentage FROM Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine WHERE Name LIKE '%engtype_3D%'");
+            using ManagementObjectCollection results = searcher.Get();
+            double sum = 0.0;
+            int count = 0;
+            foreach (ManagementObject obj in results)
+            {
+                using (obj)
+                {
+                    if (double.TryParse(obj["UtilizationPercentage"]?.ToString(), System.Globalization.CultureInfo.InvariantCulture, out double util))
+                    {
+                        sum += util;
+                        count++;
+                    }
+                }
+            }
+            if (count > 0)
+            {
+                _cachedGpuUsage = Math.Clamp(sum, 0.0, 100.0);
+            }
+        }
+        catch
+        {
+        }
+
+        if (string.IsNullOrWhiteSpace(_staticGpuName))
+        {
+            try
+            {
+                using var searcher = new ManagementObjectSearcher(@"root\CIMV2", "SELECT Name FROM Win32_VideoController");
+                using ManagementObjectCollection results = searcher.Get();
+                foreach (ManagementObject obj in results)
+                {
+                    using (obj)
+                    {
+                        string? name = obj["Name"]?.ToString();
+                        if (!string.IsNullOrWhiteSpace(name) && !name.Contains("Basic", StringComparison.OrdinalIgnoreCase))
+                        {
+                            _staticGpuName = name;
+                            break;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(_staticCpuName))
+        {
+            try
+            {
+                using var searcher = new ManagementObjectSearcher(@"root\CIMV2", "SELECT Name FROM Win32_Processor");
+                using ManagementObjectCollection results = searcher.Get();
+                foreach (ManagementObject obj in results)
+                {
+                    using (obj)
+                    {
+                        _staticCpuName = obj["Name"]?.ToString()?.Trim();
+                        if (!string.IsNullOrWhiteSpace(_staticCpuName)) break;
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+    }
     private static string GetDefaultBrowserProgId()
     {
         try
@@ -780,6 +919,32 @@ public sealed class SystemMonitorService : IDisposable
         return (0.0, 16.0, 0.0);
     }
 
+    public static string GenerateFastfetchOutput()
+    {
+        long upSecs = Environment.TickCount64 / 1000L;
+        long hours = upSecs / 3600L;
+        long minutes = (upSecs % 3600L) / 60L;
+
+        string cpu = string.IsNullOrWhiteSpace(_staticCpuName) ? "AMD/Intel x64 Processor" : _staticCpuName;
+        string gpu = string.IsNullOrWhiteSpace(_staticGpuName) ? "DirectX 3D Video Controller" : _staticGpuName;
+        string user = Environment.UserName;
+        string host = Environment.MachineName;
+        string sep = new string('-', Math.Max(12, user.Length + host.Length + 1));
+
+        return $"""
+                  .---.          {user}@{host}
+                 /     \         {sep}
+                | () () |        OS      : Windows 11 ({Environment.OSVersion.Version.Build}) x64
+                 \  _  /         Host    : {host} (Canopy Control Center)
+                  `---`          Uptime  : {hours}h {minutes}m
+                 /     \         CPU     : {cpu} ({Environment.ProcessorCount} threads)
+                | |   | |        GPU     : {gpu}
+                | |   | |        Runtime : .NET {Environment.Version} + WebView2
+                 \ \_/ /         Shell   : Canopy PowerShell Console
+                  `---`          Colors  : \u001b[31m███\u001b[0m \u001b[32m███\u001b[0m \u001b[33m███\u001b[0m \u001b[34m███\u001b[0m \u001b[35m███\u001b[0m \u001b[36m███\u001b[0m \u001b[37m███\u001b[0m
+               """;
+    }
+
     public static async Task<string> RunTerminalCommandAsync(string command)
     {
         if (string.IsNullOrWhiteSpace(command))
@@ -789,18 +954,7 @@ public sealed class SystemMonitorService : IDisposable
         if (string.Equals(trimmed, "fastfetch", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(trimmed, "neofetch", StringComparison.OrdinalIgnoreCase))
         {
-            long upSecs = Environment.TickCount64 / 1000L;
-            return $"""
-                   ╭──────────────────────────────────────────╮
-                   │  🌿 Canopy Shell v2.0 (Windows 11)       │
-                   ├──────────────────────────────────────────┤
-                   │  Host     : {Environment.MachineName}
-                   │  User     : {Environment.UserName}
-                   │  OS       : {Environment.OSVersion.VersionString}
-                   │  Uptime   : {upSecs / 3600}h {(upSecs % 3600) / 60}m
-                   │  Runtime  : .NET {Environment.Version} + WebView2
-                   ╰──────────────────────────────────────────╯
-                   """;
+            return GenerateFastfetchOutput();
         }
 
         Process? proc = null;

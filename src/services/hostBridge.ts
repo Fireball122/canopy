@@ -12,6 +12,8 @@ export interface SystemStats {
   cpu_temp_c: number;
   gpu_usage: number | null;
   gpu_temp_c: number | null;
+  gpu_name?: string | null;
+  cpu_name?: string | null;
   core_usages: number[];
   top_processes: ProcessEntry[];
   net_down_kbps: number;

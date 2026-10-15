@@ -402,8 +402,10 @@ public partial class MainWindow : Window
                 {
                     cpu_usage = (float)Math.Round(snap.CpuUsagePercent, 1),
                     cpu_temp_c = (float)Math.Round(snap.CpuTempC, 1),
+                    cpu_name = snap.CpuName,
                     gpu_usage = snap.GpuUsagePercent is double gpuUsage ? (float?)Math.Round(gpuUsage, 1) : null,
                     gpu_temp_c = snap.GpuTempC is double gpuTemp ? (float?)Math.Round(gpuTemp, 1) : null,
+                    gpu_name = snap.GpuName,
                     core_usages = snap.CoreUsages,
                     top_processes = snap.TopProcesses,
                     net_down_kbps = (float)Math.Round(snap.NetDownKbps, 1),

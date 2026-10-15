@@ -205,8 +205,8 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
   const [cpuHistory, setCpuHistory] = useState<number[]>(() => new Array(30).fill(0));
   const [ramHistory, setRamHistory] = useState<number[]>(() => new Array(30).fill(0));
   const [netDownHistory, setNetDownHistory] = useState<number[]>(() => new Array(30).fill(0));
-  const gpuAvailable = stats.gpu_usage != null && stats.gpu_temp_c != null;
-  const gpuTempC = stats.gpu_temp_c != null ? Math.round(stats.gpu_temp_c) : 0;
+  const gpuAvailable = stats.gpu_usage != null || stats.gpu_temp_c != null;
+  const gpuTempC = stats.gpu_temp_c != null ? Math.round(stats.gpu_temp_c) : null;
   const gpuUsage = stats.gpu_usage != null ? Math.round(stats.gpu_usage) : 0;
   const cpuTempC = Math.round(stats.cpu_temp_c || 41);
   const cpuUsage = Math.round(stats.cpu_usage || 0);
@@ -250,7 +250,7 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
   // Derive 8-16 logical core utilization bars from stats.core_usages or realistic distribution
   const coreUsages: number[] = useMemo(() => {
     if (Array.isArray(stats.core_usages) && stats.core_usages.length > 0) {
-      return stats.core_usages.slice(0, 16).map((v) => Math.min(100, Math.max(0, Math.round(v))));
+      return stats.core_usages.slice(0, 32).map((v) => Math.min(100, Math.max(0, Math.round(v))));
     }
     const base = stats.cpu_usage || 18;
     const offsets = [6, -4, 11, -7, 3, -2, 8, -5, 4, -6, 9, -3];
@@ -308,12 +308,22 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
       <div className="grid grid-cols-3 gap-2.5 shrink-0">
         <ConcentricDualArcGauge
           outerPercent={gpuUsage}
-          innerPercent={Math.min(100, (gpuTempC / 100) * 100)}
+          innerPercent={gpuTempC !== null ? Math.min(100, (gpuTempC / 100) * 100) : 0}
           outerColor="var(--theme-accent, #cba6f7)"
           innerColor="#89dceb"
-          centerValue={gpuAvailable ? `${gpuTempC}°C` : 'N/A'}
-          centerSublabel={gpuAvailable ? 'GPU temp' : 'GPU telemetry unavailable'}
-          pillText={gpuAvailable ? `${gpuUsage}% Usage` : 'No GPU data'}
+          centerValue={gpuTempC !== null ? `${gpuTempC}°C` : gpuAvailable ? `${gpuUsage}%` : 'N/A'}
+          centerSublabel={
+            stats.gpu_name
+              ? stats.gpu_name
+              : gpuAvailable
+                ? 'GPU active'
+                : 'GPU telemetry unavailable'
+          }
+          pillText={
+            gpuAvailable
+              ? `${gpuUsage}% Usage${gpuTempC !== null ? ` • ${gpuTempC}°C` : ''}`
+              : 'No GPU data'
+          }
           icon={
             <Activity
               className="w-4 h-4"

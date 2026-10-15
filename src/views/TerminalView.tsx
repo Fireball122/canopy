@@ -17,17 +17,39 @@ interface TerminalHistoryItem {
 
 const WINDOWS_POWERSHELL_UPTIME_CMD =
   '(get-date) - (gcim Win32_OperatingSystem).LastBootUpTime | Select-Object Days, Hours, Minutes';
+const ANSI_COLOR_MAP: Record<string, string> = {
+  '31': '#f38ba8',
+  '32': '#a6e3a1',
+  '33': '#f9e2af',
+  '34': '#89b4fa',
+  '35': '#cba6f7',
+  '36': '#89dceb',
+  '37': '#cdd6f4',
+};
 
-const INITIAL_TERMINAL_HISTORY: TerminalHistoryItem[] = [
-  {
-    id: 'init-1',
-    command: 'fastfetch',
-    output: `╭──────────────────────────────────────────╮\n│  🌿 Canopy Shell v2.0 (Windows 11)       │\n├──────────────────────────────────────────┤\n│  Type PowerShell or built-in commands:   │\n│  fastfetch, ipconfig, tasklist, uptime   │\n╰──────────────────────────────────────────╯`,
-    timestamp: 'ready',
-    isError: false,
-  },
-];
+function renderAnsiText(text: string): React.ReactNode {
+  const esc = String.fromCharCode(27);
+  if (!text.includes(esc)) {
+    return text;
+  }
+  const parts = text.split(new RegExp(`(${esc}\\[\\d+m)`, 'g'));
+  let currentColor: string | undefined;
+  return parts.map((part, index) => {
+    if (part.startsWith(`${esc}[`) && part.endsWith('m')) {
+      const code = part.slice(2, -1);
+      currentColor = code === '0' ? undefined : ANSI_COLOR_MAP[code] || currentColor;
+      return null;
+    }
+    if (!part) return null;
+    return (
+      <span key={index} style={{ color: currentColor }}>
+        {part}
+      </span>
+    );
+  });
+}
 
+const INITIAL_TERMINAL_HISTORY: TerminalHistoryItem[] = [];
 export const TerminalView: React.FC<TerminalViewProps> = ({ stats }) => {
   const [terminalHistory, setTerminalHistory] =
     useState<TerminalHistoryItem[]>(INITIAL_TERMINAL_HISTORY);
@@ -41,6 +63,27 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ stats }) => {
   useEffect(() => {
     terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [terminalHistory]);
+  useEffect(() => {
+    let active = true;
+    runTerminalCommand('fastfetch')
+      .then((res) => {
+        if (active && res) {
+          setTerminalHistory([
+            {
+              id: 'init-1',
+              command: 'fastfetch',
+              output: res,
+              timestamp: 'ready',
+              isError: false,
+            },
+          ]);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const executeCommand = async (rawCmd: string) => {
     const trimmed = rawCmd.trim();
@@ -202,7 +245,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ stats }) => {
                 border: '1px solid var(--theme-border)',
               }}
             >
-              {item.output}
+              {renderAnsiText(item.output)}
             </pre>
           </div>
         ))}

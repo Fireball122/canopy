@@ -378,7 +378,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
   // panel is expanded. A poll is skipped while the previous one is still in flight, so the
   // host is never queued with more than one outstanding get_audio_spectrum request.
   useEffect(() => {
-    if (!isPlaying || !panelOpen) {
+    if (!panelOpen) {
       setSpectrumBands(new Array(40).fill(0));
       return;
     }
@@ -403,17 +403,16 @@ export const MediaView: React.FC<MediaViewProps> = ({
       active = false;
       window.clearInterval(timer);
     };
-  }, [isPlaying, panelOpen]);
+  }, [panelOpen]);
 
-  // Harmonic wave ticker for the synthetic fallback shapes: only ticks while music plays and
-  // the panel is visible, so a hidden or paused panel does not churn React state.
+  // Harmonic wave ticker for the synthetic fallback shapes: ticks while the panel is visible
   useEffect(() => {
-    if (!isPlaying || !panelOpen) return;
+    if (!panelOpen) return;
     const timer = window.setInterval(() => {
       setVisualizerTick((prev) => (prev + 1) % 360);
     }, 45);
     return () => window.clearInterval(timer);
-  }, [isPlaying, panelOpen]);
+  }, [panelOpen]);
 
   // Per-app mixer: poll host sessions only while the mixer panel is visible and the panel is
   // open. Skips a tick while the previous request is still in flight (no queueing).
@@ -755,7 +754,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <RadialGauge
               bands={spectrumBands}
-              active={isPlaying}
+              active={isPlaying || spectrumBands.some((b) => b > 0.02)}
               size={190}
               accentColor="var(--theme-accent, #cba6f7)"
               secondaryColor="#89dceb"
@@ -1045,15 +1044,17 @@ export const MediaView: React.FC<MediaViewProps> = ({
             </div>
 
             {/* Alternate Audio Visualizer Modes (Linear Bars vs Oscilloscope Wave) */}
-            {settings.visualizerStyle === 'bars' && (
+            {(settings.visualizerStyle === 'bars' ||
+              settings.visualizerStyle === 'radial' ||
+              !settings.visualizerStyle) && (
               <div className="w-full max-w-[330px] h-9 flex items-end justify-between gap-1 px-1 pt-1.5 overflow-hidden">
                 {Array.from({ length: 32 }, (_, i) => {
                   const rawAmp = spectrumBands[i] || 0;
                   const waveDance = isPlaying
                     ? ((Math.sin(visualizerTick * 0.35 + i * 0.35) + 1) / 2) * 0.45
                     : 0;
-                  const amp = rawAmp > 0.03 ? Math.min(1, rawAmp * 1.8) : waveDance;
-                  const heightPercent = Math.max(12, Math.min(100, Math.round(amp * 100)));
+                  const amp = rawAmp > 0.02 ? Math.min(1, rawAmp * 1.8) : waveDance;
+                  const heightPercent = Math.max(10, Math.min(100, Math.round(amp * 100)));
                   return (
                     <div
                       key={i}
@@ -1062,7 +1063,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
                         height: `${heightPercent}%`,
                         background:
                           'linear-gradient(180deg, var(--theme-accent), var(--theme-border))',
-                        opacity: isPlaying || amp > 0.1 ? 0.95 : 0.3,
+                        opacity: isPlaying || amp > 0.05 ? 0.95 : 0.35,
                       }}
                     />
                   );
