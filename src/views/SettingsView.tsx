@@ -281,7 +281,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       updateSettings({ wallpaperDirectory: trimmed });
       onDirectoryChanged?.(trimmed, entries);
     } catch {
-      // Revert on invalid directory
       setDirectoryText(settings.wallpaperDirectory ?? '');
     }
   };
@@ -329,7 +328,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
     const parts = trimmed.split('+').map((p) => p.trim());
     if (parts.length < 2) {
-      setHotkeyError('Requires at least one modifier + key (e.g. Win+`)');
+      setHotkeyError('Requires modifier + key (e.g. Win+`)');
       return;
     }
     setHotkeyError(null);
@@ -428,432 +427,456 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </button>
       </div>
 
-      {/* Settings Grid Content */}
+      {/* Settings Dual-Column Flow (zero vertical gaps) */}
       <div
         data-tauri-drag-region="false"
-        className="flex-1 overflow-y-auto pr-1 grid grid-cols-1 md:grid-cols-2 gap-3.5 items-start pointer-events-auto pb-4"
+        className="flex-1 overflow-y-auto pr-1 flex flex-col md:flex-row gap-3.5 items-start pointer-events-auto pb-4"
       >
-        {/* 1. GENERAL / REGIONAL */}
-        {(activeCategory === 'all' || activeCategory === 'general') && (
-          <SettingSection
-            title="Time & Regional"
-            icon={<Clock className="w-4 h-4" />}
-            badge="Clock & Calendar"
-          >
-            <SettingRow title="Clock Format" description="Choose 12-hour or 24-hour military clock">
-              <SegmentedChoice
-                options={[
-                  { id: '12h', label: '12-Hour' },
-                  { id: '24h', label: '24-Hour' },
-                ]}
-                value={settings.clockFormat}
-                onChange={(val) => updateSettings({ clockFormat: val })}
-              />
-            </SettingRow>
-
-            <SettingRow
-              title="Show Seconds"
-              description="Live second counter ticker on Dashboard clock"
+        {/* Left Column Stack */}
+        <div className="flex-1 w-full flex flex-col gap-3.5">
+          {/* 1. GENERAL / REGIONAL */}
+          {(activeCategory === 'all' || activeCategory === 'general') && (
+            <SettingSection
+              title="Time & Regional"
+              icon={<Clock className="w-4 h-4" />}
+              badge="Clock & Calendar"
             >
-              <ToggleSwitch
-                checked={settings.showSeconds}
-                onChange={(val) => updateSettings({ showSeconds: val })}
-              />
-            </SettingRow>
-
-            <SettingRow title="First Day of Week" description="Calendar week alignment">
-              <SegmentedChoice
-                options={[
-                  { id: 'sunday', label: 'Sun' },
-                  { id: 'monday', label: 'Mon' },
-                ]}
-                value={settings.calendarFirstDay}
-                onChange={(val) => updateSettings({ calendarFirstDay: val })}
-              />
-            </SettingRow>
-          </SettingSection>
-        )}
-
-        {/* 2. WEATHER */}
-        {(activeCategory === 'all' || activeCategory === 'general') && (
-          <SettingSection
-            title="Weather Telemetry"
-            icon={<CloudSun className="w-4 h-4" />}
-            badge="Open-Meteo"
-          >
-            <SettingRow title="Temperature Unit" description="Fahrenheit (°F) or Celsius (°C)">
-              <SegmentedChoice
-                options={[
-                  { id: 'fahrenheit', label: '°F' },
-                  { id: 'celsius', label: '°C' },
-                ]}
-                value={settings.temperatureUnit}
-                onChange={(val) => updateSettings({ temperatureUnit: val })}
-              />
-            </SettingRow>
-
-            <SettingRow
-              title="Location Mode"
-              description="Automatic IP-based or manual coordinates"
-            >
-              <SegmentedChoice
-                options={[
-                  { id: 'auto', label: 'Auto IP' },
-                  { id: 'manual', label: 'Manual' },
-                ]}
-                value={settings.weatherLocationMode}
-                onChange={(val) => updateSettings({ weatherLocationMode: val })}
-              />
-            </SettingRow>
-
-            {settings.weatherLocationMode === 'manual' && (
-              <SettingRow title="Manual City" description="City name for weather lookup">
-                <input
-                  type="text"
-                  value={settings.manualCityName || ''}
-                  onChange={(e) => updateSettings({ manualCityName: e.target.value })}
-                  placeholder="e.g. Denver, CO"
-                  className="px-2.5 py-1 rounded-lg text-xs font-mono border bg-[var(--theme-track)] text-[var(--theme-text-primary)] border-[var(--theme-border)] outline-none w-36"
+              <SettingRow
+                title="Clock Format"
+                description="Choose 12-hour or 24-hour military clock"
+              >
+                <SegmentedChoice
+                  options={[
+                    { id: '12h', label: '12-Hour' },
+                    { id: '24h', label: '24-Hour' },
+                  ]}
+                  value={settings.clockFormat}
+                  onChange={(val) => updateSettings({ clockFormat: val })}
                 />
               </SettingRow>
-            )}
-          </SettingSection>
-        )}
 
-        {/* 3. APPEARANCE & WALLPAPERS */}
-        {(activeCategory === 'all' || activeCategory === 'appearance') && (
-          <SettingSection
-            title="Wallpaper & Glass"
-            icon={<ImageIcon className="w-4 h-4" />}
-            badge="Theme Engine"
-          >
-            <SettingRow title="Theme Mode" description="Color palette source for controls & HUD">
-              <SegmentedChoice
-                options={[
-                  { id: 'canopy', label: 'Canopy', icon: <Sparkles className="w-3 h-3" /> },
-                  { id: 'adaptive', label: 'Adaptive', icon: <ImageIcon className="w-3 h-3" /> },
-                  { id: 'dark', label: 'Dark', icon: <Moon className="w-3 h-3" /> },
-                ]}
-                value={
-                  settings.themeMode === 'light' || settings.themeMode === 'auto'
-                    ? 'dark'
-                    : settings.themeMode
-                }
-                onChange={handleThemeModeSelect}
-              />
-            </SettingRow>
-
-            <SliderRow
-              label="Glass Blur Strength"
-              value={settings.glassBlurStrength}
-              min={16}
-              max={32}
-              unit="px"
-              onChange={handleBlurChange}
-            />
-
-            <SliderRow
-              label="Glass Opacity"
-              value={Math.round(settings.glassOpacity * 100)}
-              min={70}
-              max={95}
-              unit="%"
-              onChange={handleOpacityChange}
-            />
-
-            <div className="flex flex-col gap-1.5 pt-1 border-t border-[var(--theme-border)]">
-              <span className="text-xs font-medium" style={{ color: 'var(--theme-text-primary)' }}>
-                Wallpaper Directory
-              </span>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={directoryText}
-                  onChange={(e) => setDirectoryText(e.target.value)}
-                  onBlur={() => void commitWallpaperDirectory()}
-                  onKeyDown={(e) => e.key === 'Enter' && void commitWallpaperDirectory()}
-                  placeholder="%USERPROFILE%\Pictures\Wallpapers"
-                  className="flex-1 px-2.5 py-1 rounded-lg text-xs font-mono border bg-[var(--theme-track)] text-[var(--theme-text-primary)] border-[var(--theme-border)] outline-none truncate"
-                />
-                <button
-                  type="button"
-                  onClick={handleBrowseWallpaperDirectory}
-                  disabled={browsingFolder}
-                  className="px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 border transition-all active:scale-95 shrink-0"
-                  style={{
-                    background: 'var(--theme-accent)',
-                    color: '#11111b',
-                    borderColor: 'var(--theme-accent)',
-                  }}
-                >
-                  <FolderOpen className="w-3.5 h-3.5" />
-                  <span>{browsingFolder ? 'Opening…' : 'Browse'}</span>
-                </button>
-              </div>
-            </div>
-          </SettingSection>
-        )}
-
-        {/* 4. TRIGGERS & WINDOW */}
-        {(activeCategory === 'all' || activeCategory === 'triggers') && (
-          <SettingSection
-            title="Bezel Trigger & Hotkey"
-            icon={<Monitor className="w-4 h-4" />}
-            badge="Win32 Hook"
-          >
-            <SettingRow
-              title="Top Bezel Hover Trigger"
-              description="Drop down panel on top-screen mouse hover"
-            >
-              <ToggleSwitch
-                checked={settings.topHoverTrigger}
-                onChange={handleToggleHoverTrigger}
-              />
-            </SettingRow>
-
-            <SliderRow
-              label="Trigger Bezel Width"
-              value={settings.triggerWidth}
-              min={200}
-              max={1920}
-              step={10}
-              unit="px"
-              onChange={(val) => updateSettings({ triggerWidth: val })}
-            />
-
-            <SliderRow
-              label="Trigger Bezel Height"
-              value={settings.triggerHeight}
-              min={2}
-              max={24}
-              unit="px"
-              onChange={(val) => updateSettings({ triggerHeight: val })}
-            />
-
-            <SliderRow
-              label="Hover Dwell Delay"
-              value={settings.triggerDelayMs}
-              min={0}
-              max={600}
-              step={20}
-              unit="ms"
-              onChange={(val) => updateSettings({ triggerDelayMs: val })}
-            />
-
-            <div className="flex flex-col gap-1.5 pt-1 border-t border-[var(--theme-border)]">
-              <span className="text-xs font-medium" style={{ color: 'var(--theme-text-primary)' }}>
-                Global Hotkey
-              </span>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={hotkeyText}
-                  onChange={(e) => {
-                    setHotkeyText(e.target.value);
-                    setHotkeyError(null);
-                  }}
-                  onBlur={commitHotkey}
-                  onKeyDown={(e) => e.key === 'Enter' && commitHotkey()}
-                  placeholder="Win+`"
-                  className="flex-1 px-2.5 py-1 rounded-lg text-xs font-mono border bg-[var(--theme-track)] text-[var(--theme-text-primary)] border-[var(--theme-border)] outline-none"
-                />
-                <span className="text-[10px] font-mono shrink-0 px-2 py-1 rounded border border-[var(--theme-border)] text-[var(--theme-text-secondary)]">
-                  <Keyboard className="w-3 h-3 inline mr-1" />
-                  Press Enter
-                </span>
-              </div>
-              {hotkeyError && <span className="text-[10px] text-[#f38ba8]">{hotkeyError}</span>}
-            </div>
-          </SettingSection>
-        )}
-
-        {/* 5. INTERFACE & DOCK */}
-        {(activeCategory === 'all' || activeCategory === 'interface') && (
-          <SettingSection
-            title="Interface & Mascot"
-            icon={<AppWindow className="w-4 h-4" />}
-            badge="HUD Layout"
-          >
-            <SettingRow
-              title="Mascot Spirit Mode"
-              description="Animated dancing mushroom spirit / GIF"
-            >
-              <SegmentedChoice
-                options={[
-                  { id: 'bongo', label: 'Capi' },
-                  { id: 'gif', label: 'Custom' },
-                  { id: 'none', label: 'Off' },
-                ]}
-                value={settings.mascotMode}
-                onChange={(val) => updateSettings({ mascotMode: val })}
-              />
-            </SettingRow>
-
-            <SettingRow title="Show Apps Tab" description="Windows start menu app launcher tab">
-              <ToggleSwitch
-                checked={settings.showAppsTab}
-                onChange={(val) => updateSettings({ showAppsTab: val })}
-              />
-            </SettingRow>
-
-            <SettingRow
-              title="Show Developer Console"
-              description="Interactive PowerShell shell tab"
-            >
-              <ToggleSwitch
-                checked={settings.showTerminalTab}
-                onChange={(val) => updateSettings({ showTerminalTab: val })}
-              />
-            </SettingRow>
-
-            <SettingRow
-              title="Hardware Brightness Slider"
-              description="Show display brightness slider on Dashboard"
-            >
-              <ToggleSwitch
-                checked={settings.enableBrightnessSlider}
-                onChange={(val) => updateSettings({ enableBrightnessSlider: val })}
-              />
-            </SettingRow>
-
-            <SettingRow
-              title="Battery Indicator Chip"
-              description="Display battery status badge in top header"
-            >
-              <ToggleSwitch
-                checked={settings.showBatteryChip}
-                onChange={(val) => updateSettings({ showBatteryChip: val })}
-              />
-            </SettingRow>
-          </SettingSection>
-        )}
-
-        {/* 6. AUDIO & MEDIA */}
-        {(activeCategory === 'all' || activeCategory === 'audio') && (
-          <SettingSection
-            title="Audio & Visualizer"
-            icon={<Music className="w-4 h-4" />}
-            badge="CoreAudio"
-          >
-            <SettingRow
-              title="Visualizer Style"
-              description="Animation style for audio loopback spectrum"
-            >
-              <SegmentedChoice
-                options={[
-                  { id: 'radial', label: 'Radial' },
-                  { id: 'bars', label: 'Bars' },
-                  { id: 'wave', label: 'Wave' },
-                ]}
-                value={settings.visualizerStyle || 'radial'}
-                onChange={(val) => updateSettings({ visualizerStyle: val })}
-              />
-            </SettingRow>
-
-            <SettingRow
-              title="Microphone Slider"
-              description="Live microphone input slider on Dashboard"
-            >
-              <ToggleSwitch
-                checked={settings.showMicSlider}
-                onChange={(val) => updateSettings({ showMicSlider: val })}
-              />
-            </SettingRow>
-
-            <SettingRow
-              title="Audio Session Mixer"
-              description="Control per-app volumes (Spotify, Chrome, Discord)"
-            >
-              <div className="text-[10px] font-mono text-[var(--theme-accent)]">
-                Available in Media tab
-              </div>
-            </SettingRow>
-          </SettingSection>
-        )}
-
-        {/* 7. SYSTEM & MAINTENANCE */}
-        {(activeCategory === 'all' || activeCategory === 'advanced') && (
-          <SettingSection
-            title="System & Power"
-            icon={<Power className="w-4 h-4" />}
-            badge="Runtime"
-          >
-            <SettingRow
-              title="Start on Windows Boot"
-              description="Auto-register in HKCU Run to start parked in tray"
-            >
-              <ToggleSwitch checked={settings.launchOnStartup} onChange={handleToggleStartup} />
-            </SettingRow>
-
-            <SettingRow
-              title="Pause in Fullscreen Games"
-              description="Suppress hover trigger when DirectX game is active"
-            >
-              <ToggleSwitch
-                checked={settings.pauseTriggerInFullscreen}
-                onChange={(val) => updateSettings({ pauseTriggerInFullscreen: val })}
-              />
-            </SettingRow>
-
-            <SettingRow
-              title="Deep Sleep When Parked"
-              description="Suspend WebView2 JS execution to conserve CPU/RAM"
-            >
-              <ToggleSwitch
-                checked={settings.suspendWebViewWhenClosed}
-                onChange={(val) => updateSettings({ suspendWebViewWhenClosed: val })}
-              />
-            </SettingRow>
-
-            <div className="flex items-center justify-between pt-2 border-t border-[var(--theme-border)]">
-              <button
-                type="button"
-                onClick={() => void openLogFolder()}
-                className="px-3 py-1.5 rounded-xl text-xs font-mono border flex items-center gap-1.5 transition-all hover:bg-[var(--theme-track)]"
-                style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-text-primary)' }}
+              <SettingRow
+                title="Show Seconds"
+                description="Live second counter ticker on Dashboard clock"
               >
-                <Activity className="w-3.5 h-3.5" />
-                <span>Open Logs</span>
-              </button>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={exportSettingsJson}
-                  className="px-3 py-1.5 rounded-xl text-xs font-mono border flex items-center gap-1.5 transition-all hover:bg-[var(--theme-track)]"
-                  style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-text-primary)' }}
-                  title="Export settings JSON"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Backup</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="px-3 py-1.5 rounded-xl text-xs font-mono border flex items-center gap-1.5 transition-all hover:bg-[var(--theme-track)]"
-                  style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-text-primary)' }}
-                  title="Restore settings JSON"
-                >
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>Restore</span>
-                </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".json"
-                  onChange={handleImportJson}
-                  className="hidden"
+                <ToggleSwitch
+                  checked={settings.showSeconds}
+                  onChange={(val) => updateSettings({ showSeconds: val })}
                 />
+              </SettingRow>
+
+              <SettingRow title="First Day of Week" description="Calendar week alignment">
+                <SegmentedChoice
+                  options={[
+                    { id: 'sunday', label: 'Sun' },
+                    { id: 'monday', label: 'Mon' },
+                  ]}
+                  value={settings.calendarFirstDay}
+                  onChange={(val) => updateSettings({ calendarFirstDay: val })}
+                />
+              </SettingRow>
+            </SettingSection>
+          )}
+
+          {/* 2. APPEARANCE & WALLPAPERS */}
+          {(activeCategory === 'all' || activeCategory === 'appearance') && (
+            <SettingSection
+              title="Wallpaper & Glass"
+              icon={<ImageIcon className="w-4 h-4" />}
+              badge="Theme Engine"
+            >
+              <SettingRow title="Theme Mode" description="Color palette source for controls & HUD">
+                <SegmentedChoice
+                  options={[
+                    { id: 'canopy', label: 'Canopy', icon: <Sparkles className="w-3 h-3" /> },
+                    { id: 'adaptive', label: 'Adaptive', icon: <ImageIcon className="w-3 h-3" /> },
+                    { id: 'dark', label: 'Dark', icon: <Moon className="w-3 h-3" /> },
+                  ]}
+                  value={
+                    settings.themeMode === 'light' || settings.themeMode === 'auto'
+                      ? 'dark'
+                      : settings.themeMode
+                  }
+                  onChange={handleThemeModeSelect}
+                />
+              </SettingRow>
+
+              <SliderRow
+                label="Glass Blur Strength"
+                value={settings.glassBlurStrength}
+                min={16}
+                max={32}
+                unit="px"
+                onChange={handleBlurChange}
+              />
+
+              <SliderRow
+                label="Glass Opacity"
+                value={Math.round(settings.glassOpacity * 100)}
+                min={70}
+                max={95}
+                unit="%"
+                onChange={handleOpacityChange}
+              />
+
+              <div className="flex flex-col gap-1.5 pt-1 border-t border-[var(--theme-border)]">
+                <span
+                  className="text-xs font-medium"
+                  style={{ color: 'var(--theme-text-primary)' }}
+                >
+                  Wallpaper Directory
+                </span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={directoryText}
+                    onChange={(e) => setDirectoryText(e.target.value)}
+                    onBlur={() => void commitWallpaperDirectory()}
+                    onKeyDown={(e) => e.key === 'Enter' && void commitWallpaperDirectory()}
+                    placeholder="%USERPROFILE%\Pictures\Wallpapers"
+                    className="flex-1 px-2.5 py-1 rounded-lg text-xs font-mono border bg-[var(--theme-track)] text-[var(--theme-text-primary)] border-[var(--theme-border)] outline-none truncate"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleBrowseWallpaperDirectory}
+                    disabled={browsingFolder}
+                    className="px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 border transition-all active:scale-95 shrink-0"
+                    style={{
+                      background: 'var(--theme-accent)',
+                      color: '#11111b',
+                      borderColor: 'var(--theme-accent)',
+                    }}
+                  >
+                    <FolderOpen className="w-3.5 h-3.5" />
+                    <span>{browsingFolder ? 'Opening…' : 'Browse'}</span>
+                  </button>
+                </div>
               </div>
-            </div>
-            {importStatus && (
-              <div className="text-[10px] font-mono text-center text-[var(--theme-accent)]">
-                {importStatus}
+            </SettingSection>
+          )}
+
+          {/* 3. INTERFACE & MASCOT */}
+          {(activeCategory === 'all' || activeCategory === 'interface') && (
+            <SettingSection
+              title="Interface & Mascot"
+              icon={<AppWindow className="w-4 h-4" />}
+              badge="HUD Layout"
+            >
+              <SettingRow
+                title="Mascot Spirit Mode"
+                description="Animated dancing mushroom spirit / GIF"
+              >
+                <SegmentedChoice
+                  options={[
+                    { id: 'bongo', label: 'Capi' },
+                    { id: 'gif', label: 'Custom' },
+                    { id: 'none', label: 'Off' },
+                  ]}
+                  value={settings.mascotMode}
+                  onChange={(val) => updateSettings({ mascotMode: val })}
+                />
+              </SettingRow>
+
+              <SettingRow title="Show Apps Tab" description="Windows start menu app launcher tab">
+                <ToggleSwitch
+                  checked={settings.showAppsTab}
+                  onChange={(val) => updateSettings({ showAppsTab: val })}
+                />
+              </SettingRow>
+
+              <SettingRow
+                title="Show Developer Console"
+                description="Interactive PowerShell shell tab"
+              >
+                <ToggleSwitch
+                  checked={settings.showTerminalTab}
+                  onChange={(val) => updateSettings({ showTerminalTab: val })}
+                />
+              </SettingRow>
+
+              <SettingRow
+                title="Hardware Brightness Slider"
+                description="Show display brightness slider on Dashboard"
+              >
+                <ToggleSwitch
+                  checked={settings.enableBrightnessSlider}
+                  onChange={(val) => updateSettings({ enableBrightnessSlider: val })}
+                />
+              </SettingRow>
+
+              <SettingRow
+                title="Battery Indicator Chip"
+                description="Display battery status badge in top header"
+              >
+                <ToggleSwitch
+                  checked={settings.showBatteryChip}
+                  onChange={(val) => updateSettings({ showBatteryChip: val })}
+                />
+              </SettingRow>
+            </SettingSection>
+          )}
+        </div>
+
+        {/* Right Column Stack */}
+        <div className="flex-1 w-full flex flex-col gap-3.5">
+          {/* 4. WEATHER */}
+          {(activeCategory === 'all' || activeCategory === 'general') && (
+            <SettingSection
+              title="Weather Telemetry"
+              icon={<CloudSun className="w-4 h-4" />}
+              badge="Open-Meteo"
+            >
+              <SettingRow title="Temperature Unit" description="Fahrenheit (°F) or Celsius (°C)">
+                <SegmentedChoice
+                  options={[
+                    { id: 'fahrenheit', label: '°F' },
+                    { id: 'celsius', label: '°C' },
+                  ]}
+                  value={settings.temperatureUnit}
+                  onChange={(val) => updateSettings({ temperatureUnit: val })}
+                />
+              </SettingRow>
+
+              <SettingRow
+                title="Location Mode"
+                description="Automatic IP-based or manual coordinates"
+              >
+                <SegmentedChoice
+                  options={[
+                    { id: 'auto', label: 'Auto IP' },
+                    { id: 'manual', label: 'Manual' },
+                  ]}
+                  value={settings.weatherLocationMode}
+                  onChange={(val) => updateSettings({ weatherLocationMode: val })}
+                />
+              </SettingRow>
+
+              {settings.weatherLocationMode === 'manual' && (
+                <SettingRow title="Manual City" description="City name for weather lookup">
+                  <input
+                    type="text"
+                    value={settings.manualCityName || ''}
+                    onChange={(e) => updateSettings({ manualCityName: e.target.value })}
+                    placeholder="e.g. Denver, CO"
+                    className="px-2.5 py-1 rounded-lg text-xs font-mono border bg-[var(--theme-track)] text-[var(--theme-text-primary)] border-[var(--theme-border)] outline-none w-36"
+                  />
+                </SettingRow>
+              )}
+            </SettingSection>
+          )}
+
+          {/* 5. TRIGGERS & WINDOW */}
+          {(activeCategory === 'all' || activeCategory === 'triggers') && (
+            <SettingSection
+              title="Bezel Trigger & Hotkey"
+              icon={<Monitor className="w-4 h-4" />}
+              badge="Win32 Hook"
+            >
+              <SettingRow
+                title="Top Bezel Hover Trigger"
+                description="Drop down panel on top-screen mouse hover"
+              >
+                <ToggleSwitch
+                  checked={settings.topHoverTrigger}
+                  onChange={handleToggleHoverTrigger}
+                />
+              </SettingRow>
+
+              <SliderRow
+                label="Trigger Bezel Width"
+                value={settings.triggerWidth}
+                min={200}
+                max={1920}
+                step={10}
+                unit="px"
+                onChange={(val) => updateSettings({ triggerWidth: val })}
+              />
+
+              <SliderRow
+                label="Trigger Bezel Height"
+                value={settings.triggerHeight}
+                min={2}
+                max={24}
+                unit="px"
+                onChange={(val) => updateSettings({ triggerHeight: val })}
+              />
+
+              <SliderRow
+                label="Hover Dwell Delay"
+                value={settings.triggerDelayMs}
+                min={0}
+                max={600}
+                step={20}
+                unit="ms"
+                onChange={(val) => updateSettings({ triggerDelayMs: val })}
+              />
+
+              <div className="flex flex-col gap-1.5 pt-1 border-t border-[var(--theme-border)]">
+                <span
+                  className="text-xs font-medium"
+                  style={{ color: 'var(--theme-text-primary)' }}
+                >
+                  Global Hotkey
+                </span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={hotkeyText}
+                    onChange={(e) => {
+                      setHotkeyText(e.target.value);
+                      setHotkeyError(null);
+                    }}
+                    onBlur={commitHotkey}
+                    onKeyDown={(e) => e.key === 'Enter' && commitHotkey()}
+                    placeholder="Win+`"
+                    className="flex-1 px-2.5 py-1 rounded-lg text-xs font-mono border bg-[var(--theme-track)] text-[var(--theme-text-primary)] border-[var(--theme-border)] outline-none"
+                  />
+                  <span className="text-[10px] font-mono shrink-0 px-2 py-1 rounded border border-[var(--theme-border)] text-[var(--theme-text-secondary)]">
+                    <Keyboard className="w-3 h-3 inline mr-1" />
+                    Press Enter
+                  </span>
+                </div>
+                {hotkeyError && <span className="text-[10px] text-[#f38ba8]">{hotkeyError}</span>}
               </div>
-            )}
-          </SettingSection>
-        )}
+            </SettingSection>
+          )}
+
+          {/* 6. AUDIO & MEDIA */}
+          {(activeCategory === 'all' || activeCategory === 'audio') && (
+            <SettingSection
+              title="Audio & Visualizer"
+              icon={<Music className="w-4 h-4" />}
+              badge="CoreAudio"
+            >
+              <SettingRow
+                title="Visualizer Style"
+                description="Animation style for audio loopback spectrum"
+              >
+                <SegmentedChoice
+                  options={[
+                    { id: 'radial', label: 'Radial' },
+                    { id: 'bars', label: 'Bars' },
+                    { id: 'wave', label: 'Wave' },
+                  ]}
+                  value={settings.visualizerStyle || 'radial'}
+                  onChange={(val) => updateSettings({ visualizerStyle: val })}
+                />
+              </SettingRow>
+
+              <SettingRow
+                title="Microphone Slider"
+                description="Live microphone input slider on Dashboard"
+              >
+                <ToggleSwitch
+                  checked={settings.showMicSlider}
+                  onChange={(val) => updateSettings({ showMicSlider: val })}
+                />
+              </SettingRow>
+
+              <SettingRow
+                title="Audio Session Mixer"
+                description="Control per-app volumes (Spotify, Chrome, Discord)"
+              >
+                <div className="text-[10px] font-mono text-[var(--theme-accent)]">
+                  Available in Media tab
+                </div>
+              </SettingRow>
+            </SettingSection>
+          )}
+
+          {/* 7. SYSTEM & MAINTENANCE */}
+          {(activeCategory === 'all' || activeCategory === 'advanced') && (
+            <SettingSection
+              title="System & Power"
+              icon={<Power className="w-4 h-4" />}
+              badge="Runtime"
+            >
+              <SettingRow
+                title="Start on Windows Boot"
+                description="Auto-register in HKCU Run to start parked in tray"
+              >
+                <ToggleSwitch checked={settings.launchOnStartup} onChange={handleToggleStartup} />
+              </SettingRow>
+
+              <SettingRow
+                title="Pause in Fullscreen Games"
+                description="Suppress hover trigger when DirectX game is active"
+              >
+                <ToggleSwitch
+                  checked={settings.pauseTriggerInFullscreen}
+                  onChange={(val) => updateSettings({ pauseTriggerInFullscreen: val })}
+                />
+              </SettingRow>
+
+              <SettingRow
+                title="Deep Sleep When Parked"
+                description="Suspend WebView2 JS execution to conserve CPU/RAM"
+              >
+                <ToggleSwitch
+                  checked={settings.suspendWebViewWhenClosed}
+                  onChange={(val) => updateSettings({ suspendWebViewWhenClosed: val })}
+                />
+              </SettingRow>
+
+              <div className="flex items-center justify-between pt-2 border-t border-[var(--theme-border)]">
+                <button
+                  type="button"
+                  onClick={() => void openLogFolder()}
+                  className="px-3 py-1.5 rounded-xl text-xs font-mono border flex items-center gap-1.5 transition-all hover:bg-[var(--theme-track)]"
+                  style={{
+                    borderColor: 'var(--theme-border)',
+                    color: 'var(--theme-text-primary)',
+                  }}
+                >
+                  <Activity className="w-3.5 h-3.5" />
+                  <span>Open Logs</span>
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={exportSettingsJson}
+                    className="px-3 py-1.5 rounded-xl text-xs font-mono border flex items-center gap-1.5 transition-all hover:bg-[var(--theme-track)]"
+                    style={{
+                      borderColor: 'var(--theme-border)',
+                      color: 'var(--theme-text-primary)',
+                    }}
+                    title="Export settings JSON"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Backup</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-3 py-1.5 rounded-xl text-xs font-mono border flex items-center gap-1.5 transition-all hover:bg-[var(--theme-track)]"
+                    style={{
+                      borderColor: 'var(--theme-border)',
+                      color: 'var(--theme-text-primary)',
+                    }}
+                    title="Restore settings JSON"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Restore</span>
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".json"
+                    onChange={handleImportJson}
+                    className="hidden"
+                  />
+                </div>
+              </div>
+              {importStatus && (
+                <div className="text-[10px] font-mono text-center text-[var(--theme-accent)]">
+                  {importStatus}
+                </div>
+              )}
+            </SettingSection>
+          )}
+        </div>
       </div>
     </div>
   );

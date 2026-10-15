@@ -919,29 +919,77 @@ public sealed class SystemMonitorService : IDisposable
         return (0.0, 16.0, 0.0);
     }
 
+    private static string GetFastCpuName()
+    {
+        if (!string.IsNullOrWhiteSpace(_staticCpuName)) return _staticCpuName;
+        try
+        {
+            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"HARDWARE\DESCRIPTION\System\CentralProcessor\0");
+            string? name = key?.GetValue("ProcessorNameString")?.ToString();
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                _staticCpuName = System.Text.RegularExpressions.Regex.Replace(name.Trim(), @"\s+", " ");
+                return _staticCpuName;
+            }
+        }
+        catch { }
+        return "AMD/Intel x64 Processor";
+    }
+
+    private static string GetFastGpuName()
+    {
+        if (!string.IsNullOrWhiteSpace(_staticGpuName)) return _staticGpuName;
+        if (NvidiaSmiPath is not null)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo(NvidiaSmiPath, "--query-gpu=name --format=csv,noheader")
+                {
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                using var proc = Process.Start(psi);
+                if (proc is not null)
+                {
+                    string outName = proc.StandardOutput.ReadToEnd().Trim();
+                    proc.WaitForExit();
+                    if (!string.IsNullOrWhiteSpace(outName))
+                    {
+                        _staticGpuName = outName;
+                        return _staticGpuName;
+                    }
+                }
+            }
+            catch { }
+        }
+        return "DirectX 3D Video Controller";
+    }
+
     public static string GenerateFastfetchOutput()
     {
         long upSecs = Environment.TickCount64 / 1000L;
         long hours = upSecs / 3600L;
         long minutes = (upSecs % 3600L) / 60L;
 
-        string cpu = string.IsNullOrWhiteSpace(_staticCpuName) ? "AMD/Intel x64 Processor" : _staticCpuName;
-        string gpu = string.IsNullOrWhiteSpace(_staticGpuName) ? "DirectX 3D Video Controller" : _staticGpuName;
+        string cpu = GetFastCpuName();
+        string gpu = GetFastGpuName();
         string user = Environment.UserName;
         string host = Environment.MachineName;
         string sep = new string('-', Math.Max(12, user.Length + host.Length + 1));
+        char e = (char)27;
 
         return $"""
-                  .---.          {user}@{host}
-                 /     \         {sep}
-                | () () |        OS      : Windows 11 ({Environment.OSVersion.Version.Build}) x64
-                 \  _  /         Host    : {host} (Canopy Control Center)
-                  `---`          Uptime  : {hours}h {minutes}m
-                 /     \         CPU     : {cpu} ({Environment.ProcessorCount} threads)
-                | |   | |        GPU     : {gpu}
-                | |   | |        Runtime : .NET {Environment.Version} + WebView2
-                 \ \_/ /         Shell   : Canopy PowerShell Console
-                  `---`          Colors  : \u001b[31m███\u001b[0m \u001b[32m███\u001b[0m \u001b[33m███\u001b[0m \u001b[34m███\u001b[0m \u001b[35m███\u001b[0m \u001b[36m███\u001b[0m \u001b[37m███\u001b[0m
+                  ████████  ████████     {user}@{host}
+                  ████████  ████████     {sep}
+                  ████████  ████████     OS      : Windows 11 ({Environment.OSVersion.Version.Build}) x64
+                                         Host    : {host} (Canopy Control Center)
+                  ████████  ████████     Uptime  : {hours}h {minutes}m
+                  ████████  ████████     CPU     : {cpu} ({Environment.ProcessorCount} threads)
+                  ████████  ████████     GPU     : {gpu}
+                                         Runtime : .NET {Environment.Version} + WebView2
+                                         Shell   : Canopy PowerShell v2.0
+                                         Palette : {e}[31m███{e}[0m {e}[32m███{e}[0m {e}[33m███{e}[0m {e}[34m███{e}[0m {e}[35m███{e}[0m {e}[36m███{e}[0m {e}[37m███{e}[0m
                """;
     }
 

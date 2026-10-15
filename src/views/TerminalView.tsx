@@ -29,10 +29,11 @@ const ANSI_COLOR_MAP: Record<string, string> = {
 
 function renderAnsiText(text: string): React.ReactNode {
   const esc = String.fromCharCode(27);
-  if (!text.includes(esc)) {
+  const normalized = text.replaceAll('\\u001b', esc).replaceAll('\\x1b', esc);
+  if (!normalized.includes(esc)) {
     return text;
   }
-  const parts = text.split(new RegExp(`(${esc}\\[\\d+m)`, 'g'));
+  const parts = normalized.split(new RegExp(`(${esc}\\[\\d+m)`, 'g'));
   let currentColor: string | undefined;
   return parts.map((part, index) => {
     if (part.startsWith(`${esc}[`) && part.endsWith('m')) {

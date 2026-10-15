@@ -39,6 +39,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarCard } from './components/CalendarCard';
 import { CanopyMascot } from './components/CanopyMascot';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { RadialGauge } from './components/RadialGauge';
 import { VerticalSliders } from './components/VerticalSliders';
 import { SettingsProvider, type TabId, useSettings } from './context/SettingsContext';
 import { useAlbumArt } from './hooks/useAlbumArt';
@@ -48,6 +49,7 @@ import {
   applyWallpaper,
   type BatteryStatus,
   executePowerAction,
+  getAudioSpectrum,
   getBatteryStatus,
   getBrightness,
   getInstalledApps,
@@ -321,6 +323,36 @@ const CanopyShellContent: React.FC = () => {
   }, []);
   const isMusicPlaying = Boolean(media.is_playing);
   const resolvedArtwork = useAlbumArt(media.title, media.artist, media.artwork_url);
+  const [spectrumBands, setSpectrumBands] = useState<number[]>(() => new Array(40).fill(0));
+  const [visualizerTick, setVisualizerTick] = useState<number>(0);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let active = true;
+    const poll = async () => {
+      try {
+        const bands = await getAudioSpectrum();
+        if (active && Array.isArray(bands) && bands.length > 0) {
+          setSpectrumBands(bands);
+        }
+      } catch {}
+    };
+    void poll();
+    const timer = window.setInterval(poll, 40);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !isMusicPlaying) return;
+    const timer = window.setInterval(() => {
+      setVisualizerTick((prev) => (prev + 1) % 360);
+    }, 45);
+    return () => window.clearInterval(timer);
+  }, [isOpen, isMusicPlaying]);
+
   const [paletteOpen, setPaletteOpen] = useState<boolean>(false);
   const [paletteQuery, setPaletteQuery] = useState<string>('');
   const [paletteIndex, setPaletteIndex] = useState<number>(0);
@@ -1551,6 +1583,15 @@ const CanopyShellContent: React.FC = () => {
                     className="relative flex items-center justify-center"
                     style={{ width: vinylSize, height: vinylSize }}
                   >
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none scale-125">
+                      <RadialGauge
+                        bands={spectrumBands}
+                        active={isMusicPlaying || spectrumBands.some((b) => b > 0.02)}
+                        size={110}
+                        accentColor="var(--theme-accent)"
+                        secondaryColor="#89dceb"
+                      />
+                    </div>
                     <svg
                       className="w-full h-full -rotate-90"
                       viewBox={`0 0 ${vinylSize} ${vinylSize}`}
@@ -1626,6 +1667,29 @@ const CanopyShellContent: React.FC = () => {
                   >
                     {trackArtist}
                   </div>
+                </div>
+                {/* Dashboard Audio Visualizer Bar */}
+                <div className="w-full h-3.5 flex items-end justify-center gap-0.5 px-2 my-0.5 overflow-hidden">
+                  {Array.from({ length: 18 }, (_, i) => {
+                    const rawAmp = spectrumBands[i * 2] || 0;
+                    const waveDance = isMusicPlaying
+                      ? ((Math.sin(visualizerTick * 0.4 + i * 0.5) + 1) / 2) * 0.55 + 0.1
+                      : 0.04;
+                    const amp = rawAmp > 0.02 ? Math.min(1, rawAmp * 1.8) : waveDance;
+                    const heightPercent = Math.max(12, Math.min(100, Math.round(amp * 100)));
+                    return (
+                      <div
+                        key={i}
+                        className="flex-1 rounded-t-sm transition-all duration-75"
+                        style={{
+                          height: `${heightPercent}%`,
+                          background:
+                            'linear-gradient(180deg, var(--theme-accent), var(--theme-border))',
+                          opacity: isMusicPlaying || amp > 0.06 ? 0.9 : 0.25,
+                        }}
+                      />
+                    );
+                  })}
                 </div>
 
                 {/* Playback Transport Controls */}

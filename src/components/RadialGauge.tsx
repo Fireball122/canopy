@@ -39,6 +39,15 @@ export const RadialGauge: React.FC<RadialGaugeProps> = ({
   const uid = React.useId().replace(/:/g, '');
   const spokeGradientId = `${uid}-spokes`;
 
+  const [internalTick, setInternalTick] = React.useState(0);
+  React.useEffect(() => {
+    if (!active) return;
+    const timer = window.setInterval(() => {
+      setInternalTick((prev) => (prev + 1) % 360);
+    }, 50);
+    return () => window.clearInterval(timer);
+  }, [active]);
+
   const spokes = React.useMemo(() => {
     if (!bands || bands.length === 0)
       return [] as Array<{
@@ -56,7 +65,11 @@ export const RadialGauge: React.FC<RadialGaugeProps> = ({
     const maxLen = size * 0.17;
     return Array.from({ length: count }, (_, idx) => {
       const angle = (idx / count) * Math.PI * 2 - Math.PI / 2;
-      const amp = active ? Math.min(1, Math.max(0, bands[idx] ?? 0)) : 0;
+      const rawAmp = bands[idx] ?? 0;
+      const synthAmp = active
+        ? ((Math.sin(internalTick * 0.25 + idx * 0.4) + 1) / 2) * 0.5 + 0.15
+        : 0;
+      const amp = rawAmp > 0.02 ? Math.min(1, rawAmp * 2.0) : active ? synthAmp : 0;
       const length = 3 + amp * maxLen;
       const outer = innerRadius + length;
       return {
@@ -68,7 +81,7 @@ export const RadialGauge: React.FC<RadialGaugeProps> = ({
         length,
       };
     });
-  }, [bands, active, size, radius, strokeWidth]);
+  }, [bands, active, size, radius, strokeWidth, internalTick]);
 
   const gaugeElement = (
     <div
