@@ -1,192 +1,161 @@
 <p align="center">
-  <img src="assets/banner.jpg" alt="Canopy — Drop-Down Info Center Banner" width="100%" />
+  <img src="assets/banner.jpg" alt="Canopy Banner" width="100%" />
 </p>
 
 <p align="center">
-  <img src="assets/logo.jpg" alt="Canopy Logo" width="130" style="border-radius: 50%;" />
+  <img src="assets/logo.jpg" alt="Canopy Logo" width="110" style="border-radius: 50%;" />
 </p>
 
-# Canopy
+<h1 align="center">Canopy</h1>
 
-<div align="center">
+<p align="center">
+  <strong>A clean, zero-notch desktop control center and wallpaper switcher for Windows 11.</strong><br>
+  Slides down smoothly when you move your mouse to the top edge of your screen, then disappears completely when you don't need it.
+</p>
 
-[![Release](https://img.shields.io/github/v/release/canopy-shell/canopy?style=for-the-badge&color=8A2BE2)](https://github.com/canopy-shell/canopy/releases)
-[![Platform](https://img.shields.io/badge/Platform-Windows_11_%7C_10-0078D4?style=for-the-badge&logo=windows)](https://github.com/canopy-shell/canopy)
-[![Runtime](https://img.shields.io/badge/.NET-8.0_WPF-512BD4?style=for-the-badge&logo=dotnet)](https://dotnet.microsoft.com/)
-[![Frontend](https://img.shields.io/badge/React-18.3_%2B_Vite-61DAFB?style=for-the-badge&logo=react)](https://react.dev/)
-[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
-
-**Fluid Zero-Notch Top Hover Desktop Control Center & Wallpaper Switcher for Windows 11.**
-
-*Inspired by Caelestia Shell (Wayland/Hyprland) and Hitodama.*
-
-</div>
-
----
-
-## Showcase
-
-<div align="center">
-
-```
-             Top Edge of Screen (Y = 0)
-+---------------------------------------------------+
-|               [ Top Hover Zone ]                  |
-+---------------------------------------------------+
-                         |
-                 (Move mouse to top)
-                         v
-   +---------------------------------------------+
-   |  Canopy Floating Frosted Glass Control Hub  |
-   |                                             |
-   |  * Digital Clock & Weather Widget           |
-   |  * Live CPU / RAM / GPU Hardware Gauges     |
-   |  * Master Volume & Microphone Controls      |
-   |  * 40-Band WASAPI Spectrum Visualizer       |
-   |  * Synced Lyrics (LRCLIB Monotonic Clock)   |
-   |  * Per-App Volume Mixer                     |
-   |  * 6-Slot Quick Launch Dock                 |
-   |  * Per-Monitor Wallpaper Carousel           |
-   +---------------------------------------------+
-```
-
-> *Add `assets/demo.gif` or a video here demonstrating hover slide-down, media playback, and wallpaper switching.*
-
-</div>
+<p align="center">
+  <a href="https://github.com/Fireball122/canopy/releases/latest"><img src="https://img.shields.io/github/v/release/Fireball122/canopy?style=flat-square&color=8A2BE2" alt="Latest Release" /></a>
+  <a href="https://github.com/Fireball122/canopy/releases"><img src="https://img.shields.io/badge/Platform-Windows_11_%7C_10-0078D4?style=flat-square&logo=windows" alt="Platform Windows" /></a>
+  <a href="https://dotnet.microsoft.com/"><img src="https://img.shields.io/badge/.NET-8.0_WPF-512BD4?style=flat-square&logo=dotnet" alt=".NET 8" /></a>
+  <a href="https://react.dev/"><img src="https://img.shields.io/badge/Frontend-React_18_%2B_Vite-61DAFB?style=flat-square&logo=react" alt="React 18" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-success?style=flat-square" alt="License MIT" /></a>
+</p>
 
 ---
 
-## Quick Install
+## What is Canopy?
 
-### Option A: One-Line PowerShell Command (Recommended)
+Canopy is an unobtrusive top-bar control hub inspired by clean Linux desktop setups (like Wayland, Hyprland, and Caelestia Shell). 
 
-Open **PowerShell** and run:
+Instead of cluttering your desktop with widgets or pinned taskbars, Canopy stays completely invisible until you nudge the top edge of your monitor or press a keyboard shortcut (`Win + ` `). 
+
+When summoned, it glides down with an anti-aliased frosted glass panel containing your media controls, synchronized lyrics, audio visualizer, hardware telemetry, quick launcher, and wallpaper manager.
+
+```
+                  Top Edge of Screen (Y = 0)
++-------------------------------------------------------------+
+|                      [ Hover Trigger ]                      |
++-------------------------------------------------------------+
+                               |
+                       (Nudge top bezel)
+                               v
+   +-------------------------------------------------------+
+   |   CANOPY CONTROL CENTER (Frosted Glass Overlay)       |
+   |                                                       |
+   |   Clock & Weather  •  Live Hardware Telemetry (Gpu/Cpu)|
+   |   Now Playing      •  Synced Lyrics & Audio Spectrum  |
+   |   Volume Mixer     •  Per-App Audio Sliders           |
+   |   Quick Dock       •  6-Slot Application Launcher     |
+   |   Wallpapers       •  Per-Monitor Palette Extraction  |
+   +-------------------------------------------------------+
+```
+
+---
+
+## Download & Install
+
+### Method 1: Installer (Recommended)
+Download the latest Windows setup package from [**Releases**](https://github.com/Fireball122/canopy/releases/latest):
+* **`Canopy-v1.0.1-Setup.exe`**: Standard installer. Sets up Start Menu shortcuts, desktop launcher, and includes an uninstaller in Windows *Settings > Installed Apps*.
+
+### Method 2: Portable ZIP
+Grab **`Canopy-v1.0.1-win-x64-portable.zip`** from [**Releases**](https://github.com/Fireball122/canopy/releases/latest). Unzip it anywhere and double-click `Start Canopy.bat` or `Canopy.exe`. Zero registry changes required.
+
+### Method 3: One-Line PowerShell
+Run this in PowerShell (no admin privileges required; installs cleanly to `%LOCALAPPDATA%\Programs\Canopy`):
 
 ```powershell
-irm https://raw.githubusercontent.com/canopy-shell/canopy/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Fireball122/canopy/main/install.ps1 | iex
 ```
 
-* **No Administrator / UAC prompt required:** Installs per-user to `%LOCALAPPDATA%\Programs\Canopy`.
-* Creates Start Menu and Desktop shortcuts.
-* Automatically strips Windows SmartScreen marks (`Unblock-File`).
-
-To cleanly uninstall:
+To uninstall via PowerShell:
 ```powershell
-$env:CANOPY_UNINSTALL=1; irm https://raw.githubusercontent.com/canopy-shell/canopy/main/install.ps1 | iex
+$env:CANOPY_UNINSTALL=1; irm https://raw.githubusercontent.com/Fireball122/canopy/main/install.ps1 | iex
 ```
 
 ---
 
-### Option B: Windows Package Manager (`winget`)
+## Key Features
 
-```cmd
-winget install CanopyShell.Canopy
-```
-
----
-
-### Option C: Standalone Downloads
-
-Grab the latest binaries directly from [**GitHub Releases**](https://github.com/canopy-shell/canopy/releases/latest):
-* **`Canopy-v1.0.0-x64.msi`** (~8.2 MB): Native Windows Installer. Registers in *Settings $\to$ Installed Apps*.
-* **`Canopy-v1.0.0-win-x64-portable.zip`** (~72 MB): Single-file self-contained executable. Unzip and run anywhere.
-
----
-
-## Core Features
-
-### 1. Zero-Notch & Zero Idle Footprint
-When collapsed, Canopy occupies **0 visible pixels**. There is no island, notch, status bar, or overlay line on screen. The window is parked off-screen with `WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_NOACTIVATE` so standard desktop clicks, window dragging, and browser tabs work with zero interference.
-
-### 2. 0% CPU Deep Sleep (WebView2 Suspension)
-When the panel slides off-screen:
-* The WebView2 Chromium engine is immediately suspended (`TrySuspendAsync()`).
-* Real-time WASAPI loopback audio capture and 40-band FFT calculations pause.
-* Per-app audio session enumeration and hardware telemetry timers sleep.
-* **Idle resource usage drops to ~0% CPU (< 0.03s per 5s).**
-
-### 3. VSync-Locked Motion & Anti-Aliased Glass
-* Slides smoothly along the Y-axis using an ease-out cubic curve ($1 - (1-t)^3$) synced to your monitor's native refresh rate (60Hz, 120Hz, 144Hz, 240Hz+) via `CompositionTarget.Rendering`.
-* Bottom corners curve at $24\text{px}$ using DWM GPU hardware alpha compositing without jagged GDI staircasing at any DPI scale.
-
-### 4. Game & Presentation Suppression
-* Automatically detects full-screen 3D games (DirectX / Vulkan) and presentation displays via `SHQueryUserNotificationState`.
-* Analyzes foreground window bounds (`rcMonitor` vs `rcWork`) to suppress hover activation over borderless windowed games (DXGI Flip Model) and full-screen video players while keeping standard maximized windows interactive.
-* Multi-monitor safe: ignores top boundaries shared with stacked upper monitors.
-
-### 5. High-Resolution Audio Visualizer
-* Real-time 40-band audio spectrum analyzer powered by NAudio WASAPI loopback capture and complex 512-point FFT.
-* Calibrated $-80\text{ dB} \dots -10\text{ dB}$ logarithmic mapping with asymmetric temporal smoothing.
-* Includes radial spoke visualizer, linear bars, and wave modes.
-
-### 6. Synchronized Lyrics & Anchored Playhead
-* Real-time synchronized lyrics fetched automatically from the **LRCLIB** database.
-* Anchored monotonic playback clock resolves the frozen SMTC playhead bug in Chromium and Spotify.
-* Adjustable lyric sync offset ($\pm 2000\text{ms}$) with auto-scrolling line highlighting.
-
-### 7. Per-App Volume Mixer
-* Integrated Windows Volume Mixer powered by CoreAudio COM interfaces (`IAudioSessionManager2`).
-* Adjust volume or mute individual running applications (Discord, Spotify, games, browser tabs).
-
-### 8. Visual Wallpaper Engine & Per-Monitor Carousel
-* Asynchronously decodes wallpaper images from `%USERPROFILE%\Pictures\Wallpapers` into $160\text{px}$ cached thumbnails.
-* Instant wallpaper switching via Win32 `SystemParametersInfo` with no-op deduplication to prevent screen flicker.
-* Adaptive theming: extracts dominant colors from the current wallpaper and updates UI glass accent colors dynamically.
-* Experimental per-monitor assignment and desktop slideshow support via `IDesktopWallpaper`.
+* **Zero Idle CPU (Deep Sleep)**: When closed, the underlying WebView2 browser engine and audio capture threads suspend immediately. Background CPU usage stays at virtually 0.0%.
+* **Zero Notch / No Dead Zones**: When collapsed, Canopy takes up 0 pixels on screen. Clicking the top of open browser tabs, game windows, or title bars works naturally.
+* **Full-Screen Game & Presentation Immunity**: Automatically detects when a full-screen game (DirectX / Vulkan) or video player is running and suppresses the hover trigger so your gameplay is never interrupted.
+* **Music Player with Synced Lyrics**: Real-time media playback display powered by Windows Media Transport (SMTC) with synchronized line-by-line lyrics fetched via LRCLIB and monotonic timekeeping.
+* **WASAPI Audio Visualizer**: 40-band multi-endpoint loopback audio spectrum analyzer featuring radial spoke, linear bars, and wave visualization modes.
+* **Per-App Volume Mixer**: Control or mute individual audio streams (Discord, Spotify, games, browser) directly from the panel.
+* **Wallpaper Engine & Adaptive Theming**: Browse your wallpaper folder, set desktop wallpapers with an iris-wipe animation, and watch Canopy automatically extract dominant color palettes to tint its frosted glass accents.
+* **Interactive Mascot**: Includes Capi the animated companion with music-reactive dancing and support for custom GIF uploads and URLs.
+* **Quick Launch Dock & Search**: 6 customizable dock slots for your favorite applications, plus a built-in search palette.
+* **Locked Aspect Ratio Scaling**: Adjust the UI size from 75% to 135% via a single slider in Settings while keeping the clean 850x430 aspect ratio intact.
 
 ---
 
-## Default Controls & Hotkeys
+## Default Controls & Shortcuts
 
-| Action | Control / Hotkey | Description |
-|---|---|---|
-| **Toggle Panel** | `Win + ` ` | Slides the control center down or collapses it immediately. Configurable in Settings. |
-| **Hover Summon** | Move mouse to top bezel edge | Dwell for 120ms at screen top ($Y \le 2\text{px}$) to slide down the panel. |
-| **Auto-Hide** | Move mouse outside panel | Automatically slides off-screen after a 200ms debounce. |
-| **Click Outside** | Left click desktop | Immediately collapses the panel without triggering background clicks. |
-| **Pause Top Hover** | Right-click tray icon $\to$ `Top-Edge Hover: Active` | Temporarily disables the top-edge hover trigger. |
-| **Quick Launcher** | Click dock icon or press slot key | Launches assigned applications or custom command paths. |
-| **Command Palette** | Press any letter on Dashboard | Opens search overlay to switch tabs, launch apps, or execute power actions. |
+| Action | How to Trigger |
+| :--- | :--- |
+| **Open / Close Panel** | `Win + ` ` *(configurable in Settings)* |
+| **Hover Summon** | Move your mouse to the top center edge of the screen and pause for ~120ms |
+| **Auto-Collapse** | Move your mouse outside the panel or click anywhere on your desktop |
+| **Quick Search** | Start typing any letter while on the Dashboard tab |
+| **Disable Hover** | Right-click the system tray icon and uncheck `Top-Edge Hover: Active` |
+| **Open Settings** | Click the gear icon in the top right or select Settings from the tray |
 
 ---
 
 ## Building from Source
 
-### Prerequisites
+If you want to build Canopy yourself or tweak the code:
+
+### Requirements
 * Windows 10 (version 19041+) or Windows 11
 * [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
 * [Node.js 20+](https://nodejs.org/) & npm
-* [WiX Toolset v4](https://wixtoolset.org/) (optional, for `.msi` packaging: `dotnet tool install --global wix --version 4.0.5`)
 
-### Quick Build
-```bash
-# 1. Clone repository
-git clone https://github.com/canopy-shell/canopy.git
-cd canopy
+### Build Steps
 
-# 2. Install frontend dependencies
-npm ci
+1. **Clone the repo:**
+   ```bash
+   git clone https://github.com/Fireball122/canopy.git
+   cd canopy
+   ```
 
-# 3. Build & run (Release mode)
-dotnet build -c Release
-dotnet run -c Release --no-build
-```
+2. **Install frontend dependencies & build bundle:**
+   ```bash
+   npm ci
+   npm run build
+   ```
 
-### Packaging Installers Locally
-```powershell
-# Build native WiX v4 MSI installer (dist-installer/Canopy-v1.0.0-x64.msi)
-.\installer\build-msi.ps1 -Version "1.0.0"
+3. **Compile and run the native .NET host:**
+   ```bash
+   dotnet build -c Release
+   dotnet run -c Release --no-build
+   ```
 
-# Build portable self-contained ZIP (dist-installer/Canopy-v1.0.0-win-x64-portable.zip)
-.\build-portable.ps1 -Version "1.0.0"
-```
-
-For release distribution instructions and CI/CD details, see [**`RELEASE_GUIDE.md`**](RELEASE_GUIDE.md).
-
-For deep architectural and subsystem details, see [**`docs/ARCHITECTURE.md`**](docs/ARCHITECTURE.md).
+4. **Package local installer (optional):**
+   ```powershell
+   # Builds dist-installer/Canopy-v1.0.1-Setup.exe (requires Inno Setup 6)
+   .\installer\build-setup-exe.ps1
+   ```
 
 ---
 
-## License
+## Architecture Overview
 
-Distributed under the **MIT License**. See `LICENSE` for details.
+Canopy uses a lightweight hybrid architecture:
+* **Native Backend (.NET 8 WPF / C#)**: Handles Win32 window management, mouse hover detection hooks, CoreAudio / WASAPI audio capture, Windows SMTC media transport, hardware telemetry, and DWM composition.
+* **Frontend UI (React 18 + Vite + Tailwind CSS)**: Renders the frosted glass interface inside a hardware-accelerated Microsoft WebView2 runtime with strict types and zero external network tracking.
+
+For more technical details, check out [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+---
+
+## Contributing & Feedback
+
+Bug reports, feature requests, and pull requests are always welcome! Feel free to open an issue on GitHub.
+
+## License & Branding Notice
+
+The software code is licensed under the [MIT License](LICENSE). 
+
+> **Asset & Branding Notice**: All project logos, mascots, UI graphics, and associated artwork are proprietary and copyright &copy; 2026 3Dinfinity8. All rights reserved. You may not use these assets in derivative works without prior written consent.

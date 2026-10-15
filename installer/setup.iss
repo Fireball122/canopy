@@ -8,7 +8,7 @@
 #define MyAppVersion "1.0.1"
 #endif
 #define MyAppPublisher "Canopy Shell"
-#define MyAppURL "https://github.com/canopy-shell/canopy"
+#define MyAppURL "https://github.com/Fireball122/canopy"
 #define MyAppExeName "Canopy.exe"
 #define MySourceDir "..\bin\Release\net8.0-windows10.0.19041.0\publish-msi"
 

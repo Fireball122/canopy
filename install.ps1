@@ -5,12 +5,12 @@
     Installs Canopy to %LOCALAPPDATA%\Programs\Canopy, sets up desktop and start menu shortcuts,
     and launches the application.
 .EXAMPLE
-    irm https://raw.githubusercontent.com/canopy-shell/canopy/main/install.ps1 | iex
+    irm https://raw.githubusercontent.com/Fireball122/canopy/main/install.ps1 | iex
 #>
 
 [CmdletBinding()]
 param(
-    [string]$Repo = "canopy-shell/canopy",
+    [string]$Repo = "Fireball122/canopy",
     [string]$InstallDir = "$env:LOCALAPPDATA\Programs\Canopy",
     [switch]$NoShortcut,
     [switch]$Uninstall

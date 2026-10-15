@@ -41,3 +41,8 @@ ehthumbs.db
 # WebView2 Runtime profile / cache
 WebView2Data/
 EBWebView/
+
+# User Wallpapers and Personal Settings
+Wallpapers/
+*.local.*
+settings.json

@@ -11,8 +11,8 @@
     <!-- Standard Windows Control Center Icon in Installed Apps -->
     <Icon Id="CanopyIcon" SourceFile="$(var.SourceDir)\app.ico" />
     <Property Id="ARPPRODUCTICON" Value="CanopyIcon" />
-    <Property Id="ARPHELPLINK" Value="https://github.com/canopy-shell/canopy" />
-    <Property Id="ARPURLINFOABOUT" Value="https://github.com/canopy-shell/canopy" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/Fireball122/canopy" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/Fireball122/canopy" />
 
     <!-- Standard Per-User Installation Directory: %LOCALAPPDATA%\Programs\Canopy -->
     <StandardDirectory Id="LocalAppDataFolder">
