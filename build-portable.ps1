@@ -1,6 +1,6 @@
 # build-portable.ps1 - Builds portable win-x64 ZIP package
 param(
-    [string]$Version = "1.0.0",
+    [string]$Version = "1.0.1",
     [string]$Configuration = "Release"
 )
 
@@ -23,6 +23,12 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
 # Make sure app.ico is included
 Copy-Item (Join-Path $ScriptDir "app.ico") (Join-Path $PublishDir "app.ico") -Force
 
+# Ensure x64 WebView2Loader.dll is in publish root alongside Canopy.exe for portable launch
+$nativeLoader = Join-Path $PublishDir "runtimes\win-x64\native\WebView2Loader.dll"
+$rootLoader = Join-Path $PublishDir "WebView2Loader.dll"
+if ((Test-Path $nativeLoader) -and (-not (Test-Path $rootLoader))) {
+    Copy-Item $nativeLoader $rootLoader -Force
+}
 # Create starter script
 $starterBat = @"
 @echo off

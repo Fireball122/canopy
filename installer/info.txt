@@ -1,0 +1,44 @@
+Welcome to Canopy — Zero-Notch Top Hover Desktop Control Center!
+
+Canopy brings the fluid desktop overlay experience of Caelestia Shell (Wayland/Hyprland) to Windows 11 and Windows 10, combined with a high-performance visual wallpaper switcher.
+
+==================================================================
+KEY FEATURES INCLUDED:
+==================================================================
+
+* ZERO-NOTCH IDLE FOOTPRINT:
+  Occupies 0 visible pixels when closed. Completely click-through
+  so browser tabs, games, and desktop windows remain 100% interactive.
+
+* TOP-EDGE HOVER SUMMON:
+  Move your mouse cursor to the top center edge of the screen and
+  dwell for ~120ms to smoothly slide down the floating frosted glass panel.
+
+* 0% CPU DEEP SLEEP:
+  WebView2 renderer, audio capture, and telemetry timers are automatically
+  suspended when the panel slides off-screen, saving laptop battery.
+
+* 40-BAND WASAPI AUDIO VISUALIZER & SYNCED LYRICS:
+  Real-time audio spectrum analyzer and time-synchronized lyrics
+  powered by the LRCLIB database with automatic album art lookup.
+
+* PER-APPLICATION AUDIO MIXER:
+  Adjust master volume, microphone level, or individual app volumes
+  (Spotify, Discord, Chrome, games) directly from the Media view.
+
+* VISUAL WALLPAPER CAROUSEL:
+  Browse and apply desktop wallpapers instantly from %USERPROFILE%\Pictures\Wallpapers
+  with automatic dominant color extraction and adaptive glass theming.
+
+* GAME & PRESENTATION IMMUNITY:
+  Automatically suppresses hover activation over full-screen DirectX/Vulkan games
+  and active presentation screens.
+
+==================================================================
+DEFAULT SHORTCUTS:
+==================================================================
+  Toggle Overlay:   Win + ` (or configurable in Settings)
+  Exit Panel:       Click outside or move cursor away (200ms debounce)
+  Settings & Tray:  Right-click the Canopy icon in the taskbar tray
+
+Press Next to continue installation.

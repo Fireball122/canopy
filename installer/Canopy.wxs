@@ -1,7 +1,7 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package Name="Canopy"
            Manufacturer="Canopy Shell"
-           Version="1.0.0"
+           Version="1.0.1"
            UpgradeCode="4C6D518F-72E6-407F-8BC1-B071536E489E"
            Scope="perUser">
 

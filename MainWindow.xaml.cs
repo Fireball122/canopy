@@ -324,6 +324,12 @@ public partial class MainWindow : Window
             catch
             {
             }
+
+            MessageBox.Show(
+                $"Canopy encountered an error while starting its UI engine:\n\n{ex.Message}\n\nIf Microsoft Edge WebView2 is not installed, please download and install the Evergreen Bootstrapper from:\nhttps://go.microsoft.com/fwlink/p/?LinkId=2124703",
+                "Canopy - UI Engine Initialization Error",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
         }
     }
 
