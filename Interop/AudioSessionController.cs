@@ -278,7 +278,7 @@ public sealed class AudioSessionController : IDisposable
         {
             if (control.GetDisplayName(out string dn) >= 0 && !string.IsNullOrWhiteSpace(dn))
             {
-                if (!dn.StartsWith("@"))
+                if (!dn.StartsWith('@'))
                     return dn.Trim();
             }
         }

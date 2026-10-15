@@ -58,6 +58,7 @@ public static class Win32
     // Hotkey Message & Modifiers
     public const int WM_NULL = 0x0000;
     public const int WM_HOTKEY = 0x0312;
+    public const int WM_DPICHANGED = 0x02E0;
     public const int WM_DISPLAYCHANGE = 0x007E;
     public const int WM_POWERBROADCAST = 0x0218;
     public const int PBT_APMSUSPEND = 0x0004;

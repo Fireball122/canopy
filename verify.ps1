@@ -82,9 +82,13 @@ finally {
 
 # Gate 4: Native .NET 8 WPF Host Compilation (if .NET SDK available)
 Write-Info "Gate 4/4: Checking native .NET 8 SDK availability..."
+$dotnet = "dotnet"
+if (Test-Path "$HOME\.dotnet\dotnet.exe") {
+  $dotnet = "$HOME\.dotnet\dotnet.exe"
+}
 $sdkList = @()
 try {
-  $sdkOutput = & dotnet --list-sdks 2>$null
+  $sdkOutput = & $dotnet --list-sdks 2>$null
   if ($sdkOutput) {
     $sdkList = $sdkOutput | Where-Object { $_ -match '\S' }
   }
@@ -99,7 +103,7 @@ if ($sdkList.Count -gt 0) {
   Write-Info "Building Canopy.csproj in Release mode with /warnaserror..."
   Push-Location $RepoRoot
   try {
-    & dotnet build "$RepoRoot\Canopy.csproj" -c Release /p:SkipFrontendBuild=true /warnaserror
+    & $dotnet build "$RepoRoot\Canopy.csproj" -c Release /p:SkipFrontendBuild=true /warnaserror
     if ($LASTEXITCODE -ne 0) {
       Write-Fail "Native C# .NET build failed with exit code $LASTEXITCODE"
       Write-Fail "VERIFICATION FAILED"

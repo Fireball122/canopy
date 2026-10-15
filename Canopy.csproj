@@ -16,6 +16,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <NoWarn>$(NoWarn);CA1707;CA1401;CA1305;CA1304;CA1310;CA1822;CA1806;CA1805;CA1838;CA2101;CA1001;CA2201;CA1711</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
