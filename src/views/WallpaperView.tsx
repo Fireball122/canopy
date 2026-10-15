@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  Check,
   ChevronDown,
   ChevronRight,
   FolderOpen,
@@ -553,7 +554,7 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
                 className="group relative w-full aspect-video rounded-[13px] overflow-hidden focus:outline-none pointer-events-auto cursor-pointer"
                 style={{
                   background: entry.data_url ? undefined : fallbackBg,
-                  transform: 'scale(1)',
+                  transform: isApplying ? 'scale(0.97)' : 'scale(1)',
                   transition: 'transform 200ms ease, box-shadow 250ms ease, opacity 300ms ease',
                   boxShadow: isActive
                     ? '0 0 0 2px var(--theme-accent, #A29BFE), 0 0 18px -2px var(--theme-accent, rgba(162, 155, 254, 0.55))'
@@ -580,34 +581,35 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
                         setSwatches(extractImageSwatches(e.currentTarget));
                       }
                     }}
-                    className={`w-full h-full object-cover transition-all duration-300 ease-out ${
-                      isApplying ? 'canopy-iris-wipe brightness-110' : 'brightness-100'
-                    }`}
+                    className="w-full h-full object-cover transition-all duration-300 ease-out brightness-100"
                   />
                 )}
 
-                {/* Centered Circular Expand (Iris Wipe) ripple effect */}
-                {isApplying && (
+                {/* Resolution Badge & Active Indicator (Top Left) */}
+                <div className="absolute top-2 left-2 flex items-center gap-1 z-10 pointer-events-none">
+                  {isActive && (
+                    <div
+                      className="px-1.5 py-0.5 rounded-md text-[9px] font-mono font-bold tracking-wider backdrop-blur-md shadow-sm flex items-center gap-1"
+                      style={{
+                        background: 'var(--theme-accent, #A29BFE)',
+                        color: '#11111b',
+                      }}
+                    >
+                      <Check className="w-2.5 h-2.5 stroke-[3]" />
+                      <span>Active</span>
+                    </div>
+                  )}
                   <div
-                    className="absolute inset-0 pointer-events-none canopy-iris-wipe z-10"
+                    className="px-1.5 py-0.5 rounded-md text-[9px] font-mono font-bold tracking-wider backdrop-blur-md shadow-sm"
                     style={{
-                      background:
-                        'radial-gradient(circle at center, var(--theme-accent, #A29BFE) 0%, rgba(255, 255, 255, 0.28) 45%, transparent 70%)',
+                      background: 'rgba(0, 0, 0, 0.65)',
+                      color: 'var(--theme-accent, #A29BFE)',
+                      border: '1px solid rgba(255, 255, 255, 0.15)',
                     }}
-                  />
-                )}
-                {/* Resolution Badge (Top Left) */}
-                <div
-                  className="absolute top-2 left-2 px-1.5 py-0.5 rounded-md text-[9px] font-mono font-bold tracking-wider backdrop-blur-md shadow-sm z-10 pointer-events-none"
-                  style={{
-                    background: 'rgba(0, 0, 0, 0.65)',
-                    color: 'var(--theme-accent, #A29BFE)',
-                    border: '1px solid rgba(255, 255, 255, 0.15)',
-                  }}
-                >
-                  {resBadge}
+                  >
+                    {resBadge}
+                  </div>
                 </div>
-
                 {/* Favorite Heart Button (Top Right) */}
                 <button
                   type="button"

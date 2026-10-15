@@ -75,6 +75,9 @@ export interface CanopySettings {
   // Diagnostics & Telemetry
   diagnosticLogging: boolean; // default false
   showBatteryChip: boolean; // default true
+  enableCornerResizeTabs: boolean; // default false (resizable corner grips)
+  appWidth: number; // 700 to 1400 (default 850)
+  appHeight: number; // 360 to 750 (default 430)
 
   // Window & System Mechanics
   launchOnStartup: boolean;
@@ -144,6 +147,9 @@ export const DEFAULT_SETTINGS: CanopySettings = {
   triggerDelayMs: 0,
   hideDebounceMs: 200,
   globalHotkey: 'Win+`',
+  enableCornerResizeTabs: false,
+  appWidth: 850,
+  appHeight: 430,
 };
 
 function applyGlassCssVariables(blurStrength: number, opacity: number): void {

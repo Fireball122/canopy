@@ -243,6 +243,7 @@ export function applyThemePalette(
     const bucketSats = new Float32Array(HUE_BUCKET_COUNT);
     const bucketCounts = new Uint32Array(HUE_BUCKET_COUNT);
 
+    let chromaticPixels = 0;
     for (let i = 0; i < data.length; i += 16) {
       const r = data[i];
       const g = data[i + 1];
@@ -256,6 +257,7 @@ export function applyThemePalette(
 
       // Filter out neutral grays / blacks / whites for accent extraction
       if (s >= 0.16 && l >= 0.12 && l <= 0.9) {
+        chromaticPixels++;
         // Shift hue so 0 is centered around Red (345..15)
         const shiftedHue = (h + 15) % 360;
         const bucketIndex = Math.floor(shiftedHue / 30);
@@ -287,27 +289,73 @@ export function applyThemePalette(
       }
     }
 
-    let accentH = 135; // Default leaf green
-    let accentS = 0.65;
-    if (bestBucket >= 0 && bucketWeights[bestBucket] > 0) {
-      accentH = bucketHues[bestBucket] / bucketWeights[bestBucket];
-      accentS = Math.min(0.95, Math.max(0.65, bucketSats[bestBucket] / bucketWeights[bestBucket]));
-    }
-
-    // Determine theme mode (light if brightness > 150)
+    // Determine theme mode (light if brightness > 155)
     const brightness = (avgR * 299 + avgG * 587 + avgB * 114) / 1000;
     const isLight = brightness > 155;
 
-    // Convert tuned HSL to accent color
-    const targetL = isLight ? 0.38 : 0.64;
+    // Check if the image is predominantly grayscale / shades of gray
+    const isGrayscale = chromaticPixels < totalPixels * 0.05 || maxWeight < 1.0;
+    if (isGrayscale) {
+      if (isLight) {
+        applyThemeVariables({
+          bg: 'rgba(248, 250, 252, 0.94)',
+          card: 'rgba(255, 255, 255, 0.85)',
+          border: 'rgba(15, 23, 42, 0.12)',
+          accent: '#475569',
+          accentSoft: 'rgba(71, 85, 105, 0.14)',
+          accentWarm: '#64748b',
+          textPrimary: '#0f172a',
+          textSecondary: '#475569',
+          track: 'rgba(15, 23, 42, 0.08)',
+          isLight: true,
+        });
+      } else {
+        applyThemeVariables({
+          bg: 'rgba(18, 18, 24, 0.94)',
+          card: 'rgba(255, 255, 255, 0.05)',
+          border: 'rgba(255, 255, 255, 0.10)',
+          accent: '#94a3b8',
+          accentSoft: 'rgba(148, 163, 184, 0.18)',
+          accentWarm: '#cbd5e1',
+          textPrimary: '#f8fafc',
+          textSecondary: '#94a3b8',
+          track: 'rgba(255, 255, 255, 0.08)',
+          isLight: false,
+        });
+      }
+      return;
+    }
+
+    let accentH = bucketHues[bestBucket] / bucketWeights[bestBucket];
+    let accentS = Math.min(
+      0.95,
+      Math.max(0.65, bucketSats[bestBucket] / bucketWeights[bestBucket]),
+    );
+
+    // If red channel strongly dominates, prevent snapping into magenta/pink
+    const isRedDominated = avgR > avgG * 1.35 && avgR > avgB * 1.25;
+    if (isRedDominated && (accentH > 320 || accentH < 35)) {
+      if (accentH > 320 && accentH < 350) accentH = 355;
+    }
+
+    const isRedHue = accentH >= 340 || accentH <= 22;
+
+    // For red hues, keep targetL around 0.50 (in dark mode) so it stays vivid crimson/red rather than turning pastel pink
+    let targetL: number;
+    if (isRedHue) {
+      targetL = isLight ? 0.42 : 0.5;
+      accentS = Math.max(0.85, accentS);
+    } else {
+      targetL = isLight ? 0.38 : 0.62;
+    }
+
     const accentRgb = hslToRgb(accentH, accentS, targetL);
     const accentHex = rgbToHex(accentRgb);
 
-    // Secondary warm complementary accent
-    const warmH = (accentH + 30) % 360;
-    const warmRgb = hslToRgb(warmH, 0.82, isLight ? 0.45 : 0.68);
+    // Secondary warm complementary accent: for red, stay in warm amber/orange (24°)
+    const warmH = isRedHue ? 24 : (accentH + 30) % 360;
+    const warmRgb = hslToRgb(warmH, 0.85, isLight ? 0.45 : 0.65);
     const warmHex = rgbToHex(warmRgb);
-
     if (isLight) {
       const bgRgb: RGBTuple = [
         Math.min(252, Math.max(242, Math.round(250 - (255 - avgR) * 0.08))),

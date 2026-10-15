@@ -855,6 +855,14 @@ export async function setDropdownOpen(open: boolean): Promise<void> {
   await invokeBridge<unknown>('set_dropdown_open', { open }, () => undefined);
 }
 
+export async function setWindowSize(width: number, height: number): Promise<void> {
+  await invokeBridge<unknown>(
+    'set_window_size',
+    { width: Math.round(width), height: Math.round(height) },
+    () => undefined,
+  );
+}
+
 export async function notifyTabSwitched(): Promise<void> {
   await invokeBridge<unknown>('tab_changed', undefined, () => undefined);
 }

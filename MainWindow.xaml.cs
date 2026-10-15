@@ -131,6 +131,8 @@ public partial class MainWindow : Window
 
     private const double BaseDesignWidth = 850.0;
     private const double BaseDesignHeight = 430.0;
+    private double _customWidth = BaseDesignWidth;
+    private double _customHeight = BaseDesignHeight;
 
     /// <summary>
     /// Resolves the true DPI scale and balanced physical pixel dimensions for the panel.
@@ -165,14 +167,8 @@ public partial class MainWindow : Window
             }
         }
 
-        int targetPhysicalHeight = (int)Math.Round(BaseDesignHeight * scaleY);
-        // Cap height so the panel never exceeds 48% of the screen height (keeps it compact on 1080p @ 150% scale)
-        if (monitor.Height > 0 && targetPhysicalHeight > (int)Math.Round(monitor.Height * 0.48))
-        {
-            targetPhysicalHeight = (int)Math.Round(monitor.Height * 0.48);
-        }
-
-        int targetPhysicalWidth = (int)Math.Round(targetPhysicalHeight * (BaseDesignWidth / BaseDesignHeight));
+        int targetPhysicalHeight = (int)Math.Round(_customHeight * scaleY);
+        int targetPhysicalWidth = (int)Math.Round(_customWidth * scaleX);
         return (scaleX, scaleY, targetPhysicalWidth, targetPhysicalHeight);
     }
 
@@ -218,6 +214,20 @@ public partial class MainWindow : Window
 
         Win32.ApplyWindowRoundedRegion(_hwnd, physicalWidth, physicalHeight, cornerRadius);
         ApplyAdaptiveZoom(panelMonitor);
+    }
+
+    public void SetCustomWindowSize(double width, double height)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            _customWidth = Math.Clamp(width, 700.0, 1600.0);
+            _customHeight = Math.Clamp(height, 360.0, 900.0);
+            Width = _customWidth;
+            Height = _customHeight;
+            Win32.RECT panelMonitor = GetPanelMonitor();
+            PositionWindowAtTopCenter(panelMonitor, offscreen: !_isExpanded);
+            ApplyRoundedRegionForCurrentDpi();
+        });
     }
 
     private async void OnWindowLoaded(object sender, RoutedEventArgs e)
@@ -750,6 +760,20 @@ public partial class MainWindow : Window
                     _topHoverTriggerEnabled = enEl.GetBoolean();
                 }
                 return _topHoverTriggerEnabled;
+            }
+
+            case "set_window_size":
+            {
+                if (args.ValueKind == JsonValueKind.Object)
+                {
+                    if (args.TryGetProperty("width", out JsonElement wEl) && wEl.TryGetDouble(out double newW) &&
+                        args.TryGetProperty("height", out JsonElement hEl) && hEl.TryGetDouble(out double newH))
+                    {
+                        SetCustomWindowSize(newW, newH);
+                        return true;
+                    }
+                }
+                return false;
             }
 
             case "set_launch_on_startup":

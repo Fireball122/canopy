@@ -517,7 +517,7 @@ public static class Win32
         {
             // A round rect starting at top = -cornerRadius to height clips the bottom corners with exactly cornerRadius,
             // while leaving the top edge perfectly flat and flush to the screen bezel.
-            IntPtr rgn = CreateRoundRectRgn(0, -cornerRadius, width + 1, height + 1, cornerRadius * 2, cornerRadius * 2);
+            IntPtr rgn = CreateRoundRectRgn(0, -cornerRadius, width, height, cornerRadius * 2, cornerRadius * 2);
             SetWindowRgn(hwnd, rgn, true);
         }
         catch

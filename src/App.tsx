@@ -3,7 +3,6 @@ import {
   AppWindow,
   Battery,
   BatteryCharging,
-  Bell,
   Calculator,
   Clock,
   CloudSun,
@@ -38,6 +37,7 @@ import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarCard } from './components/CalendarCard';
 import { CanopyMascot } from './components/CanopyMascot';
+import { DropletNotification } from './components/DropletNotification';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { RadialGauge } from './components/RadialGauge';
 import { VerticalSliders } from './components/VerticalSliders';
@@ -76,6 +76,7 @@ import {
   setDropdownOpen,
   setMasterVolume,
   setTopHoverTrigger,
+  setWindowSize,
   type WallpaperEntry,
   setMicMute as writeMicMute,
   setMicVolume as writeMicVolume,
@@ -443,6 +444,49 @@ const CanopyShellContent: React.FC = () => {
       setToastMessage((curr) => (curr === msg ? null : curr));
     }, 5000);
   }, []);
+
+  // Restore custom window dimensions if set
+  useEffect(() => {
+    if (
+      settings.appWidth &&
+      settings.appHeight &&
+      (settings.appWidth !== 850 || settings.appHeight !== 430)
+    ) {
+      setWindowSize(settings.appWidth, settings.appHeight).catch(() => {});
+    }
+  }, [settings.appWidth, settings.appHeight]);
+
+  const handleResizeStart = useCallback(
+    (e: React.PointerEvent, corner: 'se' | 'sw') => {
+      e.preventDefault();
+      e.stopPropagation();
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const initialWidth = settings.appWidth || 850;
+      const initialHeight = settings.appHeight || 430;
+
+      const onPointerMove = (moveEv: PointerEvent) => {
+        const deltaX = moveEv.clientX - startX;
+        const deltaY = moveEv.clientY - startY;
+        const newHeight = Math.max(360, Math.min(850, Math.round(initialHeight + deltaY)));
+        const newWidth = Math.max(
+          700,
+          Math.min(1450, Math.round(initialWidth + (corner === 'se' ? deltaX * 2 : -deltaX * 2))),
+        );
+        setWindowSize(newWidth, newHeight).catch(() => {});
+        updateSettings({ appWidth: newWidth, appHeight: newHeight });
+      };
+
+      const onPointerUp = () => {
+        window.removeEventListener('pointermove', onPointerMove);
+        window.removeEventListener('pointerup', onPointerUp);
+      };
+
+      window.addEventListener('pointermove', onPointerMove);
+      window.addEventListener('pointerup', onPointerUp);
+    },
+    [settings.appWidth, settings.appHeight, updateSettings],
+  );
 
   useEffect(() => {
     const onBridgeError = (event: Event) => {
@@ -1140,16 +1184,8 @@ const CanopyShellContent: React.FC = () => {
         />
       )}
 
-      {/* Reminder Toast Notification Banner */}
-      {toastMessage && (
-        <div
-          data-tauri-drag-region="false"
-          className="fixed top-12 z-50 px-3.5 py-2 rounded-full bg-[#1e1e2e]/95 border border-[var(--theme-accent)] shadow-[0_10px_30px_rgba(0,0,0,0.65)] flex items-center gap-2 text-xs text-white pointer-events-auto"
-        >
-          <Bell className="w-3.5 h-3.5 text-[var(--theme-accent)] animate-bounce" />
-          <span>{toastMessage}</span>
-        </div>
-      )}
+      {/* Dynamic Expanding Droplet Notification Banner */}
+      <DropletNotification message={toastMessage} onDismiss={() => setToastMessage(null)} />
 
       {/* Main 850x430 Canopy Glassmorphism Dropdown Container */}
       {/* Main 850x430 Canopy Glassmorphism Dropdown Container — Always 100% visible inside window */}
@@ -1906,6 +1942,39 @@ const CanopyShellContent: React.FC = () => {
             />
           )}
         </main>
+
+        {/* Interactive Corner Resize Grips (Off by default, enabled in Settings) */}
+        {settings.enableCornerResizeTabs && (
+          <>
+            <div
+              onPointerDown={(e) => handleResizeStart(e, 'sw')}
+              className="absolute bottom-1 left-1.5 w-6 h-6 flex items-end justify-start p-1 z-50 cursor-sw-resize group pointer-events-auto select-none"
+              title="Drag to resize Canopy"
+            >
+              <svg
+                className="w-3.5 h-3.5 opacity-40 group-hover:opacity-100 group-hover:scale-110 transition-all text-[var(--theme-accent)]"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+                style={{ transform: 'scaleX(-1)' }}
+              >
+                <path d="M14 14H12V12H14V14ZM14 10H12V8H14V10ZM10 14H8V12H10V14ZM14 6H12V4H14V6ZM6 14H4V12H6V14ZM10 10H8V8H10V10Z" />
+              </svg>
+            </div>
+            <div
+              onPointerDown={(e) => handleResizeStart(e, 'se')}
+              className="absolute bottom-1 right-1.5 w-6 h-6 flex items-end justify-end p-1 z-50 cursor-se-resize group pointer-events-auto select-none"
+              title="Drag to resize Canopy"
+            >
+              <svg
+                className="w-3.5 h-3.5 opacity-40 group-hover:opacity-100 group-hover:scale-110 transition-all text-[var(--theme-accent)]"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+              >
+                <path d="M14 14H12V12H14V14ZM14 10H12V8H14V10ZM10 14H8V12H10V14ZM14 6H12V4H14V6ZM6 14H4V12H6V14ZM10 10H8V8H10V10Z" />
+              </svg>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Search / Command Palette Overlay (printable key opens, Esc closes, Enter runs) */}
