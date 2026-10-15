@@ -129,11 +129,15 @@ public partial class MainWindow : Window
         _log.Write($"Source initialized; panel monitor {panelMonitor.Left},{panelMonitor.Top} {panelMonitor.Width}x{panelMonitor.Height}");
     }
 
+    private const double BaseDesignWidth = 850.0;
+    private const double BaseDesignHeight = 430.0;
+
     /// <summary>
-    /// Resolves the true DPI scale and physical pixel dimensions for the panel.
-    /// Queries Win32 GetDpiForWindow first for reliable PerMonitorV2 scale, falling back to VisualTreeHelper.
+    /// Resolves the true DPI scale and balanced physical pixel dimensions for the panel.
+    /// Preserves the native 850x430 aspect ratio while capping height to at most 48% of the monitor height,
+    /// keeping the drop-down sleek and non-intrusive on all displays (e.g. 1080p @ 150% scaling).
     /// </summary>
-    private (double scaleX, double scaleY, int physicalWidth, int physicalHeight) GetDpiScaleAndPhysicalSize()
+    private (double scaleX, double scaleY, int physicalWidth, int physicalHeight) GetDpiScaleAndPhysicalSize(Win32.RECT monitor)
     {
         double scaleX = 1.0;
         double scaleY = 1.0;
@@ -161,9 +165,40 @@ public partial class MainWindow : Window
             }
         }
 
-        int physicalWidth = (int)Math.Round(Width * scaleX);
-        int physicalHeight = (int)Math.Round(Height * scaleY);
-        return (scaleX, scaleY, physicalWidth, physicalHeight);
+        int targetPhysicalHeight = (int)Math.Round(BaseDesignHeight * scaleY);
+        // Cap height so the panel never exceeds 48% of the screen height (keeps it compact on 1080p @ 150% scale)
+        if (monitor.Height > 0 && targetPhysicalHeight > (int)Math.Round(monitor.Height * 0.48))
+        {
+            targetPhysicalHeight = (int)Math.Round(monitor.Height * 0.48);
+        }
+
+        int targetPhysicalWidth = (int)Math.Round(targetPhysicalHeight * (BaseDesignWidth / BaseDesignHeight));
+        return (scaleX, scaleY, targetPhysicalWidth, targetPhysicalHeight);
+    }
+
+    /// <summary>
+    /// Programmatically synchronizes WebView2 zoom with the physical panel dimensions so the 850x430
+    /// layout renders smoothly with zero cropping and crisp typography.
+    /// </summary>
+    private void ApplyAdaptiveZoom(Win32.RECT monitor)
+    {
+        if (ShellWebView.CoreWebView2 is null)
+            return;
+
+        var (scaleX, _, physicalWidth, _) = GetDpiScaleAndPhysicalSize(monitor);
+        if (scaleX > 0 && physicalWidth > 0)
+        {
+            double targetZoom = (double)physicalWidth / (scaleX * BaseDesignWidth);
+            targetZoom = Math.Clamp(targetZoom, 0.4, 2.0);
+            try
+            {
+                ShellWebView.ZoomFactor = targetZoom;
+            }
+            catch (Exception ex)
+            {
+                _log.WriteException("zoom factor", ex);
+            }
+        }
     }
 
     /// <summary>
@@ -177,10 +212,12 @@ public partial class MainWindow : Window
             return;
         }
 
-        var (_, scaleY, physicalWidth, physicalHeight) = GetDpiScaleAndPhysicalSize();
+        Win32.RECT panelMonitor = GetPanelMonitor();
+        var (_, scaleY, physicalWidth, physicalHeight) = GetDpiScaleAndPhysicalSize(panelMonitor);
         int cornerRadius = (int)Math.Round(24 * scaleY);
 
         Win32.ApplyWindowRoundedRegion(_hwnd, physicalWidth, physicalHeight, cornerRadius);
+        ApplyAdaptiveZoom(panelMonitor);
     }
 
     private async void OnWindowLoaded(object sender, RoutedEventArgs e)
@@ -267,8 +304,13 @@ public partial class MainWindow : Window
                 distDir,
                 CoreWebView2HostResourceAccessKind.Allow);
 
+            core.NavigationCompleted += (_, _) =>
+            {
+                ApplyAdaptiveZoom(GetPanelMonitor());
+            };
             core.Navigate("https://canopy.local/index.html");
             _webViewReady = true;
+            ApplyAdaptiveZoom(GetPanelMonitor());
         }
         catch (Exception ex)
         {
@@ -1205,7 +1247,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void PositionWindowAtTopCenter(Win32.RECT monitor, bool offscreen)
     {
-        var (scaleX, scaleY, physicalWidth, physicalHeight) = GetDpiScaleAndPhysicalSize();
+        var (scaleX, scaleY, physicalWidth, physicalHeight) = GetDpiScaleAndPhysicalSize(monitor);
 
         int physicalX = monitor.Left + ((monitor.Width - physicalWidth) / 2);
         int physicalY = offscreen
@@ -1220,6 +1262,7 @@ public partial class MainWindow : Window
 
         Left = Math.Round(physicalX / scaleX);
         Top = Math.Round(physicalY / scaleY);
+        ApplyAdaptiveZoom(monitor);
     }
 
     /// <summary>
@@ -1228,7 +1271,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void SlideTo(bool expanded, Win32.RECT monitor)
     {
-        var (scaleX, scaleY, physicalWidth, physicalHeight) = GetDpiScaleAndPhysicalSize();
+        var (scaleX, scaleY, physicalWidth, physicalHeight) = GetDpiScaleAndPhysicalSize(monitor);
 
         int physicalX = monitor.Left + ((monitor.Width - physicalWidth) / 2);
         int physicalTargetY = expanded
@@ -1259,6 +1302,7 @@ public partial class MainWindow : Window
             }
             Left = Math.Round(physicalX / scaleX);
             Top = Math.Round(physicalTargetY / scaleY);
+            ApplyAdaptiveZoom(monitor);
             OnSlideFinished();
             return;
         }
@@ -1298,7 +1342,7 @@ public partial class MainWindow : Window
         {
             StopSlideAnimation();
 
-            var (scaleX, scaleY, _, _) = GetDpiScaleAndPhysicalSize();
+            var (scaleX, scaleY, _, _) = GetDpiScaleAndPhysicalSize(GetPanelMonitor());
             Left = Math.Round(_slidePhysicalX / scaleX);
             Top = Math.Round(_slideToPhysicalY / scaleY);
 
