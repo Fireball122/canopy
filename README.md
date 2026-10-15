@@ -18,7 +18,7 @@
   <a href="https://github.com/Fireball122/canopy/releases"><img src="https://img.shields.io/badge/Platform-Windows_11_%7C_10-0078D4?style=flat-square&logo=windows" alt="Platform Windows" /></a>
   <a href="https://dotnet.microsoft.com/"><img src="https://img.shields.io/badge/.NET-8.0_WPF-512BD4?style=flat-square&logo=dotnet" alt=".NET 8" /></a>
   <a href="https://react.dev/"><img src="https://img.shields.io/badge/Frontend-React_18_%2B_Vite-61DAFB?style=flat-square&logo=react" alt="React 18" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-success?style=flat-square" alt="License MIT" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Personal_Use_Only-orange?style=flat-square" alt="License" /></a>
 </p>
 
 ---
@@ -154,8 +154,13 @@ For more technical details, check out [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE
 
 Bug reports, feature requests, and pull requests are always welcome! Feel free to open an issue on GitHub.
 
-## License & Branding Notice
+## License & Terms of Use
 
-The software code is licensed under the [MIT License](LICENSE). 
+Canopy is provided for **personal, non-commercial use**:
 
-> **Asset & Branding Notice**: All project logos, mascots, UI graphics, and associated artwork are proprietary and copyright &copy; 2026 3Dinfinity8. All rights reserved. You may not use these assets in derivative works without prior written consent.
+* **Personal Use**: You are free to download, run, inspect, and modify the source code for your own personal, private, and non-commercial purposes.
+* **Commercial Restrictions**: Commercial distribution, monetization, selling, or business use of this software or derivative works is strictly prohibited.
+* **Redistribution**: Public mirroring or re-hosting (e.g. binary releases, app stores, or third-party mirrors) requires prior written consent from the author.
+* **Proprietary Assets**: All project logos, character mascots, and UI artwork are proprietary and copyright &copy; 2026 3Dinfinity8. All rights reserved.
+
+See the [LICENSE](LICENSE) file for the full terms and contact information.
