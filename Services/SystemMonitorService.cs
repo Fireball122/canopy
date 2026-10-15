@@ -980,17 +980,17 @@ public sealed class SystemMonitorService : IDisposable
         char e = (char)27;
 
         return $"""
-                  ████████  ████████     {user}@{host}
-                  ████████  ████████     {sep}
-                  ████████  ████████     OS      : Windows 11 ({Environment.OSVersion.Version.Build}) x64
-                                         Host    : {host} (Canopy Control Center)
-                  ████████  ████████     Uptime  : {hours}h {minutes}m
-                  ████████  ████████     CPU     : {cpu} ({Environment.ProcessorCount} threads)
-                  ████████  ████████     GPU     : {gpu}
-                                         Runtime : .NET {Environment.Version} + WebView2
-                                         Shell   : Canopy PowerShell v2.0
-                                         Palette : {e}[31m███{e}[0m {e}[32m███{e}[0m {e}[33m███{e}[0m {e}[34m███{e}[0m {e}[35m███{e}[0m {e}[36m███{e}[0m {e}[37m███{e}[0m
-               """;
+                 ______        {user}@{host}
+                /      \       {sep}
+               /   /\   \      OS      : Windows 11 ({Environment.OSVersion.Version.Build}) x64
+              /   /  \   \     Host    : {host} (Canopy Control Center)
+             /   /    \   \    Uptime  : {hours}h {minutes}m
+            /   /  /\  \   \   CPU     : {cpu} ({Environment.ProcessorCount} threads)
+           /___/  /  \  \___\  GPU     : {gpu}
+                 /    \        Runtime : .NET {Environment.Version} + WebView2
+                /______\       Shell   : Canopy PowerShell v2.0
+                               Palette : {e}[31m███{e}[0m {e}[32m███{e}[0m {e}[33m███{e}[0m {e}[34m███{e}[0m {e}[35m███{e}[0m {e}[36m███{e}[0m {e}[37m███{e}[0m
+         """;
     }
 
     public static async Task<string> RunTerminalCommandAsync(string command)

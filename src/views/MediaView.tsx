@@ -1050,11 +1050,8 @@ export const MediaView: React.FC<MediaViewProps> = ({
               <div className="w-full max-w-[330px] h-9 flex items-end justify-between gap-1 px-1 pt-1.5 overflow-hidden">
                 {Array.from({ length: 32 }, (_, i) => {
                   const rawAmp = spectrumBands[i] || 0;
-                  const waveDance = isPlaying
-                    ? ((Math.sin(visualizerTick * 0.35 + i * 0.35) + 1) / 2) * 0.45
-                    : 0;
-                  const amp = rawAmp > 0.02 ? Math.min(1, rawAmp * 1.8) : waveDance;
-                  const heightPercent = Math.max(10, Math.min(100, Math.round(amp * 100)));
+                  const amp = rawAmp > 0.005 ? Math.min(1, rawAmp * 2.5) : 0;
+                  const heightPercent = Math.max(8, Math.min(100, Math.round(amp * 100)));
                   return (
                     <div
                       key={i}
@@ -1063,7 +1060,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
                         height: `${heightPercent}%`,
                         background:
                           'linear-gradient(180deg, var(--theme-accent), var(--theme-border))',
-                        opacity: isPlaying || amp > 0.05 ? 0.95 : 0.35,
+                        opacity: amp > 0.04 ? 0.95 : 0.3,
                       }}
                     />
                   );

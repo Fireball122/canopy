@@ -324,7 +324,6 @@ const CanopyShellContent: React.FC = () => {
   const isMusicPlaying = Boolean(media.is_playing);
   const resolvedArtwork = useAlbumArt(media.title, media.artist, media.artwork_url);
   const [spectrumBands, setSpectrumBands] = useState<number[]>(() => new Array(40).fill(0));
-  const [visualizerTick, setVisualizerTick] = useState<number>(0);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -344,14 +343,6 @@ const CanopyShellContent: React.FC = () => {
       window.clearInterval(timer);
     };
   }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen || !isMusicPlaying) return;
-    const timer = window.setInterval(() => {
-      setVisualizerTick((prev) => (prev + 1) % 360);
-    }, 45);
-    return () => window.clearInterval(timer);
-  }, [isOpen, isMusicPlaying]);
 
   const [paletteOpen, setPaletteOpen] = useState<boolean>(false);
   const [paletteQuery, setPaletteQuery] = useState<string>('');
@@ -1672,11 +1663,8 @@ const CanopyShellContent: React.FC = () => {
                 <div className="w-full h-3.5 flex items-end justify-center gap-0.5 px-2 my-0.5 overflow-hidden">
                   {Array.from({ length: 18 }, (_, i) => {
                     const rawAmp = spectrumBands[i * 2] || 0;
-                    const waveDance = isMusicPlaying
-                      ? ((Math.sin(visualizerTick * 0.4 + i * 0.5) + 1) / 2) * 0.55 + 0.1
-                      : 0.04;
-                    const amp = rawAmp > 0.02 ? Math.min(1, rawAmp * 1.8) : waveDance;
-                    const heightPercent = Math.max(12, Math.min(100, Math.round(amp * 100)));
+                    const amp = rawAmp > 0.005 ? Math.min(1, rawAmp * 2.5) : 0;
+                    const heightPercent = Math.max(10, Math.min(100, Math.round(amp * 100)));
                     return (
                       <div
                         key={i}
@@ -1685,7 +1673,7 @@ const CanopyShellContent: React.FC = () => {
                           height: `${heightPercent}%`,
                           background:
                             'linear-gradient(180deg, var(--theme-accent), var(--theme-border))',
-                          opacity: isMusicPlaying || amp > 0.06 ? 0.9 : 0.25,
+                          opacity: amp > 0.04 ? 0.95 : 0.25,
                         }}
                       />
                     );

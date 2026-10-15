@@ -28,7 +28,7 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
     private MMDevice? _micDevice;
     private AudioEndpointVolume? _micEndpointVolume;
 
-    private WasapiLoopbackCapture? _loopbackCapture;
+    private readonly List<WasapiLoopbackCapture> _loopbackCaptures = new();
     private readonly float[] _sampleBuffer = new float[FftLength];
     private int _sampleBufferPos;
     private readonly Complex[] _fftBuffer = new Complex[FftLength];
@@ -64,7 +64,7 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
         {
             lock (_syncLock)
             {
-                return _loopbackCapture is not null;
+                return _loopbackCaptures.Count > 0;
             }
         }
     }
@@ -132,31 +132,56 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
             return;
         try
         {
-            WasapiLoopbackCapture? previous;
+            List<WasapiLoopbackCapture> previous;
             lock (_syncLock)
             {
-                previous = _loopbackCapture;
-                _loopbackCapture = null;
+                previous = new List<WasapiLoopbackCapture>(_loopbackCaptures);
+                _loopbackCaptures.Clear();
             }
 
-            // Tear down the previous capture without letting its RecordingStopped handler
-            // trigger a restart, then start a fresh one so a dead device cannot ossify.
-            if (previous is not null)
+            foreach (var cap in previous)
             {
-                previous.DataAvailable -= OnLoopbackDataAvailable;
-                previous.RecordingStopped -= OnLoopbackRecordingStopped;
-                try { previous.StopRecording(); } catch { }
-                try { previous.Dispose(); } catch { }
+                cap.DataAvailable -= OnLoopbackDataAvailable;
+                cap.RecordingStopped -= OnLoopbackRecordingStopped;
+                try { cap.StopRecording(); } catch { }
+                try { cap.Dispose(); } catch { }
             }
 
-            var capture = _device is not null ? new WasapiLoopbackCapture(_device) : new WasapiLoopbackCapture();
-            capture.DataAvailable += OnLoopbackDataAvailable;
-            capture.RecordingStopped += OnLoopbackRecordingStopped;
-            capture.StartRecording();
+            if (_enumerator is null) return;
+
+            var newCaptures = new List<WasapiLoopbackCapture>();
+            var endpoints = _enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
+            foreach (var dev in endpoints)
+            {
+                try
+                {
+                    var capture = new WasapiLoopbackCapture(dev);
+                    capture.DataAvailable += OnLoopbackDataAvailable;
+                    capture.RecordingStopped += OnLoopbackRecordingStopped;
+                    capture.StartRecording();
+                    newCaptures.Add(capture);
+                }
+                catch
+                {
+                }
+            }
+
+            if (newCaptures.Count == 0 && _device is not null)
+            {
+                try
+                {
+                    var capture = new WasapiLoopbackCapture(_device);
+                    capture.DataAvailable += OnLoopbackDataAvailable;
+                    capture.RecordingStopped += OnLoopbackRecordingStopped;
+                    capture.StartRecording();
+                    newCaptures.Add(capture);
+                }
+                catch { }
+            }
 
             lock (_syncLock)
             {
-                _loopbackCapture = capture;
+                _loopbackCaptures.AddRange(newCaptures);
             }
 
             LastError = null;
@@ -209,19 +234,19 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
     public void PauseCapture()
     {
         _isCapturePaused = true;
-        WasapiLoopbackCapture? captureToStop;
+        List<WasapiLoopbackCapture> capturesToStop;
         lock (_syncLock)
         {
-            captureToStop = _loopbackCapture;
-            _loopbackCapture = null;
+            capturesToStop = new List<WasapiLoopbackCapture>(_loopbackCaptures);
+            _loopbackCaptures.Clear();
         }
 
-        if (captureToStop is not null)
+        foreach (var cap in capturesToStop)
         {
-            captureToStop.DataAvailable -= OnLoopbackDataAvailable;
-            captureToStop.RecordingStopped -= OnLoopbackRecordingStopped;
-            try { captureToStop.StopRecording(); } catch { }
-            try { captureToStop.Dispose(); } catch { }
+            cap.DataAvailable -= OnLoopbackDataAvailable;
+            cap.RecordingStopped -= OnLoopbackRecordingStopped;
+            try { cap.StopRecording(); } catch { }
+            try { cap.Dispose(); } catch { }
         }
 
         lock (_spectrumLock)
@@ -249,9 +274,9 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
             if (e.BytesRecorded <= 0 || _disposed)
                 return;
 
-        var wf = _loopbackCapture?.WaveFormat;
+        var capture = sender as WasapiLoopbackCapture;
+        var wf = capture?.WaveFormat;
         if (wf is null) return;
-
         int channels = Math.Max(1, wf.Channels);
         int bitsPerSample = wf.BitsPerSample;
         int bytesPerSample = bitsPerSample / 8;
@@ -374,11 +399,11 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
                     // Smooth attack and decay
                     if (currentVal > _spectrumBands[b])
                     {
-                        _spectrumBands[b] = _spectrumBands[b] * 0.35f + currentVal * 0.65f;
+                        _spectrumBands[b] = _spectrumBands[b] * 0.20f + currentVal * 0.80f;
                     }
                     else
                     {
-                        _spectrumBands[b] = _spectrumBands[b] * 0.72f + currentVal * 0.28f;
+                        _spectrumBands[b] = _spectrumBands[b] * 0.60f + currentVal * 0.40f;
                     }
                 }
             }
@@ -604,19 +629,19 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
             return;
 
         _disposed = true;
-        WasapiLoopbackCapture? capture;
+        List<WasapiLoopbackCapture> capturesToDispose;
         lock (_syncLock)
         {
-            capture = _loopbackCapture;
-            _loopbackCapture = null;
+            capturesToDispose = new List<WasapiLoopbackCapture>(_loopbackCaptures);
+            _loopbackCaptures.Clear();
         }
 
-        if (capture is not null)
+        foreach (var cap in capturesToDispose)
         {
-            capture.DataAvailable -= OnLoopbackDataAvailable;
-            capture.RecordingStopped -= OnLoopbackRecordingStopped;
-            try { capture.StopRecording(); } catch { }
-            try { capture.Dispose(); } catch { }
+            cap.DataAvailable -= OnLoopbackDataAvailable;
+            cap.RecordingStopped -= OnLoopbackRecordingStopped;
+            try { cap.StopRecording(); } catch { }
+            try { cap.Dispose(); } catch { }
         }
 
         lock (_syncLock)
