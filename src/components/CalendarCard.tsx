@@ -2,6 +2,7 @@ import { Bell, ChevronLeft, ChevronRight, Clock, Plus, Trash2, X } from 'lucide-
 import type React from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSettings } from '../context/SettingsContext';
+import { setReminders } from '../services/hostBridge';
 
 export interface CalendarEvent {
   id: string;
@@ -107,6 +108,7 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
               item &&
                 typeof item === 'object' &&
                 typeof (item as CalendarEvent).id === 'string' &&
+                !(item as CalendarEvent).id.startsWith('seed-canopy-') &&
                 typeof (item as CalendarEvent).date === 'string' &&
                 typeof (item as CalendarEvent).text === 'string',
             ),
@@ -114,31 +116,10 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
         }
       }
     } catch {
-      // Fall through to seed sample events
+      // Fall through to empty list
     }
 
-    const seeded: CalendarEvent[] = [
-      {
-        id: 'seed-canopy-1',
-        date: todayIso,
-        text: 'Canopy shell telemetry review',
-        time: '14:00',
-      },
-      {
-        id: 'seed-canopy-2',
-        date: todayIso,
-        text: 'Evening desktop workspace backup',
-        time: '18:30',
-      },
-    ];
-    try {
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
-      }
-    } catch {
-      // Ignore storage quota errors
-    }
-    return seeded;
+    return [];
   });
 
   const firedNotificationsRef = useRef<Record<string, true>>({});
@@ -153,6 +134,14 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
     } catch {
       // Ignore storage errors
     }
+    void setReminders(
+      events.map((e) => ({
+        id: e.id,
+        text: e.text,
+        date: e.date,
+        time: e.time,
+      })),
+    );
   }, [events]);
 
   useEffect(() => {

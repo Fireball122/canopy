@@ -1,11 +1,21 @@
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <Package Name="Canopy"
            Manufacturer="Canopy Shell"
            Version="$(var.ProductVersion)"
            UpgradeCode="4C6D518F-72E6-407F-8BC1-B071536E489E"
            Scope="perUser">
 
-    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MajorUpgrade Schedule="afterInstallInitialize"
+                  AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+
+    <!-- Automatically close running Canopy instances before file replacement -->
+    <util:CloseApplication Target="Canopy.exe"
+                           CloseMessage="no"
+                           RebootPrompt="no"
+                           TerminateProcess="1" />
+
     <MediaTemplate EmbedCab="yes" />
 
     <!-- Standard Windows Control Center Icon in Installed Apps -->

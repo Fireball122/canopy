@@ -132,15 +132,18 @@ if (-not (Test-Path $wix)) {
     if ($wixCmd) { $wix = $wixCmd.Source }
 }
 
+# Ensure WixToolset.Util.wixext extension is available
+& $wix extension add -g WixToolset.Util.wixext/4.0.5 2>$null
+
 $MsiOutput = Join-Path $OutputDir "Canopy-v$Version-x64.msi"
 Write-Host "==> 5. Building MSI Installer with WiX: $MsiOutput" -ForegroundColor Cyan
 
 & $wix build (Join-Path $ScriptDir "Canopy.wxs") "$GeneratedWxs" `
     -arch x64 `
+    -ext WixToolset.Util.wixext `
     -d SourceDir="$PublishDir" `
     -d ProductVersion="$Version" `
     -out "$MsiOutput"
-
 if ($LASTEXITCODE -ne 0) { throw "WiX build failed" }
 
 Remove-Item $GeneratedWxs -Force -ErrorAction SilentlyContinue

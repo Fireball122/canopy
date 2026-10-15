@@ -68,6 +68,39 @@ public partial class MainWindow : Window
     private bool _showPanelOnLaunch = true;
     private string _hotkey = "Win+`";
 
+    // Host-owned reminder scheduling: the renderer is suspended while the panel is parked, so
+    // calendar alerts have to be timed natively to slide the panel down on their own.
+    private readonly DispatcherTimer _reminderTimer;
+    private readonly DispatcherTimer _notificationCollapseTimer;
+    private readonly List<HostReminder> _reminders = new();
+    private readonly Dictionary<string, DateTime> _pendingReminders = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _firedReminders = new(StringComparer.OrdinalIgnoreCase);
+    private bool _notificationVisible;
+
+    /// <summary>Deferred reminders are dropped once they are this stale, so a long game session never
+    /// dumps a burst of overdue alerts the moment gameplay ends.</summary>
+    private static readonly TimeSpan ReminderDeferWindow = TimeSpan.FromMinutes(10);
+
+    /// <summary>
+    /// Process names that must never be treated as a full-screen game. Chromium-family browsers
+    /// composite through Direct3D, so the shell reports QUNS_RUNNING_D3D_FULL_SCREEN for an F11
+    /// full-screen browser as well; without this list the hover trigger looks dead while a browser
+    /// is full-screen. Windows shell surfaces are excluded for the same reason.
+    /// </summary>
+    private static readonly HashSet<string> NonGameProcessNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "brave", "chrome", "msedge", "msedgewebview2", "firefox", "opera", "opera_gx", "vivaldi",
+        "iexplore", "librewolf", "floorp", "waterfox", "zen", "arc", "thorium", "tor browser",
+        "explorer", "ApplicationFrameHost", "SearchHost", "ShellExperienceHost",
+        "StartMenuExperienceHost", "TextInputHost", "Canopy", "dwm", "powershell", "pwsh", "cmd",
+        "WindowsTerminal", "OpenConsole", "conhost", "taskmgr",
+    };
+
+    /// <summary>
+    /// A reminder that the native host times itself, mirroring the calendar entries the UI owns.
+    /// </summary>
+    private sealed record HostReminder(string Id, string Text, string Date, string Time);
+
     // VSync-locked physical pixel slide animation state
     private readonly Stopwatch _slideStopwatch = new();
     private int _slidePhysicalX;
@@ -102,6 +135,29 @@ public partial class MainWindow : Window
             Interval = TimeSpan.FromMilliseconds(_hideDebounceMs)
         };
         _hideDebounceTimer.Tick += OnHideDebounceTimerTick;
+
+        // Reminder watchdog runs for the lifetime of the tray-resident process so alerts still fire
+        // while the panel is parked off-screen.
+        _reminderTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromSeconds(20)
+        };
+        _reminderTimer.Tick += (_, _) => CheckDueReminders();
+        _reminderTimer.Start();
+
+        _notificationCollapseTimer = new DispatcherTimer(DispatcherPriority.Normal)
+        {
+            Interval = TimeSpan.FromSeconds(7.5)
+        };
+        _notificationCollapseTimer.Tick += (_, _) =>
+        {
+            _notificationCollapseTimer.Stop();
+            _notificationVisible = false;
+            if (_isExpanded)
+            {
+                CollapsePanel();
+            }
+        };
 
 
         _log.Write("MainWindow constructed");
@@ -505,6 +561,59 @@ public partial class MainWindow : Window
             case "tab_changed":
                 _ignoreAutoHideUntilUtc = DateTime.UtcNow.AddMilliseconds(600);
                 return true;
+
+            case "pick_executable":
+            {
+                _ignoreAutoHideUntilUtc = DateTime.UtcNow.AddSeconds(60);
+
+                var exeDialog = new Microsoft.Win32.OpenFileDialog
+                {
+                    Title = "Select an application",
+                    Filter =
+                        "Applications (*.exe;*.lnk;*.bat;*.cmd)|*.exe;*.lnk;*.bat;*.cmd|" +
+                        "Programs (*.exe)|*.exe|Shortcuts (*.lnk)|*.lnk|All files (*.*)|*.*",
+                    CheckFileExists = true,
+                    Multiselect = false,
+                };
+
+                if (TryGetString(args, "initialDir", out string initialDir) &&
+                    !string.IsNullOrWhiteSpace(initialDir) &&
+                    Directory.Exists(initialDir))
+                {
+                    exeDialog.InitialDirectory = initialDir;
+                }
+
+                bool? exePicked = exeDialog.ShowDialog(this);
+                _ignoreAutoHideUntilUtc = DateTime.UtcNow.AddSeconds(3);
+                return exePicked == true && !string.IsNullOrWhiteSpace(exeDialog.FileName)
+                    ? exeDialog.FileName
+                    : null;
+            }
+
+            case "set_reminders":
+            {
+                if (args.ValueKind == JsonValueKind.Object &&
+                    args.TryGetProperty("reminders", out JsonElement remEl) &&
+                    remEl.ValueKind == JsonValueKind.Array)
+                {
+                    ApplyReminders(remEl);
+                }
+                return true;
+            }
+
+            case "test_notification":
+            case "show_notification":
+            {
+                string msg = "Canopy Notification: Raindrop -> Pill Capsule Alert";
+                string title = "Canopy Alert";
+                if (args.ValueKind == JsonValueKind.Object)
+                {
+                    if (args.TryGetProperty("message", out JsonElement m)) msg = m.GetString() ?? msg;
+                    if (args.TryGetProperty("title", out JsonElement t)) title = t.GetString() ?? title;
+                }
+                NotificationWindow.ShowNotification(msg, title);
+                return true;
+            }
 
             case "set_host_config":
                 ApplyHostConfig(args);
@@ -1112,11 +1221,22 @@ public partial class MainWindow : Window
         if (TryGetBool(args, "pauseInFullscreen", out bool pauseFullscreen))
         {
             _pauseInFullscreen = pauseFullscreen;
+            // Apply on the spot: previously this only took effect on the next probe tick, which is why
+            // toggling the setting off and on appeared to "fix" a stuck full-screen state.
+            RefreshFullscreenSuppression();
         }
 
         if (TryGetBool(args, "pauseInPresentation", out bool pausePresentation))
         {
             _pauseInPresentation = pausePresentation;
+            RefreshFullscreenSuppression();
+        }
+
+        if (args.ValueKind == JsonValueKind.Object &&
+            args.TryGetProperty("reminders", out JsonElement remindersEl) &&
+            remindersEl.ValueKind == JsonValueKind.Array)
+        {
+            ApplyReminders(remindersEl);
         }
 
         if (TryGetBool(args, "quietHoursEnabled", out bool quietEnabled))
@@ -1602,6 +1722,23 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
+    /// True when the foreground window belongs to a browser or Windows shell surface that composites
+    /// through Direct3D. Those report the same shell notification state as a game, so they must be
+    /// exempted before any full-screen suppression is applied.
+    /// </summary>
+    private bool IsForegroundWindowNonGame()
+    {
+        IntPtr fg = Win32.GetForegroundWindow();
+        if (fg == IntPtr.Zero || fg == _hwnd)
+        {
+            return false;
+        }
+
+        string processName = Win32.GetWindowProcessName(fg);
+        return processName.Length > 0 && NonGameProcessNames.Contains(processName);
+    }
+
+    /// <summary>
     /// True while the automatic hover trigger must stay silent: quiet hours, a full-screen game
     /// (borderless or exclusive fullscreen), or a presentation.
     /// </summary>
@@ -1612,8 +1749,11 @@ public partial class MainWindow : Window
             return true;
         }
 
+        // Browsers and shell surfaces are never games, no matter what the shell state reports.
+        bool nonGameForeground = IsForegroundWindowNonGame();
+
         // Direct borderless fullscreen detection (DXGI Flip Model games, fullscreen video)
-        if (_pauseInFullscreen && IsForegroundWindowFullscreen(currentMonitor))
+        if (!nonGameForeground && _pauseInFullscreen && IsForegroundWindowFullscreen(currentMonitor))
         {
             return true;
         }
@@ -1621,12 +1761,118 @@ public partial class MainWindow : Window
         int state = Win32.QueryUserNotificationState();
         return state switch
         {
-            Win32.QUNS_RUNNING_D3D_FULL_SCREEN => _pauseInFullscreen,
+            Win32.QUNS_RUNNING_D3D_FULL_SCREEN => _pauseInFullscreen && !nonGameForeground,
             Win32.QUNS_PRESENTATION_MODE => _pauseInPresentation,
             // For QUNS_BUSY, only suppress if the foreground window is truly covering rcMonitor
-            Win32.QUNS_BUSY => _pauseInFullscreen && IsForegroundWindowFullscreen(currentMonitor),
+            Win32.QUNS_BUSY => _pauseInFullscreen && !nonGameForeground && IsForegroundWindowFullscreen(currentMonitor),
             _ => false,
         };
+    }
+
+    /// <summary>
+    /// Recomputes the suppression flag immediately instead of waiting for the next probe tick, so
+    /// flipping the fullscreen/game toggle in Settings takes effect on the spot.
+    /// </summary>
+    private void RefreshFullscreenSuppression()
+    {
+        _fullscreenAppActive = ShouldSuppressTrigger(GetActiveMonitorBounds());
+    }
+
+    /// <summary>
+    /// Replaces the host's reminder list from the calendar surface. Delivery state is kept by id, so
+    /// re-pushing the calendar never re-alerts a reminder that already fired.
+    /// </summary>
+    private void ApplyReminders(JsonElement remindersEl)
+    {
+        _reminders.Clear();
+
+        foreach (JsonElement item in remindersEl.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object)
+                continue;
+
+            string id = item.TryGetProperty("id", out JsonElement idEl) ? idEl.GetString() ?? string.Empty : string.Empty;
+            string text = item.TryGetProperty("text", out JsonElement textEl) ? textEl.GetString() ?? string.Empty : string.Empty;
+            string date = item.TryGetProperty("date", out JsonElement dateEl) ? dateEl.GetString() ?? string.Empty : string.Empty;
+            string time = item.TryGetProperty("time", out JsonElement timeEl) ? timeEl.GetString() ?? string.Empty : string.Empty;
+
+            if (id.Length == 0 || date.Length == 0 || time.Length == 0)
+                continue;
+
+            _reminders.Add(new HostReminder(id, text, date, time));
+        }
+
+        _log.Write($"reminders synced ({_reminders.Count})");
+        CheckDueReminders();
+    }
+
+    /// <summary>
+    /// Fires reminders whose local date/time matches now. This runs even while the panel is parked,
+    /// in which case the panel is slid down first so the droplet is actually visible. Reminders are
+    /// held back while a full-screen game owns the foreground.
+    /// </summary>
+    private void CheckDueReminders()
+    {
+        if (_reminders.Count == 0)
+            return;
+
+        DateTime now = DateTime.Now;
+        string today = now.ToString("yyyy-MM-dd");
+        string hhmm = now.ToString("HH:mm");
+
+        foreach (HostReminder reminder in _reminders)
+        {
+            string fireKey = $"{reminder.Id}:{reminder.Date}:{reminder.Time}";
+            if (_firedReminders.Contains(fireKey))
+                continue;
+
+            bool due = string.Equals(reminder.Date, today, StringComparison.Ordinal) &&
+                       string.Equals(reminder.Time, hhmm, StringComparison.Ordinal);
+            bool deferred = _pendingReminders.TryGetValue(fireKey, out DateTime deferredAt);
+
+            if (!due && !deferred)
+                continue;
+
+            if (_fullscreenAppActive)
+            {
+                // Never cover gameplay: hold the alert, then drop it if it went stale.
+                if (!deferred)
+                {
+                    _pendingReminders[fireKey] = now;
+                    _log.Write($"reminder deferred (game in foreground): {reminder.Text}");
+                }
+                else if (now - deferredAt > ReminderDeferWindow)
+                {
+                    _pendingReminders.Remove(fireKey);
+                    _firedReminders.Add(fireKey);
+                    _log.Write($"reminder dropped after defer window: {reminder.Text}");
+                }
+                continue;
+            }
+
+            _pendingReminders.Remove(fireKey);
+            _firedReminders.Add(fireKey);
+            ShowReminder(reminder);
+        }
+    }
+
+    /// <summary>
+    /// Triggers the standalone raindrop -> pill capsule notification popup at the top of the screen.
+    /// Works whether Canopy is open or closed, staying topmost above other applications without taking focus.
+    /// </summary>
+    private void ShowReminder(HostReminder reminder)
+    {
+        _log.Write($"reminder fired: {reminder.Text}");
+        NotificationWindow.ShowNotification(reminder.Text, "Canopy Reminder");
+        if (_isExpanded)
+        {
+            EmitFrontendEvent("canopy:notification", new
+            {
+                message = $"Reminder: {reminder.Text}",
+                title = "Canopy Reminder",
+                kind = "reminder",
+            });
+        }
     }
 
     private bool IsWithinQuietHours()
@@ -1735,6 +1981,14 @@ public partial class MainWindow : Window
             _hideDebounceTimer.Stop();
             return;
         }
+
+        // A reminder banner owns the panel until it finishes its drop/expand animation.
+        if (_notificationVisible)
+        {
+            _hideDebounceTimer.Stop();
+            return;
+        }
+
         if (Win32.IsAnyMouseButtonDown())
         {
             _hideDebounceTimer.Stop();
@@ -1765,7 +2019,7 @@ public partial class MainWindow : Window
     private void OnHideDebounceTimerTick(object? sender, EventArgs e)
     {
         _hideDebounceTimer.Stop();
-        if (_isResizingWindow || !_isExpanded)
+        if (_isResizingWindow || !_isExpanded || _notificationVisible)
             return;
 
         if (Win32.GetCursorPos(out Win32.POINT cursor))
@@ -1784,6 +2038,9 @@ public partial class MainWindow : Window
         StopSlideAnimation();
         _cursorPollTimer.Interval = TimeSpan.FromMilliseconds(25);
         Win32.SetClickThrough(_hwnd, clickThrough: false);
+        // Re-assert topmost so the panel and its notification banner stay above ordinary windows.
+        Win32.ReassertTopmost(_hwnd);
+        Win32.ShowWithoutActivating(_hwnd);
         ResumeWebView();
         _audioController.ResumeCapture();
         _audioSessions.Resume();

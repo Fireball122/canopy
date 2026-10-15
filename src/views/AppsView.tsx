@@ -19,7 +19,12 @@ import {
 } from 'lucide-react';
 import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
-import { getInstalledApps, type InstalledAppItem, launchApp } from '../services/hostBridge';
+import {
+  getInstalledApps,
+  type InstalledAppItem,
+  launchApp,
+  pickExecutable,
+} from '../services/hostBridge';
 
 export interface AppsViewProps {
   onAppLaunched?: () => void;
@@ -225,6 +230,28 @@ export const AppsView: React.FC<AppsViewProps> = ({
     }
   };
 
+  const handleBrowseAndLaunch = async () => {
+    try {
+      const filePath = await pickExecutable();
+      if (!filePath) return;
+      const fileName = filePath.split(/[\\/]/).pop() || filePath;
+      const cleanName = fileName.replace(/\.[^/.]+$/, '');
+      const customItem: InstalledAppItem = {
+        id: `custom-${cleanName.toLowerCase().replace(/[^a-z0-9_-]/g, '-')}`,
+        name: cleanName,
+        path: filePath,
+        category: 'Custom',
+      };
+      if (isPickerMode && onPickApp) {
+        onPickApp(customItem);
+      } else {
+        await handleLaunch(customItem);
+      }
+    } catch {
+      // User cancelled
+    }
+  };
+
   return (
     <div
       data-tauri-drag-region="false"
@@ -317,6 +344,22 @@ export const AppsView: React.FC<AppsViewProps> = ({
             title="Rescan installed Windows applications"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+
+          {/* Browse for Executable Button */}
+          <button
+            type="button"
+            data-tauri-drag-region="false"
+            onClick={handleBrowseAndLaunch}
+            className="p-1.5 rounded-xl border transition-all hover:scale-[1.03] active:scale-95 pointer-events-auto cursor-pointer"
+            style={{
+              background: 'var(--theme-track, rgba(255, 255, 255, 0.05))',
+              borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
+              color: 'var(--theme-text-primary, #cdd6f4)',
+            }}
+            title="Browse computer for an executable (.exe, .lnk) to add or run"
+          >
+            <FolderOpen className="w-3.5 h-3.5" />
           </button>
         </div>
 

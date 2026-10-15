@@ -442,7 +442,7 @@ const CanopyShellContent: React.FC = () => {
     setToastMessage(msg);
     window.setTimeout(() => {
       setToastMessage((curr) => (curr === msg ? null : curr));
-    }, 5000);
+    }, 7000);
   }, []);
 
   // Restore custom window dimensions if configured
@@ -464,6 +464,18 @@ const CanopyShellContent: React.FC = () => {
     };
     window.addEventListener('canopy:bridge-error', onBridgeError);
     return () => window.removeEventListener('canopy:bridge-error', onBridgeError);
+  }, [handleToastNotification]);
+
+  // Handle native host notifications (e.g. reminders that fired when panel was closed)
+  useEffect(() => {
+    const onNotification = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: string; title?: string }>).detail;
+      if (detail?.message) {
+        handleToastNotification(detail.message);
+      }
+    };
+    window.addEventListener('canopy:notification', onNotification);
+    return () => window.removeEventListener('canopy:notification', onNotification);
   }, [handleToastNotification]);
 
   // Sync topHoverTrigger setting to native host

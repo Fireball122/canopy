@@ -78,6 +78,7 @@ public static class Win32
     public const uint SHGFI_LARGEICON = 0x000000000;
     public const uint SHGFI_USEFILEATTRIBUTES = 0x000000010;
     public static readonly IntPtr HWND_BOTTOM = new(1);
+    public static readonly IntPtr HWND_TOPMOST = new(-1);
     public const uint SWP_NOSIZE = 0x0001;
     public const uint SWP_NOMOVE = 0x0002;
     public const uint SWP_NOZORDER = 0x0004;
@@ -201,6 +202,105 @@ public static class Win32
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowTextW(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+    /// <summary>
+    /// Top-level window owned by the given process with an exact title match, or IntPtr.Zero.
+    /// Used as a last-resort recovery when the cross-process expand signal cannot be delivered.
+    /// </summary>
+    public static IntPtr FindTopLevelWindow(uint processId, string expectedTitle)
+    {
+        IntPtr found = IntPtr.Zero;
+
+        try
+        {
+            _ = EnumWindows((hWnd, lParam) =>
+            {
+                GetWindowThreadProcessId(hWnd, out uint pid);
+                if (pid != processId)
+                    return true;
+
+                var title = new StringBuilder(256);
+                _ = GetWindowTextW(hWnd, title, title.Capacity);
+                if (!string.Equals(title.ToString(), expectedTitle, StringComparison.Ordinal))
+                    return true;
+
+                found = hWnd;
+                return false;
+            }, IntPtr.Zero);
+        }
+        catch
+        {
+        }
+
+        return found;
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    public const int SW_SHOWNOACTIVATE = 4;
+
+    /// <summary>
+    /// Re-asserts HWND_TOPMOST without moving, resizing, or stealing focus. Called when the panel
+    /// expands so the notification surface reliably paints above ordinary windows.
+    /// </summary>
+    public static void ReassertTopmost(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero)
+            return;
+
+        _ = SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+
+    /// <summary>
+    /// Shows a window without activating it (keeps the user's foreground app focused).
+    /// </summary>
+    public static void ShowWithoutActivating(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero)
+            return;
+
+        _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+    }
+
+    /// <summary>
+    /// Lowercase executable name (no extension) owning the given window, or an empty string when the
+    /// process has exited or is inaccessible. Used to keep browsers and shell surfaces out of the
+    /// full-screen "game" suppression path.
+    /// </summary>
+    public static string GetWindowProcessName(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero)
+            return string.Empty;
+
+        try
+        {
+            _ = GetWindowThreadProcessId(hwnd, out uint pid);
+            if (pid == 0)
+                return string.Empty;
+
+            using System.Diagnostics.Process process = System.Diagnostics.Process.GetProcessById((int)pid);
+            return process.ProcessName ?? string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);

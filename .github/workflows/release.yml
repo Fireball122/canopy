@@ -38,9 +38,10 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      - name: Install WiX Toolset v4
-        run: dotnet tool install --global wix --version 4.0.5
-
+      - name: Install WiX Toolset v4 & Util Extension
+        run: |
+          dotnet tool install --global wix --version 4.0.5
+          wix extension add -g WixToolset.Util.wixext/4.0.5
       - name: Determine Version
         id: get_version
         shell: pwsh

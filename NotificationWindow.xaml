@@ -1,0 +1,124 @@
+<Window x:Class="CaelestiaWin.NotificationWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Canopy Notification"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        SizeToContent="WidthAndHeight"
+        WindowStartupLocation="Manual"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        MouseEnter="OnMouseEnterPill"
+        MouseLeave="OnMouseLeavePill"
+        Loaded="OnWindowLoaded">
+    <Grid Margin="20" HorizontalAlignment="Center" VerticalAlignment="Top">
+        <!-- The Animated Raindrop -> Pill Capsule -->
+        <Border x:Name="NotificationPill"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Top"
+                Background="#F412121E"
+                BorderBrush="#B3CBA6F7"
+                BorderThickness="1.5"
+                CornerRadius="24"
+                ClipToBounds="True">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="28"
+                                  Color="#CBA6F7"
+                                  Opacity="0.45"
+                                  ShadowDepth="4"
+                                  Direction="270" />
+            </Border.Effect>
+            <Border.RenderTransform>
+                <TransformGroup>
+                    <TranslateTransform x:Name="PillTranslate" Y="-60" />
+                    <ScaleTransform x:Name="PillScale" CenterX="0.5" CenterY="0" ScaleX="0.25" ScaleY="0.25" />
+                </TransformGroup>
+            </Border.RenderTransform>
+
+            <Grid x:Name="ContentGrid" Height="48" MinWidth="48" Margin="8,0,12,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Icon Badge (acts as the raindrop head during drop, then icon in pill) -->
+                <Border x:Name="IconBadge"
+                        Grid.Column="0"
+                        Width="32"
+                        Height="32"
+                        CornerRadius="16"
+                        Background="#33CBA6F7"
+                        BorderBrush="#80CBA6F7"
+                        BorderThickness="1"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center">
+                    <Path Data="M 7 13 A 2 2 0 0 0 11 13 M 9 3 C 6.5 3 5 5 5 8 C 5 10 4 11 3 12 L 15 12 C 14 11 13 10 13 8 C 13 5 11.5 3 9 3 Z"
+                          Fill="#FFCBA6F7"
+                          Width="15"
+                          Height="15"
+                          Stretch="Uniform"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Center" />
+                </Border>
+
+                <!-- Notification Content -->
+                <StackPanel x:Name="TextContainer"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            Margin="10,0,14,0"
+                            Opacity="0">
+                    <TextBlock x:Name="TitleText"
+                               Text="Canopy Reminder"
+                               FontSize="10"
+                               FontWeight="SemiBold"
+                               Foreground="#94A3B8"
+                               FontFamily="Segoe UI Variable Text, Segoe UI" />
+                    <TextBlock x:Name="MessageText"
+                               Text="Reminder notification text"
+                               FontSize="12.5"
+                               FontWeight="Medium"
+                               Foreground="#FFFFFF"
+                               FontFamily="Segoe UI Variable Text, Segoe UI"
+                               TextTrimming="CharacterEllipsis"
+                               MaxWidth="380" />
+                </StackPanel>
+
+                <!-- Dismiss Button -->
+                <Button x:Name="DismissButton"
+                        Grid.Column="2"
+                        Width="22"
+                        Height="22"
+                        VerticalAlignment="Center"
+                        Cursor="Hand"
+                        Opacity="0"
+                        Click="OnDismissClick">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="BtnBorder" Background="Transparent" CornerRadius="11" Width="22" Height="22">
+                                <Path Data="M 4 4 L 12 12 M 12 4 L 4 12"
+                                      Stroke="#94A3B8"
+                                      StrokeThickness="1.6"
+                                      StrokeStartLineCap="Round"
+                                      StrokeEndLineCap="Round"
+                                      Width="10"
+                                      Height="10"
+                                      Stretch="Uniform"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="BtnBorder" Property="Background" Value="#26FFFFFF" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

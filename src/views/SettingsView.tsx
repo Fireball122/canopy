@@ -26,10 +26,12 @@ import {
   getInstalledApps,
   type InstalledAppItem,
   openLogFolder,
+  pickExecutable,
   pickWallpaperFolder,
   setLaunchOnStartup,
   setTopHoverTrigger,
   setWallpaperDirectory,
+  testNotification,
   type WallpaperEntry,
 } from '../services/hostBridge';
 import { applyThemeModeFallback } from '../services/palette';
@@ -308,6 +310,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       },
     });
     setPickerSlotIndex(null);
+  };
+
+  const handleBrowseExecutable = async () => {
+    if (pickerSlotIndex === null) return;
+    try {
+      const filePath = await pickExecutable();
+      if (!filePath) return;
+      const fileName = filePath.split(/[\\/]/).pop() || filePath;
+      const cleanName = fileName.replace(/\.[^/.]+$/, '');
+      const customId = `custom-${cleanName.toLowerCase().replace(/[^a-z0-9_-]/g, '-')}-${Date.now().toString(36)}`;
+      assignAppToSlot(pickerSlotIndex, {
+        id: customId,
+        name: cleanName,
+        path: filePath,
+      });
+    } catch {
+      // User cancelled
+    }
   };
 
   const clearSlot = (slotIdx: number) => {
@@ -743,6 +763,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               />
             </SettingRow>
 
+            <SettingRow
+              title="Test Raindrop Notification"
+              description="Preview the top-screen raindrop to pill capsule popup"
+            >
+              <button
+                type="button"
+                data-tauri-drag-region="false"
+                onClick={() =>
+                  void testNotification('Meeting with team in 5 minutes!', 'Canopy Reminder')
+                }
+                className="px-3 py-1 rounded-lg text-xs font-semibold border hover:scale-105 active:scale-95 transition-all pointer-events-auto cursor-pointer"
+                style={{
+                  background: 'var(--theme-accent, #cba6f7)',
+                  color: '#11111b',
+                  borderColor: 'var(--theme-accent, #cba6f7)',
+                }}
+              >
+                Send Test
+              </button>
+            </SettingRow>
+
             {/* Uniform Application Scaling Slider (Locked 850x430 Aspect Ratio) */}
             <div className="flex flex-col gap-1.5 pt-1 border-t border-[var(--theme-border)]">
               <div className="flex items-center justify-between">
@@ -961,6 +1002,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         <X className="w-3 h-3" />
                       </button>
                     )}
+                    <button
+                      type="button"
+                      data-tauri-drag-region="false"
+                      onClick={handleBrowseExecutable}
+                      className="p-1 rounded text-white/50 hover:text-[var(--theme-accent)] hover:bg-white/10 transition-all pointer-events-auto cursor-pointer shrink-0"
+                      title="Browse computer for an executable (.exe, .lnk)"
+                    >
+                      <FolderOpen className="w-3.5 h-3.5" />
+                    </button>
                   </div>
 
                   <div className="max-h-44 overflow-y-auto grid grid-cols-3 gap-1.5 pr-0.5">

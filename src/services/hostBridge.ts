@@ -784,6 +784,29 @@ export async function pickWallpaperFolder(currentDir?: string): Promise<string |
   );
 }
 
+export async function pickExecutable(initialDir?: string): Promise<string | null> {
+  return invokeBridge<string | null>('pick_executable', { initialDir }, () => null);
+}
+
+export interface ReminderPayload {
+  id: string;
+  text: string;
+  date: string;
+  time?: string;
+}
+
+export async function setReminders(reminders: ReminderPayload[]): Promise<boolean> {
+  return invokeBridge<boolean>('set_reminders', { reminders }, () => false);
+}
+
+export async function testNotification(message?: string, title?: string): Promise<boolean> {
+  return invokeBridge<boolean>('test_notification', { message, title }, () => true);
+}
+
+export async function showNotification(message: string, title?: string): Promise<boolean> {
+  return invokeBridge<boolean>('show_notification', { message, title }, () => true);
+}
+
 export async function setWallpaperDirectory(path: string): Promise<WallpaperEntry[]> {
   const list = await invokeBridge<WallpaperEntry[]>('set_wallpaper_directory', { path }, () =>
     fallbackWallpapers.map((item) => ({ ...item })),
