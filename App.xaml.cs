@@ -2,10 +2,10 @@ using System.Diagnostics;
 using System.Threading;
 using System.Windows;
 using System.Windows.Threading;
-using CaelestiaWin.Interop;
-using CaelestiaWin.Services;
+using Canopy.Interop;
+using Canopy.Services;
 
-namespace CaelestiaWin;
+namespace Canopy;
 
 public partial class App : Application
 {

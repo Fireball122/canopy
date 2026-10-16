@@ -1364,6 +1364,13 @@ export const MediaView: React.FC<MediaViewProps> = ({
                           <Volume2 className="w-3 h-3" strokeWidth={2} />
                         )}
                       </button>
+                      {session.icon_data_url && (
+                        <img
+                          src={session.icon_data_url}
+                          alt={session.name}
+                          className="w-4 h-4 rounded shrink-0 object-contain"
+                        />
+                      )}
                       <span
                         className="w-[74px] shrink-0 text-[11px] font-medium truncate"
                         title={session.name}

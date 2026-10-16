@@ -1,3 +1,5 @@
+import { setHostConfig } from './hostBridge';
+
 export type RGBTuple = [number, number, number];
 
 export type ThemePreset = 'canopy' | 'adaptive' | 'dark' | 'light' | 'auto';
@@ -164,6 +166,15 @@ function applyThemeVariables(vars: {
   root.style.setProperty('--theme-text-muted', vars.textSecondary);
   root.style.setProperty('--theme-text-secondary', vars.textSecondary);
   root.style.setProperty('--theme-track', vars.track);
+  root.style.setProperty(
+    '--theme-surface-hover',
+    vars.isLight ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.08)',
+  );
+  try {
+    setHostConfig({ themeAccent: vars.accent, themeBg: vars.bg }).catch(() => {});
+  } catch {
+    // Non-fatal if host bridge is not ready
+  }
 }
 
 export function applyThemeModeFallback(
@@ -182,9 +193,11 @@ export function applyThemeModeFallback(
   }
 
   const mode = themeMode.toLowerCase();
-  if (mode === 'light' || mode === 'alabaster') {
+  const prefersLight =
+    typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: light)').matches;
+  if (mode === 'light' || mode === 'alabaster' || (mode === 'auto' && prefersLight)) {
     applyThemeVariables(ALABASTER_LIGHT_THEME);
-  } else if (mode === 'dark' || mode === 'obsidian') {
+  } else if (mode === 'dark' || mode === 'obsidian' || (mode === 'auto' && !prefersLight)) {
     applyThemeVariables(OBSIDIAN_DARK_THEME);
   } else {
     // Default signature: Canopy Forest
@@ -207,11 +220,13 @@ export function applyThemePalette(
     applyThemeVariables(CANOPY_FOREST_THEME);
     return;
   }
-  if (mode === 'dark' || mode === 'obsidian') {
+  const prefersLight =
+    typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: light)').matches;
+  if (mode === 'dark' || mode === 'obsidian' || (mode === 'auto' && !prefersLight)) {
     applyThemeVariables(OBSIDIAN_DARK_THEME);
     return;
   }
-  if (mode === 'light' || mode === 'alabaster') {
+  if (mode === 'light' || mode === 'alabaster' || (mode === 'auto' && prefersLight)) {
     applyThemeVariables(ALABASTER_LIGHT_THEME);
     return;
   }
@@ -418,4 +433,12 @@ export async function applyThemeFromImageSrc(
   } catch {
     applyThemeModeFallback(themeMode);
   }
+}
+
+export function initializeSystemThemeWatcher(onThemeChange: () => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+  const media = window.matchMedia('(prefers-color-scheme: light)');
+  const listener = () => onThemeChange();
+  media.addEventListener('change', listener);
+  return () => media.removeEventListener('change', listener);
 }

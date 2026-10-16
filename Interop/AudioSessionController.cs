@@ -1,8 +1,9 @@
+using System.IO;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json.Serialization;
 
-namespace CaelestiaWin.Interop;
+namespace Canopy.Interop;
 
 /// <summary>
 /// Snapshot of a single WASAPI per-application audio session.
@@ -24,6 +25,9 @@ public sealed class AudioSessionInfo
 
     [JsonPropertyName("is_active")]
     public bool IsActive { get; init; }
+
+    [JsonPropertyName("icon_data_url")]
+    public string? IconDataUrl { get; init; }
 }
 
 /// <summary>
@@ -238,6 +242,7 @@ public sealed class AudioSessionController : IDisposable
             VolumePercent = Math.Clamp(volumeScalar * 100f, 0f, 100f),
             Muted = muted,
             IsActive = state == AudioSessionState.Active,
+            IconDataUrl = ExtractProcessIconDataUrl(pid),
         };
     }
 
@@ -350,6 +355,44 @@ public sealed class AudioSessionController : IDisposable
         }
 
         return pid > 0 ? $"Process ({pid})" : "Audio Stream";
+    }
+
+    private static readonly Dictionary<string, string> s_iconCache = new(StringComparer.OrdinalIgnoreCase);
+
+    private static string? ExtractProcessIconDataUrl(uint pid)
+    {
+        if (pid == 0) return null;
+        try
+        {
+            using var process = Process.GetProcessById((int)pid);
+            string? exePath = process.MainModule?.FileName;
+            if (string.IsNullOrWhiteSpace(exePath) || !File.Exists(exePath))
+                return null;
+
+            lock (s_iconCache)
+            {
+                if (s_iconCache.TryGetValue(exePath, out string? cached))
+                    return cached;
+            }
+
+            using System.Drawing.Icon? icon = System.Drawing.Icon.ExtractAssociatedIcon(exePath);
+            if (icon is null) return null;
+
+            using var bmp = icon.ToBitmap();
+            using var ms = new MemoryStream();
+            bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+            string dataUrl = "data:image/png;base64," + Convert.ToBase64String(ms.ToArray());
+
+            lock (s_iconCache)
+            {
+                s_iconCache[exePath] = dataUrl;
+            }
+            return dataUrl;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
 

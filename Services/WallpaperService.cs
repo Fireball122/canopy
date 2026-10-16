@@ -6,9 +6,9 @@ using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
-using CaelestiaWin.Interop;
+using Canopy.Interop;
 
-namespace CaelestiaWin.Services;
+namespace Canopy.Services;
 
 /// <summary>
 /// Scans %USERPROFILE%\Pictures\Wallpapers, serves disk-cached JPEG thumbnails as data URLs,

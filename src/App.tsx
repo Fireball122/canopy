@@ -85,6 +85,7 @@ import {
   applyThemeFromImageSrc,
   applyThemeModeFallback,
   applyThemePalette,
+  initializeSystemThemeWatcher,
 } from './services/palette';
 import { fetchWeather, type WeatherData } from './services/weather';
 import { WallpaperView } from './views/WallpaperView';
@@ -227,7 +228,7 @@ const CanopyShellContent: React.FC = () => {
   // System stats state (polled every 1500ms)
   const [stats, setStats] = useState<SystemStats>({
     cpu_usage: 14,
-    cpu_temp_c: 41,
+    cpu_temp_c: null,
     gpu_usage: null,
     gpu_temp_c: null,
     core_usages: [18, 12, 24, 9, 15, 11, 21, 8, 14, 10, 16, 7],
@@ -567,6 +568,11 @@ const CanopyShellContent: React.FC = () => {
         applyThemeModeFallback('light', settings.glassOpacity, settings.glassBlurStrength);
         return;
       }
+      if (mode === 'auto') {
+        // palette.ts resolves 'auto' against the OS preference, so light/dark lives in one place.
+        applyThemeModeFallback('auto', settings.glassOpacity, settings.glassBlurStrength);
+        return;
+      }
       const activeEntry = entries.find((w) => w.active) || entries[0];
       if (activeEntry?.data_url) {
         await applyThemeFromImageSrc(activeEntry.data_url, mode);
@@ -579,6 +585,14 @@ const CanopyShellContent: React.FC = () => {
 
   useEffect(() => {
     syncThemeWithActiveWallpaper(wallpapers, settings.themeMode);
+  }, [settings.themeMode, wallpapers, syncThemeWithActiveWallpaper]);
+  useEffect(() => {
+    if (settings.themeMode === 'auto') {
+      return initializeSystemThemeWatcher(() => {
+        void syncThemeWithActiveWallpaper(wallpapers, 'auto');
+      });
+    }
+    return undefined;
   }, [settings.themeMode, wallpapers, syncThemeWithActiveWallpaper]);
 
   // Poll system stats every 1500ms — only while the panel is open and visible; a fresh poll

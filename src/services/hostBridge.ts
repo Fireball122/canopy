@@ -9,7 +9,7 @@ export interface ProcessEntry {
 
 export interface SystemStats {
   cpu_usage: number;
-  cpu_temp_c: number;
+  cpu_temp_c: number | null;
   gpu_usage: number | null;
   gpu_temp_c: number | null;
   gpu_name?: string | null;
@@ -394,7 +394,9 @@ export async function getSystemStats(): Promise<SystemStats> {
     cpu_temp_c:
       typeof raw.cpu_temp_c === 'number' && raw.cpu_temp_c > 0
         ? raw.cpu_temp_c
-        : fallback.cpu_temp_c,
+        : raw.cpu_temp_c === null
+          ? null
+          : fallback.cpu_temp_c,
     gpu_usage:
       typeof raw.gpu_usage === 'number' && Number.isFinite(raw.gpu_usage) ? raw.gpu_usage : null,
     gpu_temp_c:
@@ -569,12 +571,32 @@ export async function getHostConfig(): Promise<HostConfig> {
   return invokeBridge<HostConfig>('get_host_config', undefined, () => ({}));
 }
 
+export async function getSettingsJson<T = unknown>(): Promise<T | null> {
+  return invokeBridge<T | null>('get_settings_json', undefined, () => null);
+}
+
+export async function saveSettingsJson(settings: Record<string, unknown>): Promise<boolean> {
+  return invokeBridge<boolean>('save_settings_json', settings, () => true);
+}
+
+export async function uploadMascot(
+  filename: string,
+  dataBase64: string,
+): Promise<{ url: string; path: string } | null> {
+  return invokeBridge<{ url: string; path: string } | null>(
+    'upload_mascot',
+    { filename, data_base64: dataBase64 },
+    () => null,
+  );
+}
+
 export interface AudioSessionEntry {
   id: string;
   name: string;
   volume: number;
   muted: boolean;
   is_active: boolean;
+  icon_data_url?: string | null;
 }
 
 export async function getAudioSessions(): Promise<AudioSessionEntry[]> {
@@ -800,11 +822,42 @@ export async function setReminders(reminders: ReminderPayload[]): Promise<boolea
 }
 
 export async function testNotification(message?: string, title?: string): Promise<boolean> {
-  return invokeBridge<boolean>('test_notification', { message, title }, () => true);
+  const accent =
+    typeof document !== 'undefined'
+      ? getComputedStyle(document.documentElement).getPropertyValue('--theme-accent').trim()
+      : undefined;
+  const bg =
+    typeof document !== 'undefined'
+      ? getComputedStyle(document.documentElement).getPropertyValue('--theme-bg').trim()
+      : undefined;
+  return invokeBridge<boolean>(
+    'test_notification',
+    { message, title, accentColorHex: accent, bgColorHex: bg },
+    () => true,
+  );
 }
 
-export async function showNotification(message: string, title?: string): Promise<boolean> {
-  return invokeBridge<boolean>('show_notification', { message, title }, () => true);
+export async function showNotification(
+  message: string,
+  title?: string,
+  accentColorHex?: string,
+  bgColorHex?: string,
+): Promise<boolean> {
+  const accent =
+    accentColorHex ||
+    (typeof document !== 'undefined'
+      ? getComputedStyle(document.documentElement).getPropertyValue('--theme-accent').trim()
+      : undefined);
+  const bg =
+    bgColorHex ||
+    (typeof document !== 'undefined'
+      ? getComputedStyle(document.documentElement).getPropertyValue('--theme-bg').trim()
+      : undefined);
+  return invokeBridge<boolean>(
+    'show_notification',
+    { message, title, accentColorHex: accent, bgColorHex: bg },
+    () => true,
+  );
 }
 
 export async function setWallpaperDirectory(path: string): Promise<WallpaperEntry[]> {

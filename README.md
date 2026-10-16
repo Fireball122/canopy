@@ -56,10 +56,10 @@ When summoned, it glides down with an anti-aliased frosted glass panel containin
 
 ### Method 1: Installer (Recommended)
 Download the latest Windows setup package from [**Releases**](https://github.com/Fireball122/canopy/releases/latest):
-* **`Canopy-v1.0.1-Setup.exe`**: Standard installer. Sets up Start Menu shortcuts, desktop launcher, and includes an uninstaller in Windows *Settings > Installed Apps*.
+* **`Canopy-v1.0.2-Setup.exe`**: Standard installer. Sets up Start Menu shortcuts, desktop launcher, and includes an uninstaller in Windows *Settings > Installed Apps*.
 
 ### Method 2: Portable ZIP
-Grab **`Canopy-v1.0.1-win-x64-portable.zip`** from [**Releases**](https://github.com/Fireball122/canopy/releases/latest). Unzip it anywhere and double-click `Start Canopy.bat` or `Canopy.exe`. Zero registry changes required.
+Grab **`Canopy-v1.0.2-win-x64-portable.zip`** from [**Releases**](https://github.com/Fireball122/canopy/releases/latest). Unzip it anywhere and double-click `Start Canopy.bat` or `Canopy.exe`. Zero registry changes required.
 
 ### Method 3: One-Line PowerShell
 Run this in PowerShell (no admin privileges required; installs cleanly to `%LOCALAPPDATA%\Programs\Canopy`):
@@ -134,7 +134,7 @@ If you want to build Canopy yourself or tweak the code:
 
 4. **Package local installer (optional):**
    ```powershell
-   # Builds dist-installer/Canopy-v1.0.1-Setup.exe (requires Inno Setup 6)
+   # Builds dist-installer/Canopy-v1.0.2-Setup.exe (requires Inno Setup 6)
    .\installer\build-setup-exe.ps1
    ```
 

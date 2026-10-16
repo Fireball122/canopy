@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace CaelestiaWin.Interop;
+namespace Canopy.Interop;
 
 public static class Win32
 {
@@ -423,6 +423,13 @@ public static class Win32
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    public static extern uint RegisterWindowMessage(string lpString);
+
+    public static readonly uint WM_TASKBARCREATED = RegisterWindowMessage("TaskbarCreated");
+
+    [DllImport("user32.dll")]
+    public static extern short VkKeyScan(char ch);
     [DllImport("user32.dll")]
     public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
@@ -837,16 +844,28 @@ public static class Win32
 
         if (key.Length == 1)
         {
-            char c = char.ToUpperInvariant(key[0]);
-            if (c is >= 'A' and <= 'Z' or >= '0' and <= '9')
+            char c = key[0];
+            short scan = VkKeyScan(c);
+            if (scan != -1)
             {
-                virtualKey = c;
+                byte vk = (byte)(scan & 0xFF);
+                if (vk > 0)
+                {
+                    virtualKey = vk;
+                    return true;
+                }
+            }
+
+            char upper = char.ToUpperInvariant(c);
+            if (upper is >= 'A' and <= 'Z' or >= '0' and <= '9')
+            {
+                virtualKey = upper;
                 return true;
             }
 
-            if (key[0] == '`')
+            if (c == '`')
             {
-                virtualKey = VK_OEM_3;
+                virtualKey = (uint)VK_OEM_3;
                 return true;
             }
         }
@@ -855,7 +874,7 @@ public static class Win32
         {
             case "space":
             case "spacebar":
-                virtualKey = VK_SPACE;
+                virtualKey = (uint)VK_SPACE;
                 return true;
             case "tab":
                 virtualKey = 0x09;
@@ -871,7 +890,7 @@ public static class Win32
             case "grave":
             case "backtick":
             case "`":
-                virtualKey = VK_OEM_3;
+                virtualKey = (uint)VK_OEM_3;
                 return true;
             case "f1": case "f2": case "f3": case "f4": case "f5": case "f6":
             case "f7": case "f8": case "f9": case "f10": case "f11": case "f12":
@@ -911,4 +930,28 @@ public static class Win32
         int result = SystemParametersInfo(SPI_GETDESKWALLPAPER, sb.Capacity, sb, 0);
         return result != 0 ? sb.ToString() : string.Empty;
     }
+
+    // ── DDC/CI brightness control (desktop/external monitors via Dxva2.dll) ──────────────────────
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+    public struct PHYSICAL_MONITOR
+    {
+        public IntPtr hPhysicalMonitor;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string szPhysicalMonitorDescription;
+    }
+
+    [DllImport("dxva2.dll", SetLastError = true)]
+    public static extern bool GetNumberOfPhysicalMonitorsFromHMONITOR(IntPtr hMonitor, out uint pdwNumberOfPhysicalMonitors);
+
+    [DllImport("dxva2.dll", SetLastError = true)]
+    public static extern bool GetPhysicalMonitorsFromHMONITOR(IntPtr hMonitor, uint dwPhysicalMonitorArraySize, [Out] PHYSICAL_MONITOR[] pPhysicalMonitorArray);
+
+    [DllImport("dxva2.dll", SetLastError = true)]
+    public static extern bool DestroyPhysicalMonitors(uint dwPhysicalMonitorArraySize, [In] PHYSICAL_MONITOR[] pPhysicalMonitorArray);
+
+    [DllImport("dxva2.dll", SetLastError = true)]
+    public static extern bool GetMonitorBrightness(IntPtr hPhysicalMonitor, out uint pdwMinimumBrightness, out uint pdwCurrentBrightness, out uint pdwMaximumBrightness);
+
+    [DllImport("dxva2.dll", SetLastError = true)]
+    public static extern bool SetMonitorBrightness(IntPtr hPhysicalMonitor, uint dwNewBrightness);
 }

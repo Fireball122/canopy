@@ -1,7 +1,7 @@
 using Windows.Media.Control;
 using Windows.Storage.Streams;
 
-namespace CaelestiaWin.Interop;
+namespace Canopy.Interop;
 
 public sealed record MediaSessionSnapshot(
     string id,

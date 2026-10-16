@@ -3,7 +3,7 @@ using NAudio.CoreAudioApi.Interfaces;
 using NAudio.Dsp;
 using NAudio.Wave;
 
-namespace CaelestiaWin.Interop;
+namespace Canopy.Interop;
 
 public sealed class AudioVolumeStateChangedEventArgs(float volumePercent, bool isMuted) : EventArgs
 {

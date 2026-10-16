@@ -6,9 +6,9 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
-using CaelestiaWin.Interop;
+using Canopy.Interop;
 
-namespace CaelestiaWin;
+namespace Canopy;
 
 public partial class NotificationWindow : Window
 {
@@ -16,8 +16,12 @@ public partial class NotificationWindow : Window
     private readonly DispatcherTimer _autoDismissTimer;
     private bool _isClosing;
     private bool _isHovered;
+    private double _targetWidth = 380;
+    private readonly TimeSpan _dismissDuration = TimeSpan.FromSeconds(6.0);
+    private DateTime _dismissDueTime;
+    private Storyboard? _countdownStoryboard;
 
-    public NotificationWindow(string message, string? title = "Canopy Reminder", string? accentColorHex = null)
+    public NotificationWindow(string message, string? title = "Canopy Reminder", string? accentColorHex = null, string? bgColorHex = null)
     {
         InitializeComponent();
 
@@ -34,28 +38,16 @@ public partial class NotificationWindow : Window
 
         string cleanTitle = string.IsNullOrWhiteSpace(title) ? "REMINDER" : title.Trim().ToUpperInvariant();
         TitleText.Text = cleanTitle;
-        if (!string.IsNullOrWhiteSpace(accentColorHex))
-        {
-            try
-            {
-                var color = (Color)ColorConverter.ConvertFromString(accentColorHex);
-                NotificationPill.BorderBrush = new SolidColorBrush(color);
-                if (NotificationPill.Effect is System.Windows.Media.Effects.DropShadowEffect dropShadow)
-                {
-                    dropShadow.Color = color;
-                }
-                IconBadge.Background = new SolidColorBrush(Color.FromArgb(50, color.R, color.G, color.B));
-                IconBadge.BorderBrush = new SolidColorBrush(Color.FromArgb(140, color.R, color.G, color.B));
-            }
-            catch
-            {
-                // Keep default theme accent
-            }
-        }
+
+        // Adaptive target width based on message length (clamped neatly)
+        _targetWidth = Math.Clamp(340 + cleanMsg.Length * 2.8, 340, 520);
+
+        // Apply theme colors (active theme from Canopy)
+        ApplyTheme(accentColorHex, bgColorHex);
 
         _autoDismissTimer = new DispatcherTimer
         {
-            Interval = TimeSpan.FromSeconds(6.5)
+            Interval = _dismissDuration
         };
         _autoDismissTimer.Tick += (_, _) =>
         {
@@ -66,12 +58,58 @@ public partial class NotificationWindow : Window
         };
     }
 
+    private void ApplyTheme(string? accentColorHex, string? bgColorHex)
+    {
+        Color accentColor = Color.FromRgb(116, 168, 108); // Canopy Forest default
+
+        if (!string.IsNullOrWhiteSpace(accentColorHex))
+        {
+            try
+            {
+                accentColor = (Color)ColorConverter.ConvertFromString(accentColorHex.Trim());
+            }
+            catch { }
+        }
+
+        var accentBrush = new SolidColorBrush(accentColor);
+        accentBrush.Freeze();
+
+        var borderBrush = new SolidColorBrush(Color.FromArgb(90, accentColor.R, accentColor.G, accentColor.B));
+        borderBrush.Freeze();
+
+        var softBadgeBrush = new SolidColorBrush(Color.FromArgb(45, accentColor.R, accentColor.G, accentColor.B));
+        softBadgeBrush.Freeze();
+
+        var badgeBorderBrush = new SolidColorBrush(Color.FromArgb(110, accentColor.R, accentColor.G, accentColor.B));
+        badgeBorderBrush.Freeze();
+
+        NotificationPill.BorderBrush = borderBrush;
+        PillShadow.Color = accentColor;
+        IconBadge.Background = softBadgeBrush;
+        IconBadge.BorderBrush = badgeBorderBrush;
+        BellPath.Fill = accentBrush;
+        TitleText.Foreground = accentBrush;
+        CountdownBar.Background = accentBrush;
+
+        if (!string.IsNullOrWhiteSpace(bgColorHex))
+        {
+            try
+            {
+                var bg = (Color)ColorConverter.ConvertFromString(bgColorHex.Trim());
+                var bgBrush = new SolidColorBrush(Color.FromArgb(240, bg.R, bg.G, bg.B));
+                bgBrush.Freeze();
+                NotificationPill.Background = bgBrush;
+            }
+            catch { }
+        }
+    }
+
     /// <summary>
     /// Displays a standalone, always-on-top raindrop -> pill capsule notification that drops down from
     /// the screen's top bezel and stays above active applications without stealing focus.
     /// Works across any monitor resolution, aspect ratio, or DPI scale.
     /// </summary>
-    public static void ShowNotification(string message, string? title = "Canopy Reminder", string? accentColorHex = null)
+    public static void ShowNotification(string message, string? title = "Canopy Reminder", string? accentColorHex = null, string? bgColorHex = null)
     {
         Application.Current.Dispatcher.Invoke(() =>
         {
@@ -82,7 +120,7 @@ public partial class NotificationWindow : Window
                     s_current.Close();
                 }
 
-                var win = new NotificationWindow(message, title, accentColorHex);
+                var win = new NotificationWindow(message, title, accentColorHex, bgColorHex);
                 s_current = win;
                 win.Show();
             }
@@ -105,7 +143,7 @@ public partial class NotificationWindow : Window
         IntPtr hwnd = new WindowInteropHelper(this).Handle;
         if (hwnd == IntPtr.Zero) return;
 
-        // Apply WS_EX_TOOLWINDOW and WS_EX_NOACTIVATE so the notification never steals focus or taskbar slot
+        // Apply WS_EX_TOOLWINDOW and WS_EX_NOACTIVATE so notification never steals focus or taskbar slot
         long exStyle = Win32.GetWindowLongPtr(hwnd, Win32.GWL_EXSTYLE).ToInt64();
         exStyle |= Win32.WS_EX_TOOLWINDOW | Win32.WS_EX_NOACTIVATE;
         _ = Win32.SetWindowLongPtr(hwnd, Win32.GWL_EXSTYLE, new IntPtr(exStyle));
@@ -120,12 +158,12 @@ public partial class NotificationWindow : Window
     {
         CenterAtTopBezel();
         PlayRaindropToPillAnimation();
+        _dismissDueTime = DateTime.UtcNow.Add(_dismissDuration);
         _autoDismissTimer.Start();
     }
 
     private void CenterAtTopBezel()
     {
-        // 1. Resolve active monitor under cursor (or primary if cursor unavailable)
         Win32.RECT monitor = Win32.GetPrimaryMonitorBounds();
         if (Win32.GetCursorPos(out Win32.POINT cursor))
         {
@@ -137,7 +175,6 @@ public partial class NotificationWindow : Window
             }
         }
 
-        // 2. Resolve DPI scale for this window
         double scaleX = 1.0;
         double scaleY = 1.0;
         IntPtr hwnd = new WindowInteropHelper(this).Handle;
@@ -151,49 +188,68 @@ public partial class NotificationWindow : Window
             }
         }
 
-        // 3. Convert physical monitor coordinates to DIPs
         double monitorLeftDip = monitor.Left / scaleX;
         double monitorWidthDip = monitor.Width / scaleX;
         double monitorTopDip = monitor.Top / scaleY;
 
-        // 4. Exact horizontal center of monitor, flush with top bezel
         Left = monitorLeftDip + ((monitorWidthDip - Width) / 2.0);
         Top = monitorTopDip;
     }
 
     private void PlayRaindropToPillAnimation()
     {
-        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-        var bounce = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.22 };
+        var easeOut = new CubicEase { EasingMode = EasingMode.EaseOut };
 
-        // 1. Drop down from bezel as a circular droplet (Y: -50 -> 10)
+        // 1. Drop down from bezel as a pure liquid bead (Y: -70 -> 14). Bell icon is 100% hidden.
         var dropAnim = new DoubleAnimation
         {
-            From = -50,
-            To = 10,
-            Duration = TimeSpan.FromMilliseconds(240),
-            EasingFunction = ease
+            From = -70,
+            To = 14,
+            Duration = TimeSpan.FromMilliseconds(440),
+            EasingFunction = easeOut
         };
         PillTranslate.BeginAnimation(TranslateTransform.YProperty, dropAnim);
 
-        // 2. Expand width horizontally into a clean pill capsule (Width: 40 -> 360)
+        // 2. Zero-pause momentum transfer: begins bloom midway through drop (at 200ms)
         var expandWidth = new DoubleAnimation
         {
-            From = 40,
-            To = 360,
+            From = 48,
+            To = _targetWidth,
             BeginTime = TimeSpan.FromMilliseconds(200),
-            Duration = TimeSpan.FromMilliseconds(280),
-            EasingFunction = bounce
+            Duration = TimeSpan.FromMilliseconds(520),
+            EasingFunction = easeOut
         };
         NotificationPill.BeginAnimation(WidthProperty, expandWidth);
 
-        // 3. Fade in text and dismiss button
+        // 3. Reveal Bell Icon Badge & Content as pill reaches ~80% expansion (at 380ms)
+        var iconFade = new DoubleAnimation
+        {
+            From = 0.0,
+            To = 1.0,
+            BeginTime = TimeSpan.FromMilliseconds(380),
+            Duration = TimeSpan.FromMilliseconds(260),
+            EasingFunction = easeOut
+        };
+        IconBadge.BeginAnimation(OpacityProperty, iconFade);
+
+        var iconScaleAnim = new DoubleAnimation
+        {
+            From = 0.5,
+            To = 1.0,
+            BeginTime = TimeSpan.FromMilliseconds(380),
+            Duration = TimeSpan.FromMilliseconds(300),
+            EasingFunction = easeOut
+        };
+        IconScale.BeginAnimation(ScaleTransform.ScaleXProperty, iconScaleAnim);
+        IconScale.BeginAnimation(ScaleTransform.ScaleYProperty, iconScaleAnim);
+
         var textFade = new DoubleAnimation
         {
             From = 0.0,
             To = 1.0,
-            BeginTime = TimeSpan.FromMilliseconds(280),
-            Duration = TimeSpan.FromMilliseconds(200)
+            BeginTime = TimeSpan.FromMilliseconds(380),
+            Duration = TimeSpan.FromMilliseconds(260),
+            EasingFunction = easeOut
         };
         TextContainer.BeginAnimation(OpacityProperty, textFade);
 
@@ -201,44 +257,86 @@ public partial class NotificationWindow : Window
         {
             From = 0.0,
             To = 0.85,
-            BeginTime = TimeSpan.FromMilliseconds(320),
-            Duration = TimeSpan.FromMilliseconds(180)
+            BeginTime = TimeSpan.FromMilliseconds(420),
+            Duration = TimeSpan.FromMilliseconds(240),
+            EasingFunction = easeOut
         };
         DismissButton.BeginAnimation(OpacityProperty, btnFade);
+
+        // 4. Smooth countdown bar shrinking across the bottom via controllable Storyboard
+        var countdownAnim = new DoubleAnimation
+        {
+            From = _targetWidth,
+            To = 0.0,
+            BeginTime = TimeSpan.FromMilliseconds(420),
+            Duration = _dismissDuration,
+            FillBehavior = FillBehavior.HoldEnd
+        };
+        Storyboard.SetTarget(countdownAnim, CountdownBar);
+        Storyboard.SetTargetProperty(countdownAnim, new PropertyPath(FrameworkElement.WidthProperty));
+
+        _countdownStoryboard = new Storyboard();
+        _countdownStoryboard.Children.Add(countdownAnim);
+        _countdownStoryboard.Begin(this, isControllable: true);
     }
 
+    /// <summary>
+    /// Plays the exact symmetrical reverse animation:
+    /// Content fades out -> Capsule width smoothly shrinks back into 48x48 centered circular bead -> Bead retracts up into bezel.
+    /// Never turns into a rectangle.
+    /// </summary>
     private void DismissWithAnimation()
     {
         if (_isClosing) return;
         _isClosing = true;
         _autoDismissTimer.Stop();
+        _countdownStoryboard?.Stop(this);
 
-        var slideUp = new DoubleAnimation
-        {
-            To = -50,
-            Duration = TimeSpan.FromMilliseconds(200),
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
-        };
+        var easeOut = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var easeIn = new CubicEase { EasingMode = EasingMode.EaseIn };
+        var easeInOut = new CubicEase { EasingMode = EasingMode.EaseInOut };
 
-        var fadeOut = new DoubleAnimation
+        // Step 1: Content, icon, and countdown fade out first (140ms)
+        var fadeContent = new DoubleAnimation
         {
             To = 0.0,
-            Duration = TimeSpan.FromMilliseconds(200)
+            Duration = TimeSpan.FromMilliseconds(140),
+            EasingFunction = easeOut
+        };
+        IconBadge.BeginAnimation(OpacityProperty, fadeContent);
+        TextContainer.BeginAnimation(OpacityProperty, fadeContent);
+        DismissButton.BeginAnimation(OpacityProperty, fadeContent);
+        CountdownBar.BeginAnimation(OpacityProperty, fadeContent);
+
+        // Step 2: Pill smoothly collapses width back to 48 (starts at 120ms)
+        var collapseWidth = new DoubleAnimation
+        {
+            To = 48,
+            BeginTime = TimeSpan.FromMilliseconds(120),
+            Duration = TimeSpan.FromMilliseconds(360),
+            EasingFunction = easeInOut
+        };
+        NotificationPill.BeginAnimation(WidthProperty, collapseWidth);
+
+        // Step 3: Pure droplet bead retracts straight up into top bezel (starts at 460ms)
+        var retractAnim = new DoubleAnimation
+        {
+            To = -70,
+            BeginTime = TimeSpan.FromMilliseconds(460),
+            Duration = TimeSpan.FromMilliseconds(340),
+            EasingFunction = easeIn
         };
 
-        slideUp.Completed += (_, _) =>
+        retractAnim.Completed += (_, _) =>
         {
             try
             {
                 Close();
             }
-            catch
-            {
-            }
+            catch { }
         };
 
-        PillTranslate.BeginAnimation(TranslateTransform.YProperty, slideUp);
-        NotificationPill.BeginAnimation(OpacityProperty, fadeOut);
+        PillTranslate.BeginAnimation(TranslateTransform.YProperty, retractAnim);
     }
 
     private void OnDismissClick(object sender, RoutedEventArgs e)
@@ -249,14 +347,20 @@ public partial class NotificationWindow : Window
     private void OnMouseEnterPill(object sender, MouseEventArgs e)
     {
         _isHovered = true;
+        _autoDismissTimer.Stop();
+        _countdownStoryboard?.Pause(this);
     }
 
     private void OnMouseLeavePill(object sender, MouseEventArgs e)
     {
         _isHovered = false;
-        // Resume timer with a 2-second grace after user leaves
-        _autoDismissTimer.Stop();
-        _autoDismissTimer.Interval = TimeSpan.FromSeconds(2.0);
-        _autoDismissTimer.Start();
+        if (!_isClosing)
+        {
+            _countdownStoryboard?.Resume(this);
+            // Resume with at least 2.5 seconds grace
+            double remainingSeconds = Math.Max(2.5, (_dismissDueTime - DateTime.UtcNow).TotalSeconds);
+            _autoDismissTimer.Interval = TimeSpan.FromSeconds(remainingSeconds);
+            _autoDismissTimer.Start();
+        }
     }
 }

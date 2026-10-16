@@ -1,6 +1,6 @@
 using Microsoft.Win32;
 
-namespace CaelestiaWin.Services;
+namespace Canopy.Services;
 
 /// <summary>
 /// Stores the small set of host settings needed before WebView2 and its local storage are available.

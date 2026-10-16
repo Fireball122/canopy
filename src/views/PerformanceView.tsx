@@ -208,7 +208,7 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
   const gpuAvailable = stats.gpu_usage != null || stats.gpu_temp_c != null;
   const gpuTempC = stats.gpu_temp_c != null ? Math.round(stats.gpu_temp_c) : null;
   const gpuUsage = stats.gpu_usage != null ? Math.round(stats.gpu_usage) : 0;
-  const cpuTempC = Math.round(stats.cpu_temp_c || 41);
+  const cpuTempC = stats.cpu_temp_c != null ? Math.round(stats.cpu_temp_c) : null;
   const cpuUsage = Math.round(stats.cpu_usage || 0);
   const ramUsage = Math.round(stats.ram_usage || 0);
   const diskUsage = Math.round(stats.disk_usage || 0);
@@ -336,11 +336,11 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
         {/* Gauge 2: CPU (Outer = CPU Usage %, Inner = CPU Temp %) */}
         <ConcentricDualArcGauge
           outerPercent={cpuUsage}
-          innerPercent={Math.min(100, (cpuTempC / 100) * 100)}
+          innerPercent={cpuTempC !== null ? Math.min(100, (cpuTempC / 100) * 100) : 0}
           outerColor="var(--theme-accent, #cba6f7)"
           innerColor="#f9e2af"
-          centerValue={`${cpuTempC}°C`}
-          centerSublabel="CPU temp"
+          centerValue={cpuTempC !== null ? `${cpuTempC}°C` : `${cpuUsage}%`}
+          centerSublabel={cpuTempC !== null ? 'CPU temp' : 'CPU load'}
           pillText={`${cpuUsage}% Usage`}
           icon={
             <Cpu
@@ -547,7 +547,7 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
                 className="text-[10px] font-mono tabular-nums"
                 style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))' }}
               >
-                {cpuUsage}% Avg • {cpuTempC}°C
+                {cpuUsage}% Avg{cpuTempC !== null ? ` • ${cpuTempC}°C` : ''}
               </span>
             </div>
 

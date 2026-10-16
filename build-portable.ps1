@@ -1,6 +1,6 @@
 # build-portable.ps1 - Builds portable win-x64 ZIP package
 param(
-    [string]$Version = "1.0.1",
+    [string]$Version = "1.0.2",
     [string]$Configuration = "Release"
 )
 

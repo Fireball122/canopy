@@ -2,7 +2,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json.Serialization;
 
-namespace CaelestiaWin.Interop;
+namespace Canopy.Interop;
 
 /// <summary>
 /// A single physical display as reported by the shell's <c>IDesktopWallpaper</c> interface.
@@ -119,8 +119,9 @@ public sealed class DesktopWallpaperController : IDisposable
                 });
             }
         }
-        catch
+        catch (Exception ex)
         {
+            _ = ex; // COM GetMonitors iteration failed; return whatever was collected
         }
 
         return result;
@@ -228,16 +229,18 @@ public sealed class DesktopWallpaperController : IDisposable
                 if (wallpaper.SetWallpaper(monitor.Id, monitor.Path) >= 0)
                     continue;
             }
-            catch
+            catch (Exception ex)
             {
+                _ = ex; // COM SetWallpaper(monitorId) failed; fall through to null-id retry
             }
 
             try
             {
                 wallpaper.SetWallpaper(null, monitor.Path);
             }
-            catch
+            catch (Exception ex)
             {
+                _ = ex; // COM SetWallpaper(null) retry failed; skip this monitor
             }
         }
     }
@@ -297,8 +300,9 @@ public sealed class DesktopWallpaperController : IDisposable
                 label += $" · {rect.Width} × {rect.Height}";
             }
         }
-        catch
+        catch (Exception ex)
         {
+            _ = ex; // COM GetMonitorRECT failed; label omits resolution suffix
         }
 
         return label;
@@ -355,8 +359,9 @@ public sealed class DesktopWallpaperController : IDisposable
             if (Marshal.IsComObject(local))
                 Marshal.FinalReleaseComObject(local);
         }
-        catch
+        catch (Exception ex)
         {
+            _ = ex; // Marshal.FinalReleaseComObject failed; nothing recoverable to do
         }
     }
 

@@ -9,12 +9,12 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Management;
 using System.Windows.Threading;
-using CaelestiaWin.Interop;
-using CaelestiaWin.Services;
+using Canopy.Interop;
+using Canopy.Services;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Win32;
 
-namespace CaelestiaWin;
+namespace Canopy;
 
 public partial class MainWindow : Window
 {
@@ -37,6 +37,11 @@ public partial class MainWindow : Window
     private readonly AudioSessionController _audioSessions;
     private readonly DesktopWallpaperController _desktopWallpaper;
     private readonly DiagnosticsLog _log = new();
+    private static readonly string SettingsJsonPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "Canopy",
+        "settings.json");
+    private static readonly JsonSerializerOptions IndentedJsonOptions = new() { WriteIndented = true };
 
     private readonly DispatcherTimer _cursorPollTimer;
     private readonly DispatcherTimer _hideDebounceTimer;
@@ -44,6 +49,8 @@ public partial class MainWindow : Window
     private IntPtr _hwnd;
     private HwndSource? _hwndSource;
     private bool _isExpanded;
+    private Win32.RECT _expandedMonitor;
+    private Win32.RECT _lastProbedMonitor;
     private bool _webViewReady;
     private readonly bool _startExpanded;
     private volatile bool _isSuspending;
@@ -67,6 +74,8 @@ public partial class MainWindow : Window
     private bool _suspendWhenClosed = true;
     private bool _showPanelOnLaunch = true;
     private string _hotkey = "Win+`";
+    private string? _currentThemeAccent;
+    private string? _currentThemeBg;
 
     // Host-owned reminder scheduling: the renderer is suspended while the panel is parked, so
     // calendar alerts have to be timed natively to slide the panel down on their own.
@@ -89,8 +98,13 @@ public partial class MainWindow : Window
     /// </summary>
     private static readonly HashSet<string> NonGameProcessNames = new(StringComparer.OrdinalIgnoreCase)
     {
+        // Browsers
         "brave", "chrome", "msedge", "msedgewebview2", "firefox", "opera", "opera_gx", "vivaldi",
         "iexplore", "librewolf", "floorp", "waterfox", "zen", "arc", "thorium", "tor browser",
+        // Chat, Media & Desktop Apps (Electron / Chromium D3D composited)
+        "Discord", "DiscordPTB", "DiscordCanary", "Vesktop", "Slack", "Teams", "ms-teams",
+        "Spotify", "Code", "Cursor", "Notion", "Obsidian",
+        // Windows Shell & Terminals
         "explorer", "ApplicationFrameHost", "SearchHost", "ShellExperienceHost",
         "StartMenuExperienceHost", "TextInputHost", "Canopy", "dwm", "powershell", "pwsh", "cmd",
         "WindowsTerminal", "OpenConsole", "conhost", "taskmgr",
@@ -219,13 +233,24 @@ public partial class MainWindow : Window
                 if (dpi.DpiScaleX > 0) scaleX = dpi.DpiScaleX;
                 if (dpi.DpiScaleY > 0) scaleY = dpi.DpiScaleY;
             }
-            catch
+            catch (Exception ex)
             {
+                _log.WriteException("GetDpiScaleVisualTree", ex);
             }
         }
 
         int targetPhysicalHeight = (int)Math.Round(_customHeight * scaleY);
-        int targetPhysicalWidth = (int)Math.Round(_customWidth * scaleX);
+
+        // Cap to 48% of monitor height so the panel never dominates the screen at high DPI scaling
+        if (monitor.Height > 0)
+        {
+            int maxPhysicalHeight = (int)Math.Round(monitor.Height * 0.48);
+            if (targetPhysicalHeight > maxPhysicalHeight)
+                targetPhysicalHeight = maxPhysicalHeight;
+        }
+
+        // Preserve aspect ratio after any height clamping
+        int targetPhysicalWidth = (int)Math.Round(targetPhysicalHeight * (_customWidth / _customHeight));
         return (scaleX, scaleY, targetPhysicalWidth, targetPhysicalHeight);
     }
 
@@ -266,8 +291,9 @@ public partial class MainWindow : Window
         }
 
         Win32.RECT panelMonitor = GetPanelMonitor();
-        var (_, scaleY, physicalWidth, physicalHeight) = GetDpiScaleAndPhysicalSize(panelMonitor);
-        int cornerRadius = (int)Math.Round(24 * scaleY);
+        var (scaleX, scaleY, physicalWidth, physicalHeight) = GetDpiScaleAndPhysicalSize(panelMonitor);
+        double targetZoom = physicalWidth > 0 ? (double)physicalWidth / (scaleX * BaseDesignWidth) : 1.0;
+        int cornerRadius = (int)Math.Round(24.0 * scaleY * targetZoom);
 
         Win32.ApplyWindowRoundedRegion(_hwnd, physicalWidth, physicalHeight, cornerRadius);
         ApplyAdaptiveZoom(panelMonitor);
@@ -370,6 +396,47 @@ public partial class MainWindow : Window
                 "canopy.local",
                 distDir,
                 CoreWebView2HostResourceAccessKind.Allow);
+            string mascotDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Canopy",
+                "mascot");
+            try { Directory.CreateDirectory(mascotDir); } catch (Exception ex) { _ = ex; }
+
+            core.AddWebResourceRequestedFilter("https://canopy.local/mascot/*", CoreWebView2WebResourceContext.All);
+            core.WebResourceRequested += (sender, args) =>
+            {
+                try
+                {
+                    var uri = new Uri(args.Request.Uri);
+                    if (uri.AbsolutePath.StartsWith("/mascot/", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string filename = Path.GetFileName(uri.LocalPath);
+                        string mascotPath = Path.Combine(mascotDir, filename);
+                        if (File.Exists(mascotPath))
+                        {
+                            FileStream fs = File.OpenRead(mascotPath);
+                            string ext = Path.GetExtension(filename).ToLowerInvariant();
+                            string contentType = ext switch
+                            {
+                                ".gif" => "image/gif",
+                                ".webp" => "image/webp",
+                                ".png" => "image/png",
+                                ".jpg" or ".jpeg" => "image/jpeg",
+                                _ => "application/octet-stream"
+                            };
+                            args.Response = core.Environment.CreateWebResourceResponse(
+                                fs,
+                                200,
+                                "OK",
+                                $"Content-Type: {contentType}\r\nAccess-Control-Allow-Origin: *");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _log.WriteException("WebResourceRequested_Mascot", ex);
+                }
+            };
 
             core.NavigationStarting += (_, args) =>
             {
@@ -397,8 +464,9 @@ public partial class MainWindow : Window
                     Path.Combine(AppContext.BaseDirectory, "error.log"),
                     $"[{DateTime.Now:O}] WebView2 init error: {ex}\r\n");
             }
-            catch
+            catch (Exception logEx)
             {
+                _log.WriteException("WebViewInitErrorLog", logEx);
             }
 
             MessageBox.Show(
@@ -468,7 +536,7 @@ public partial class MainWindow : Window
                 return new
                 {
                     cpu_usage = (float)Math.Round(snap.CpuUsagePercent, 1),
-                    cpu_temp_c = (float)Math.Round(snap.CpuTempC, 1),
+                    cpu_temp_c = snap.CpuTempC is double cpuTemp ? (float?)Math.Round(cpuTemp, 1) : null,
                     cpu_name = snap.CpuName,
                     gpu_usage = snap.GpuUsagePercent is double gpuUsage ? (float?)Math.Round(gpuUsage, 1) : null,
                     gpu_temp_c = snap.GpuTempC is double gpuTemp ? (float?)Math.Round(gpuTemp, 1) : null,
@@ -606,13 +674,69 @@ public partial class MainWindow : Window
             {
                 string msg = "Canopy Notification: Raindrop -> Pill Capsule Alert";
                 string title = "Canopy Alert";
+                string? accent = null;
+                string? bg = null;
                 if (args.ValueKind == JsonValueKind.Object)
                 {
                     if (args.TryGetProperty("message", out JsonElement m)) msg = m.GetString() ?? msg;
                     if (args.TryGetProperty("title", out JsonElement t)) title = t.GetString() ?? title;
+                    if (args.TryGetProperty("accentColorHex", out JsonElement a)) accent = a.GetString();
+                    if (args.TryGetProperty("bgColorHex", out JsonElement b)) bg = b.GetString();
                 }
-                NotificationWindow.ShowNotification(msg, title);
+                NotificationWindow.ShowNotification(msg, title, accent ?? _currentThemeAccent, bg ?? _currentThemeBg);
                 return true;
+            }
+
+            case "get_settings_json":
+            {
+                if (File.Exists(SettingsJsonPath))
+                {
+                    string text = await File.ReadAllTextAsync(SettingsJsonPath);
+                    using var doc = JsonDocument.Parse(text);
+                    return doc.RootElement.Clone();
+                }
+                return null;
+            }
+
+            case "save_settings_json":
+            {
+                string dir = Path.GetDirectoryName(SettingsJsonPath)!;
+                if (!Directory.Exists(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+                string json = JsonSerializer.Serialize(args, IndentedJsonOptions);
+                await File.WriteAllTextAsync(SettingsJsonPath, json);
+                return true;
+            }
+
+            case "upload_mascot":
+            {
+                if (args.ValueKind == JsonValueKind.Object &&
+                    args.TryGetProperty("data_base64", out JsonElement b64El) &&
+                    args.TryGetProperty("filename", out JsonElement nameEl))
+                {
+                    string filename = nameEl.GetString() ?? "custom_mascot.gif";
+                    filename = Path.GetFileName(filename);
+                    if (string.IsNullOrWhiteSpace(filename)) filename = "custom_mascot.gif";
+
+                    string b64 = b64El.GetString() ?? string.Empty;
+                    if (b64.Contains(','))
+                    {
+                        b64 = b64[(b64.IndexOf(',') + 1)..];
+                    }
+
+                    byte[] fileBytes = Convert.FromBase64String(b64);
+                    string targetDir = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "Canopy",
+                        "mascot");
+                    Directory.CreateDirectory(targetDir);
+                    string targetPath = Path.Combine(targetDir, filename);
+                    await File.WriteAllBytesAsync(targetPath, fileBytes);
+                    return new { url = $"https://canopy.local/mascot/{filename}", path = targetPath };
+                }
+                return null;
             }
 
             case "set_host_config":
@@ -658,6 +782,7 @@ public partial class MainWindow : Window
                         volume = Math.Round(session.VolumePercent),
                         muted = session.Muted,
                         is_active = session.IsActive,
+                        icon_data_url = session.IconDataUrl,
                     })
                     .ToList();
 
@@ -1015,8 +1140,9 @@ public partial class MainWindow : Window
         }
     }
 
-    private static int QueryHardwareBrightness()
+    private int QueryHardwareBrightness()
     {
+        // 1. WMI path — works on laptops / internal panels
         try
         {
             using var searcher = new ManagementObjectSearcher(@"root\WMI", "SELECT CurrentBrightness FROM WmiMonitorBrightness");
@@ -1029,16 +1155,44 @@ public partial class MainWindow : Window
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
+            _log.WriteException("WmiBrightnessQuery", ex);
         }
 
-        return 80;
-    }
-    private static CancellationTokenSource? _brightnessCts;
-    private static readonly object _brightnessLock = new();
+        // 2. DDC/CI fallback — works on external monitors connected via DisplayPort / HDMI
+        if (_hwnd != IntPtr.Zero)
+        {
+            IntPtr hMonitor = Win32.MonitorFromWindow(_hwnd, Win32.MONITOR_DEFAULTTONEAREST);
+            if (Win32.GetNumberOfPhysicalMonitorsFromHMONITOR(hMonitor, out uint count) && count > 0)
+            {
+                var monitors = new Win32.PHYSICAL_MONITOR[count];
+                if (Win32.GetPhysicalMonitorsFromHMONITOR(hMonitor, count, monitors))
+                {
+                    try
+                    {
+                        if (Win32.GetMonitorBrightness(monitors[0].hPhysicalMonitor, out _, out uint current, out _))
+                            return (int)current;
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.WriteException("DdcCiBrightnessQuery", ex);
+                    }
+                    finally
+                    {
+                        Win32.DestroyPhysicalMonitors(count, monitors);
+                    }
+                }
+            }
+        }
 
-    private static void QueueHardwareBrightness(int level)
+        return 80; // safe default
+    }
+
+    private CancellationTokenSource? _brightnessCts;
+    private readonly object _brightnessLock = new();
+
+    private void QueueHardwareBrightness(int level)
     {
         lock (_brightnessLock)
         {
@@ -1064,9 +1218,9 @@ public partial class MainWindow : Window
         }
     }
 
-
-    private static void ApplyHardwareBrightness(int level)
+    private void ApplyHardwareBrightness(int level)
     {
+        // 1. WMI path
         try
         {
             using var searcher = new ManagementObjectSearcher(@"root\WMI", "SELECT * FROM WmiMonitorBrightnessMethods");
@@ -1076,11 +1230,36 @@ public partial class MainWindow : Window
                 using (obj)
                 {
                     obj.InvokeMethod("WmiSetBrightness", new object[] { 1, (byte)Math.Clamp(level, 0, 100) });
+                    return; // WMI succeeded; skip DDC/CI
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
+            _log.WriteException("WmiBrightnessApply", ex);
+        }
+
+        // 2. DDC/CI fallback
+        if (_hwnd == IntPtr.Zero) return;
+        IntPtr hMonitor = Win32.MonitorFromWindow(_hwnd, Win32.MONITOR_DEFAULTTONEAREST);
+        if (Win32.GetNumberOfPhysicalMonitorsFromHMONITOR(hMonitor, out uint count) && count > 0)
+        {
+            var monitors = new Win32.PHYSICAL_MONITOR[count];
+            if (Win32.GetPhysicalMonitorsFromHMONITOR(hMonitor, count, monitors))
+            {
+                try
+                {
+                    Win32.SetMonitorBrightness(monitors[0].hPhysicalMonitor, (uint)Math.Clamp(level, 0, 100));
+                }
+                catch (Exception ex)
+                {
+                    _log.WriteException("DdcCiBrightnessApply", ex);
+                }
+                finally
+                {
+                    Win32.DestroyPhysicalMonitors(count, monitors);
+                }
+            }
         }
     }
 
@@ -1139,21 +1318,41 @@ public partial class MainWindow : Window
 
         _ = Win32.UnregisterHotKey(_hwnd, HotkeyIdToggle);
 
-        if (!Win32.TryParseHotkey(_hotkey, out uint modifiers, out uint virtualKey))
+        if (TryRegisterHotkey(_hotkey))
         {
-            _log.Write($"hotkey '{_hotkey}' could not be parsed");
-            EmitFrontendEvent("hotkey-failed", new { hotkey = _hotkey });
+            _log.Write($"hotkey '{_hotkey}' registered");
             return;
         }
 
-        if (!Win32.RegisterHotKey(_hwnd, HotkeyIdToggle, modifiers | Win32.MOD_NOREPEAT, virtualKey))
+        _log.Write($"primary hotkey '{_hotkey}' failed; attempting fallback 'Win+Shift+Space'");
+        if (TryRegisterHotkey("Win+Shift+Space"))
         {
-            _log.Write($"hotkey '{_hotkey}' was rejected (already owned by another application)");
-            EmitFrontendEvent("hotkey-failed", new { hotkey = _hotkey });
+            _hotkey = "Win+Shift+Space";
+            _log.Write("fallback hotkey 'Win+Shift+Space' registered");
+            EmitFrontendEvent("hotkey-fallback", new { hotkey = _hotkey });
             return;
         }
 
-        _log.Write($"hotkey '{_hotkey}' registered");
+        _log.Write("secondary fallback hotkey 'Alt+Space' attempting");
+        if (TryRegisterHotkey("Alt+Space"))
+        {
+            _hotkey = "Alt+Space";
+            _log.Write("fallback hotkey 'Alt+Space' registered");
+            EmitFrontendEvent("hotkey-fallback", new { hotkey = _hotkey });
+            return;
+        }
+
+        _log.Write("all hotkey registrations failed or were rejected by Windows");
+        EmitFrontendEvent("hotkey-failed", new { hotkey = _hotkey });
+    }
+
+    private bool TryRegisterHotkey(string? hotkey)
+    {
+        if (!Win32.TryParseHotkey(hotkey, out uint modifiers, out uint virtualKey))
+        {
+            return false;
+        }
+        return Win32.RegisterHotKey(_hwnd, HotkeyIdToggle, modifiers | Win32.MOD_NOREPEAT, virtualKey);
     }
 
     private void OnMasterVolumeChanged(object? sender, AudioVolumeStateChangedEventArgs e)
@@ -1313,6 +1512,16 @@ public partial class MainWindow : Window
             _hotkey = hotkey;
             ApplyHotkeyFromSettings();
         }
+
+        if (TryGetString(args, "themeAccent", out string themeAccent) && !string.IsNullOrWhiteSpace(themeAccent))
+        {
+            _currentThemeAccent = themeAccent;
+        }
+
+        if (TryGetString(args, "themeBg", out string themeBg) && !string.IsNullOrWhiteSpace(themeBg))
+        {
+            _currentThemeBg = themeBg;
+        }
     }
 
     private object BuildHostConfigPayload() => new
@@ -1381,6 +1590,17 @@ public partial class MainWindow : Window
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        if ((uint)msg == Win32.WM_TASKBARCREATED)
+        {
+            _log.Write("WM_TASKBARCREATED received (explorer restarted); recreating tray icon");
+            // The shell rebuilt the notification area, so the old icon handle must be released here:
+            // InitializeTrayIcon would otherwise overwrite the reference and leak the GDI handle.
+            _trayIconObj?.Dispose();
+            _trayIconObj = null;
+            _trayIconCreated = false;
+            InitializeTrayIcon();
+        }
+
         if (msg == Win32.WM_HOTKEY)
         {
             if (wParam.ToInt32() == HotkeyIdToggle)
@@ -1702,6 +1922,11 @@ public partial class MainWindow : Window
         {
             mi.rcMonitor = monitor;
         }
+        // Only suppress if the fullscreen window is on the SAME monitor the cursor is hovering
+        if (!IsSameMonitor(mi.rcMonitor, monitor))
+        {
+            return false;
+        }
 
         // True borderless fullscreen game or video covers or exceeds the entire rcMonitor bounds
         return fgRect.Left <= mi.rcMonitor.Left &&
@@ -1761,7 +1986,7 @@ public partial class MainWindow : Window
         int state = Win32.QueryUserNotificationState();
         return state switch
         {
-            Win32.QUNS_RUNNING_D3D_FULL_SCREEN => _pauseInFullscreen && !nonGameForeground,
+            Win32.QUNS_RUNNING_D3D_FULL_SCREEN => _pauseInFullscreen && !nonGameForeground && IsForegroundWindowFullscreen(currentMonitor),
             Win32.QUNS_PRESENTATION_MODE => _pauseInPresentation,
             // For QUNS_BUSY, only suppress if the foreground window is truly covering rcMonitor
             Win32.QUNS_BUSY => _pauseInFullscreen && !nonGameForeground && IsForegroundWindowFullscreen(currentMonitor),
@@ -1863,7 +2088,7 @@ public partial class MainWindow : Window
     private void ShowReminder(HostReminder reminder)
     {
         _log.Write($"reminder fired: {reminder.Text}");
-        NotificationWindow.ShowNotification(reminder.Text, "Canopy Reminder");
+        NotificationWindow.ShowNotification(reminder.Text, "Canopy Reminder", _currentThemeAccent, _currentThemeBg);
         if (_isExpanded)
         {
             EmitFrontendEvent("canopy:notification", new
@@ -1909,8 +2134,11 @@ public partial class MainWindow : Window
         bool inTopTriggerZone;
         if (!_isExpanded)
         {
-            // Collapsed: tight bezel catch zone (within 2 physical pixels of top) to prevent collisions with maximized browser tabs
-            bool atBezelEdge = cursor.Y >= (cursorMonitor.Top - 10) && cursor.Y <= (cursorMonitor.Top + 2);
+            // Collapsed: tight bezel catch zone scaled by monitor DPI so it stays reachable at 4K/200%
+            uint dpi = _hwnd != IntPtr.Zero ? Win32.GetDpiForWindow(_hwnd) : 96;
+            double scaleY = dpi > 0 ? dpi / 96.0 : 1.0;
+            int scaledTriggerMargin = (int)Math.Round(3.0 * scaleY);
+            bool atBezelEdge = cursor.Y >= (cursorMonitor.Top - 10) && cursor.Y <= (cursorMonitor.Top + Math.Max(2, scaledTriggerMargin));
             bool notStackedAbove = !HasStackedMonitorAbove(cursor.X, cursorMonitor.Top);
             inTopTriggerZone = scopeAllows && atBezelEdge && notStackedAbove && Math.Abs(cursor.X - centerX) <= (effectiveTriggerWidth / 2);
         }
@@ -1920,18 +2148,20 @@ public partial class MainWindow : Window
             bool inTriggerBand = cursor.Y >= (cursorMonitor.Top - 10) && cursor.Y <= (cursorMonitor.Top + triggerHeight);
             inTopTriggerZone = scopeAllows && inTriggerBand && Math.Abs(cursor.X - centerX) <= (effectiveTriggerWidth / 2);
         }
+        // If user set panelMonitorMode to "primary" but the primary monitor has a fullscreen game running,
+        // automatically fall back to cursorMonitor so the panel can open on the non-gaming screen.
         Win32.RECT panelTarget = string.Equals(_panelMonitorMode, "primary", StringComparison.OrdinalIgnoreCase)
-            ? primaryMonitor
+            ? (ShouldSuppressTrigger(primaryMonitor) ? cursorMonitor : primaryMonitor)
             : cursorMonitor;
 
         if (!_isExpanded)
         {
-            // Re-probe a few times per second rather than on every tick.
-            if (_fullscreenProbeCounter++ % 8 == 0)
+            bool monitorChanged = !IsSameMonitor(panelTarget, _lastProbedMonitor);
+            if (monitorChanged || inTopTriggerZone || _fullscreenProbeCounter++ % 8 == 0)
             {
-                _fullscreenAppActive = ShouldSuppressTrigger(cursorMonitor);
+                _lastProbedMonitor = panelTarget;
+                _fullscreenAppActive = ShouldSuppressTrigger(panelTarget);
             }
-
             // Never drop the panel over a game, during quiet hours, or out of scope — the hotkey and
             // the tray menu still open it on demand.
             if (!_topHoverTriggerEnabled || _fullscreenAppActive || !inTopTriggerZone)
@@ -2035,6 +2265,7 @@ public partial class MainWindow : Window
     }
     public void ExpandPanel(Win32.RECT monitor)
     {
+        _expandedMonitor = monitor;
         StopSlideAnimation();
         _cursorPollTimer.Interval = TimeSpan.FromMilliseconds(25);
         Win32.SetClickThrough(_hwnd, clickThrough: false);
@@ -2048,7 +2279,7 @@ public partial class MainWindow : Window
         bool wasExpanded = _isExpanded;
         _isExpanded = true;
 
-        SlideTo(expanded: true, monitor);
+        SlideTo(expanded: true, _expandedMonitor);
 
         if (!wasExpanded)
         {
@@ -2073,7 +2304,9 @@ public partial class MainWindow : Window
         // Park less aggressively once hidden: the trigger only needs coarse sampling when closed.
         _cursorPollTimer.Interval = TimeSpan.FromMilliseconds(60);
 
-        SlideTo(expanded: false, GetPanelMonitor());
+        // Collapse on the exact monitor where the panel is currently open
+        Win32.RECT targetMonitor = _expandedMonitor.Width > 0 ? _expandedMonitor : GetPanelMonitor();
+        SlideTo(expanded: false, targetMonitor);
         _log.Write("collapse");
 
         EmitFrontendEvent("canopy:set-open", false);
@@ -2120,8 +2353,9 @@ public partial class MainWindow : Window
                     _trayIconObj = new System.Drawing.Icon(icoPath, 32, 32);
                     hIcon = _trayIconObj.Handle;
                 }
-                catch
+                catch (Exception ex)
                 {
+                    _log.WriteException("TrayIconLoad", ex);
                 }
             }
             if (hIcon == IntPtr.Zero)
@@ -2148,8 +2382,9 @@ public partial class MainWindow : Window
                 _log.Write("tray icon registration failed");
             }
         }
-        catch
+        catch (Exception ex)
         {
+            _log.WriteException(nameof(InitializeTrayIcon), ex);
         }
     }
 
@@ -2161,8 +2396,9 @@ public partial class MainWindow : Window
             {
                 Win32.Shell_NotifyIcon(Win32.NIM_DELETE, ref _trayData);
             }
-            catch
+            catch (Exception ex)
             {
+                _log.WriteException("TrayIconNimDelete", ex);
             }
             _trayIconCreated = false;
             try
@@ -2170,8 +2406,9 @@ public partial class MainWindow : Window
                 _trayIconObj?.Dispose();
                 _trayIconObj = null;
             }
-            catch
+            catch (Exception ex)
             {
+                _log.WriteException("TrayIconDispose", ex);
             }
         }
     }

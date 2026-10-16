@@ -1,6 +1,6 @@
 using System.IO;
 
-namespace CaelestiaWin.Services;
+namespace Canopy.Services;
 
 /// <summary>
 /// Append-only diagnostic log for the windowed host, which has no console.
@@ -11,7 +11,9 @@ public sealed class DiagnosticsLog
 {
     private const long MaxBytes = 2L * 1024 * 1024;
 
-    private readonly object _gate = new();
+    // Process-wide lock: every logger instance appends to the same file, so a per-instance
+    // gate would let two writers interleave mid-line.
+    private static readonly object _gate = new();
     private readonly string _filePath;
 
     public DiagnosticsLog()

@@ -1,15 +1,20 @@
 @echo off
 setlocal
-set "CANOPY_DIR=%LOCALAPPDATA%\Canopy"
-set "CANOPY_EXE=%CANOPY_DIR%\Canopy.exe"
-
-if not exist "%CANOPY_EXE%" (
-    echo [ERROR] Canopy.exe not found at %CANOPY_EXE%
-    echo Please make sure Canopy is installed/published.
-    pause
-    exit /b 1
+if exist "%~dp0Canopy.exe" (
+    cd /d "%~dp0"
+    start "" "Canopy.exe" --expand
+    exit /b 0
 )
-
-cd /d "%CANOPY_DIR%"
-start "" "%CANOPY_EXE%" --expand
-exit /b 0
+if exist "%LOCALAPPDATA%\Programs\Canopy\Canopy.exe" (
+    cd /d "%LOCALAPPDATA%\Programs\Canopy"
+    start "" "Canopy.exe" --expand
+    exit /b 0
+)
+if exist "%LOCALAPPDATA%\Canopy\Canopy.exe" (
+    cd /d "%LOCALAPPDATA%\Canopy"
+    start "" "Canopy.exe" --expand
+    exit /b 0
+)
+echo [ERROR] Canopy.exe not found.
+pause
+exit /b 1

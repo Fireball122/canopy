@@ -1,6 +1,6 @@
 import type React from 'react';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { setHostConfig } from '../services/hostBridge';
+import { getSettingsJson, saveSettingsJson, setHostConfig } from '../services/hostBridge';
 
 export type TabId =
   | 'dashboard'
@@ -207,6 +207,33 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     applyGlassCssVariables(initial.glassBlurStrength, initial.glassOpacity);
     return initial;
   });
+  const [hydratedFromHost, setHydratedFromHost] = useState(false);
+
+  // The host copy at %LOCALAPPDATA%\Canopy\settings.json is the durable store; the WebView2
+  // localStorage copy is only a fast cache. Read the host file first — writing it before this
+  // resolves would overwrite good settings with a stale (or cleared) localStorage copy.
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const hostSettings = await getSettingsJson<Partial<CanopySettings>>();
+        if (active && hostSettings && typeof hostSettings === 'object') {
+          setSettings((prev) => {
+            const merged: CanopySettings = { ...prev, ...hostSettings };
+            applyGlassCssVariables(merged.glassBlurStrength, merged.glassOpacity);
+            return merged;
+          });
+        }
+      } catch {
+        // Unreadable host file (first run, permissions): keep the localStorage copy.
+      } finally {
+        if (active) setHydratedFromHost(true);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     applyGlassCssVariables(settings.glassBlurStrength, settings.glassOpacity);
@@ -217,7 +244,9 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } catch {
       // Ignore storage quota errors
     }
-  }, [settings]);
+    if (!hydratedFromHost) return;
+    void saveSettingsJson(settings as unknown as Record<string, unknown>).catch(() => undefined);
+  }, [settings, hydratedFromHost]);
 
   // Push every host-relevant setting to the native host in one message.
   useEffect(() => {

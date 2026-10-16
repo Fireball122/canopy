@@ -1,3 +1,4 @@
+using System.Text;
 using System.Diagnostics;
 using System.IO;
 using System.Management;
@@ -6,10 +7,10 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media.Imaging;
-using CaelestiaWin.Interop;
+using Canopy.Interop;
 using Microsoft.Win32;
 
-namespace CaelestiaWin.Services;
+namespace Canopy.Services;
 
 public sealed record ProcessSnapshot(
     string name,
@@ -27,7 +28,7 @@ public sealed record InstalledAppSnapshot(
 
 public readonly record struct SystemTelemetrySnapshot(
     double CpuUsagePercent,
-    double CpuTempC,
+    double? CpuTempC,
     double? GpuUsagePercent,
     double? GpuTempC,
     double[] CoreUsages,
@@ -69,7 +70,7 @@ public sealed class SystemMonitorService : IDisposable
 
     private double[] _cachedCoreUsages;
     private IReadOnlyList<ProcessSnapshot> _cachedTopProcesses = [];
-    private double _cachedCpuTempC = 41.0;
+    private double? _cachedCpuTempC;
     private long _lastHeavySampleTick;
     private int _heavySampleInFlight;
     private long _prevNetBytesRecv;
@@ -81,9 +82,18 @@ public sealed class SystemMonitorService : IDisposable
     private readonly Dictionary<int, (TimeSpan TotalTime, long SampleTick)> _processCpuHistory = new();
     private double? _cachedGpuUsage;
     private double? _cachedGpuTempC;
+    // Volatile snapshot: built once on a background task, read on the sampling thread. Assigning a
+    // fully-populated list means readers never observe a half-filled collection.
+    private volatile List<PerformanceCounter> _gpuCounters = [];
     private static string? _staticGpuName;
     private static string? _staticCpuName;
     private static readonly string? NvidiaSmiPath = FindNvidiaSmi();
+
+    /// <summary>
+    /// Shares the host's process-wide logger so suppressed telemetry failures are recorded
+    /// (and stay no-ops) under the same diagnosticLogging switch as the rest of the app.
+    /// </summary>
+    private static readonly DiagnosticsLog Log = new();
 
     private static string? FindNvidiaSmi()
     {
@@ -102,6 +112,7 @@ public sealed class SystemMonitorService : IDisposable
         PrimeSystemTimes();
         PrimeNetworkBytes();
         _ = Task.Run(InitializePerformanceCounters);
+        _ = Task.Run(InitializeGpuCounter);
         _ = Task.Run(RefreshHeavyTelemetry);
     }
 
@@ -159,6 +170,33 @@ public sealed class SystemMonitorService : IDisposable
             _countersReady = false;
         }
     }
+    private void InitializeGpuCounter()
+    {
+        try
+        {
+            var category = new PerformanceCounterCategory("GPU Engine");
+            var counters = new List<PerformanceCounter>();
+            foreach (string instance in category.GetInstanceNames())
+            {
+                if (!instance.EndsWith("engtype_3D", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var counter = new PerformanceCounter("GPU Engine", "Utilization Percentage", instance, true);
+                _ = counter.NextValue(); // prime: the first read of a counter is always 0
+                counters.Add(counter);
+            }
+
+            if (_disposed)
+            {
+                foreach (var counter in counters) counter.Dispose();
+                return;
+            }
+
+            _gpuCounters = counters;
+        }
+        catch (Exception ex) { Log.WriteException(nameof(InitializeGpuCounter), ex); }
+    }
+
 
     private void PrimeSystemTimes()
     {
@@ -196,8 +234,9 @@ public sealed class SystemMonitorService : IDisposable
                 tx += stats.BytesSent;
             }
         }
-        catch
+        catch (Exception ex)
         {
+            Log.WriteException(nameof(ReadTotalNetworkBytes), ex);
         }
         return (rx, tx);
     }
@@ -253,7 +292,7 @@ public sealed class SystemMonitorService : IDisposable
         }
 
         double[] coreUsages = SampleCoreUsages(cpuPercent);
-        double cpuTemp = Math.Clamp(_cachedCpuTempC + (cpuPercent * 0.18), 36.0, 92.0);
+        double? cpuTemp = _cachedCpuTempC is double t ? Math.Round(t, 1) : null;
         long uptimeSecs = Environment.TickCount64 / 1000L;
         long hours = uptimeSecs / 3600L;
         long minutes = (uptimeSecs % 3600L) / 60L;
@@ -264,7 +303,7 @@ public sealed class SystemMonitorService : IDisposable
 
         var snapshot = new SystemTelemetrySnapshot(
             CpuUsagePercent: cpuPercent,
-            CpuTempC: Math.Round(cpuTemp, 1),
+            CpuTempC: cpuTemp,
             GpuUsagePercent: _cachedGpuUsage,
             GpuTempC: _cachedGpuTempC,
             CoreUsages: coreUsages,
@@ -279,7 +318,7 @@ public sealed class SystemMonitorService : IDisposable
             DiskTotalGb: diskTotalGb,
             UptimeFormatted: uptimeFormatted,
             Hostname: hostname,
-            OsName: "Windows 11",
+            OsName: Environment.OSVersion.Version.Build >= 22000 ? "Windows 11" : "Windows 10",
             Username: username,
             GpuName: _staticGpuName,
             CpuName: _staticCpuName);
@@ -302,8 +341,9 @@ public sealed class SystemMonitorService : IDisposable
                 _cachedCoreUsages = values;
                 return values;
             }
-            catch
+            catch (Exception ex)
             {
+                Log.WriteException(nameof(SampleCoreUsages), ex);
             }
         }
 
@@ -311,8 +351,7 @@ public sealed class SystemMonitorService : IDisposable
         var fallback = new double[count];
         for (int i = 0; i < count; i++)
         {
-            double wave = Math.Sin((Environment.TickCount64 / 600.0) + i * 0.9) * 6.5;
-            fallback[i] = Math.Round(Math.Clamp(overallCpu + wave, 1.0, 100.0), 1);
+            fallback[i] = Math.Round(Math.Clamp(overallCpu, 1.0, 100.0), 1);
         }
         return fallback;
     }
@@ -362,8 +401,9 @@ public sealed class SystemMonitorService : IDisposable
 
                     top.Add(new ProcessSnapshot(name, p.Id, cpuPercent, memMb));
                 }
-                catch
+                catch (Exception ex)
                 {
+                    Log.WriteException("ProcessSample", ex);
                 }
                 finally
                 {
@@ -383,8 +423,9 @@ public sealed class SystemMonitorService : IDisposable
                 .Take(5)
                 .ToList();
         }
-        catch
+        catch (Exception ex)
         {
+            Log.WriteException(nameof(RefreshHeavyTelemetry), ex);
         }
 
         try
@@ -405,51 +446,35 @@ public sealed class SystemMonitorService : IDisposable
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
-            _cachedCpuTempC = 39.0;
+            _ = ex;
+            _cachedCpuTempC = null;
         }
         RefreshGpuTelemetry();
     }
 
     private void RefreshGpuTelemetry()
     {
-        if (NvidiaSmiPath is not null)
+        // NVML is the only non-spawning source of GPU temperature; null when no NVIDIA driver is present.
+        _cachedGpuTempC = NvmlGpu.TryReadTemperatureCelsius();
+
+        List<PerformanceCounter> gpuCounters = _gpuCounters;
+        if (gpuCounters.Count > 0)
         {
             try
             {
-                var psi = new ProcessStartInfo(NvidiaSmiPath, "--query-gpu=utilization.gpu,temperature.gpu,name --format=csv,noheader,nounits")
+                double total = 0.0;
+                foreach (PerformanceCounter counter in gpuCounters)
                 {
-                    RedirectStandardOutput = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-                using var proc = Process.Start(psi);
-                if (proc is not null)
-                {
-                    string output = proc.StandardOutput.ReadToEnd();
-                    proc.WaitForExit();
-                    if (!string.IsNullOrWhiteSpace(output))
-                    {
-                        var parts = output.Split(',', StringSplitOptions.TrimEntries);
-                        if (parts.Length >= 2 && double.TryParse(parts[0], System.Globalization.CultureInfo.InvariantCulture, out double usage))
-                        {
-                            _cachedGpuUsage = Math.Clamp(usage, 0.0, 100.0);
-                        }
-                        if (parts.Length >= 2 && double.TryParse(parts[1], System.Globalization.CultureInfo.InvariantCulture, out double temp))
-                        {
-                            _cachedGpuTempC = temp;
-                        }
-                        if (parts.Length >= 3 && !string.IsNullOrWhiteSpace(parts[2]))
-                        {
-                            _staticGpuName = parts[2];
-                        }
-                        return;
-                    }
+                    total += counter.NextValue();
                 }
+                _cachedGpuUsage = Math.Clamp(Math.Round(total, 1), 0.0, 100.0);
+                return;
             }
-            catch
+            catch (Exception ex)
             {
+                Log.WriteException(nameof(RefreshGpuTelemetry), ex);
             }
         }
 
@@ -475,8 +500,9 @@ public sealed class SystemMonitorService : IDisposable
                 _cachedGpuUsage = Math.Clamp(sum, 0.0, 100.0);
             }
         }
-        catch
+        catch (Exception ex)
         {
+            Log.WriteException("GpuUtilisationQuery", ex);
         }
 
         if (string.IsNullOrWhiteSpace(_staticGpuName))
@@ -498,8 +524,9 @@ public sealed class SystemMonitorService : IDisposable
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                Log.WriteException("GpuNameQuery", ex);
             }
         }
 
@@ -518,8 +545,9 @@ public sealed class SystemMonitorService : IDisposable
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                Log.WriteException("CpuNameQuery", ex);
             }
         }
     }
@@ -709,13 +737,11 @@ public sealed class SystemMonitorService : IDisposable
                             path: lnk,
                             description: desc,
                             icon_data_url: iconDataUrl));
-
-                        if (apps.Count >= 42)
-                            break;
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
+                    Log.WriteException("StartMenuScan", ex);
                 }
             }
 
@@ -841,8 +867,9 @@ public sealed class SystemMonitorService : IDisposable
                 return (usedGb, totalGb, percent);
             }
         }
-        catch
+        catch (Exception ex)
         {
+            Log.WriteException(nameof(SampleDisk), ex);
         }
 
         return (184.0, 512.0, 35.9);
@@ -858,8 +885,9 @@ public sealed class SystemMonitorService : IDisposable
                 _lastCpuPercent = Math.Clamp(raw, 0f, 100f);
                 return _lastCpuPercent;
             }
-            catch
+            catch (Exception ex)
             {
+                Log.WriteException(nameof(SampleCpuPercent), ex);
             }
         }
 
@@ -932,7 +960,7 @@ public sealed class SystemMonitorService : IDisposable
                 return _staticCpuName;
             }
         }
-        catch { }
+        catch (Exception ex) { _ = ex; /* CPU name registry read failed; fallback string used */ }
         return "AMD/Intel x64 Processor";
     }
 
@@ -961,7 +989,7 @@ public sealed class SystemMonitorService : IDisposable
                     }
                 }
             }
-            catch { }
+            catch (Exception ex) { _ = ex; /* nvidia-smi GPU name query failed; fall through to WMI registry */ }
         }
 
         try
@@ -986,7 +1014,7 @@ public sealed class SystemMonitorService : IDisposable
                 }
             }
         }
-        catch { }
+        catch (Exception ex) { _ = ex; /* WMI registry GPU name walk failed; fallback string used */ }
 
         return "DirectX 3D Video Controller";
     }
@@ -1003,11 +1031,11 @@ public sealed class SystemMonitorService : IDisposable
         string host = Environment.MachineName;
         string sep = new string('-', Math.Max(12, user.Length + host.Length + 1));
         char e = (char)27;
-
+        string osName = Environment.OSVersion.Version.Build >= 22000 ? "Windows 11" : "Windows 10";
         return $"""
                  ______        {user}@{host}
                 /      \       {sep}
-               /   /\   \      OS      : Windows 11 ({Environment.OSVersion.Version.Build}) x64
+               /   /\   \      OS      : {osName} ({Environment.OSVersion.Version.Build}) x64
               /   /  \   \     Host    : {host} (Canopy Control Center)
              /   /    \   \    Uptime  : {hours}h {minutes}m
             /   /  /\  \   \   CPU     : {cpu} ({Environment.ProcessorCount} threads)
@@ -1034,10 +1062,13 @@ public sealed class SystemMonitorService : IDisposable
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            byte[] bytes = Encoding.Unicode.GetBytes(trimmed);
+            string encoded = Convert.ToBase64String(bytes);
+
             var psi = new ProcessStartInfo
             {
                 FileName = "powershell.exe",
-                Arguments = $"-NoProfile -NonInteractive -Command \"{trimmed.Replace("\"", "\\\"")}\"",
+                Arguments = $"-NoProfile -NonInteractive -EncodedCommand {encoded}",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -1067,12 +1098,12 @@ public sealed class SystemMonitorService : IDisposable
         }
         catch (OperationCanceledException)
         {
-            try { proc?.Kill(entireProcessTree: true); } catch { }
+            try { proc?.Kill(entireProcessTree: true); } catch (Exception killEx) { Log.WriteException("TerminalTimeoutKill", killEx); }
             return "Error: Command timed out after 8 seconds.";
         }
         catch (Exception ex)
         {
-            try { proc?.Kill(entireProcessTree: true); } catch { }
+            try { proc?.Kill(entireProcessTree: true); } catch (Exception killEx) { Log.WriteException("TerminalErrorKill", killEx); }
             return $"Error: {ex.Message}";
         }
         finally
@@ -1092,14 +1123,16 @@ public sealed class SystemMonitorService : IDisposable
         try
         {
             _cpuCounter?.Dispose();
+            foreach (PerformanceCounter counter in _gpuCounters) counter.Dispose();
             _availMemCounter?.Dispose();
             if (_coreCounters is not null)
             {
                 foreach (var c in _coreCounters) c.Dispose();
             }
         }
-        catch
+        catch (Exception ex)
         {
+            Log.WriteException(nameof(Dispose), ex);
         }
     }
 }

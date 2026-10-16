@@ -14,8 +14,49 @@
   --theme-text-muted: #9eb09a;
   --theme-text-secondary: #9eb09a;
   --theme-track: rgba(116, 168, 108, 0.12);
+  --theme-surface-hover: rgba(255, 255, 255, 0.08);
   --glass-blur: 24px;
   --glass-opacity: 0.92;
+}
+
+html[data-theme="light"] {
+  --theme-bg: rgba(248, 250, 248, 0.94);
+  --theme-card: rgba(255, 255, 255, 0.9);
+  --theme-border: rgba(45, 65, 50, 0.14);
+  --theme-accent: #3b7537;
+  --theme-accent-soft: rgba(59, 117, 55, 0.14);
+  --theme-text-primary: #152217;
+  --theme-text-secondary: #4a6350;
+  --theme-track: rgba(45, 65, 50, 0.08);
+  --theme-surface-hover: rgba(0, 0, 0, 0.05);
+}
+
+/* Universal high-contrast semantic utility overrides */
+html[data-theme="light"] .canopy-shell .text-white,
+html[data-theme="light"] .canopy-shell .text-white\/90,
+html[data-theme="light"] .canopy-shell .text-white\/80,
+html[data-theme="light"] .canopy-shell .text-white\/70,
+html[data-theme="light"] .caelestia-shell .text-white,
+html[data-theme="light"] .caelestia-shell .text-white\/90,
+html[data-theme="light"] .caelestia-shell .text-white\/80,
+html[data-theme="light"] .caelestia-shell .text-white\/70 {
+  color: var(--theme-text-primary) !important;
+}
+
+html[data-theme="light"] .canopy-shell .text-white\/60,
+html[data-theme="light"] .canopy-shell .text-white\/50,
+html[data-theme="light"] .canopy-shell .text-white\/40,
+html[data-theme="light"] .caelestia-shell .text-white\/60,
+html[data-theme="light"] .caelestia-shell .text-white\/50,
+html[data-theme="light"] .caelestia-shell .text-white\/40 {
+  color: var(--theme-text-secondary) !important;
+}
+
+html[data-theme="light"] .canopy-shell .bg-white\/5,
+html[data-theme="light"] .canopy-shell .bg-white\/10,
+html[data-theme="light"] .caelestia-shell .bg-white\/5,
+html[data-theme="light"] .caelestia-shell .bg-white\/10 {
+  background-color: var(--theme-surface-hover) !important;
 }
 
 /* Colour transitions live only on the theme-coloured surfaces (glass shell, cards, pills).
