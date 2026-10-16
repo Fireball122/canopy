@@ -363,10 +363,29 @@ const CanopyShellContent: React.FC = () => {
       }
     };
     window.addEventListener('canopy:navigate_tab', handleNavigateTab);
+
+    const handleThemeChanged = (e: Event) => {
+      const detail = (e as CustomEvent<unknown>).detail;
+      if (
+        detail &&
+        typeof detail === 'object' &&
+        'theme' in detail &&
+        typeof detail.theme === 'string'
+      ) {
+        const raw = detail.theme.toLowerCase();
+        const valid = ['canopy', 'adaptive', 'dark', 'light', 'auto'].includes(raw)
+          ? (raw as 'canopy' | 'adaptive' | 'dark' | 'light' | 'auto')
+          : 'canopy';
+        updateSettings({ themeMode: valid });
+      }
+    };
+    window.addEventListener('canopy:theme-changed', handleThemeChanged);
+
     return () => {
       window.removeEventListener('canopy:navigate_tab', handleNavigateTab);
+      window.removeEventListener('canopy:theme-changed', handleThemeChanged);
     };
-  }, []);
+  }, [updateSettings]);
 
   const visibleTabs = useMemo<{ id: TabId; label: string; icon: React.ReactNode }[]>(
     () => [

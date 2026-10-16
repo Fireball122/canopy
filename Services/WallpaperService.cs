@@ -21,7 +21,7 @@ public sealed class WallpaperService : IDisposable
     /// <summary>Maximum number of JPEG thumbnails kept on disk before the oldest are evicted.</summary>
     private const int ThumbnailCacheFileLimit = 500;
 
-    private static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
+    public static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".png",
         ".jpg",

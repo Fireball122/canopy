@@ -1,3 +1,5 @@
+using System.IO;
+using System.IO.Pipes;
 using System.Diagnostics;
 using System.Threading;
 using System.Windows;
@@ -12,6 +14,7 @@ public partial class App : Application
     private const string MutexName = @"Local\Canopy_ZeroNotchOverlay_SingleInstance_v1";
     private const string ExpandEventName = @"Local\Canopy_ZeroNotchOverlay_ExpandEvent_v1";
     private const string TestNotifyEventName = @"Local\Canopy_ZeroNotchOverlay_TestNotifyEvent_v1";
+    public const string ControlPipeName = "Canopy_Control_v1";
     private readonly DiagnosticsLog _log = new();
     private Mutex? _singleInstanceMutex;
     private EventWaitHandle? _expandEvent;
@@ -38,6 +41,66 @@ public partial class App : Application
         _singleInstanceMutex = new Mutex(initiallyOwned: true, MutexName, out _ownsMutex);
         if (!_ownsMutex)
         {
+            string? commandToSend = null;
+            if (HasArgument(e.Args, "--test-notify"))
+            {
+                commandToSend = "notify:Canopy Reminder|Raindrop to Pill Capsule alert working seamlessly!";
+            }
+            else if (HasArgument(e.Args, "--collapse"))
+            {
+                commandToSend = "collapse";
+            }
+            else if (HasArgument(e.Args, "--toggle"))
+            {
+                commandToSend = "toggle";
+            }
+            else if (HasArgument(e.Args, "--expand"))
+            {
+                commandToSend = "expand";
+            }
+            else if (HasArgument(e.Args, "--next-wallpaper"))
+            {
+                commandToSend = "next-wallpaper";
+            }
+            else
+            {
+                int notifyIdx = Array.FindIndex(e.Args, a => string.Equals(a, "--notify", StringComparison.OrdinalIgnoreCase));
+                if (notifyIdx >= 0 && notifyIdx + 1 < e.Args.Length)
+                {
+                    string msg = e.Args[notifyIdx + 1];
+                    string title = (notifyIdx + 2 < e.Args.Length && !e.Args[notifyIdx + 2].StartsWith("--", StringComparison.Ordinal)) ? e.Args[notifyIdx + 2] : "Canopy Notification";
+                    commandToSend = $"notify:{title}|{msg}";
+                }
+
+                int tabIdx = Array.FindIndex(e.Args, a => string.Equals(a, "--tab", StringComparison.OrdinalIgnoreCase));
+                if (tabIdx >= 0 && tabIdx + 1 < e.Args.Length)
+                {
+                    commandToSend = $"tab:{e.Args[tabIdx + 1]}";
+                }
+
+                int themeIdx = Array.FindIndex(e.Args, a => string.Equals(a, "--theme", StringComparison.OrdinalIgnoreCase));
+                if (themeIdx >= 0 && themeIdx + 1 < e.Args.Length)
+                {
+                    commandToSend = $"theme:{e.Args[themeIdx + 1]}";
+                }
+
+                int cmdIdx = Array.FindIndex(e.Args, a => string.Equals(a, "--cmd", StringComparison.OrdinalIgnoreCase));
+                if (cmdIdx >= 0 && cmdIdx + 1 < e.Args.Length)
+                {
+                    commandToSend = e.Args[cmdIdx + 1];
+                }
+            }
+
+            if (commandToSend != null)
+            {
+                bool sent = SendRemoteCommandAsync(commandToSend, timeoutMs: 1200).GetAwaiter().GetResult();
+                if (sent)
+                {
+                    Shutdown(0);
+                    return;
+                }
+            }
+
             if (HasArgument(e.Args, "--test-notify"))
             {
                 try
@@ -201,10 +264,113 @@ public partial class App : Application
                     }
                 }
             }, token);
+            StartControlPipeServer(mainWindow, token);
         }
         catch (Exception ex)
         {
             _log.WriteException("expand signal listener", ex);
+        }
+    }
+    public static async Task<bool> SendRemoteCommandAsync(string command, int timeoutMs = 800)
+    {
+        try
+        {
+            using var client = new NamedPipeClientStream(".", ControlPipeName, PipeDirection.Out);
+            await client.ConnectAsync(timeoutMs);
+            using var writer = new StreamWriter(client) { AutoFlush = true };
+            await writer.WriteLineAsync(command);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private void StartControlPipeServer(MainWindow mainWindow, CancellationToken token)
+    {
+        _ = Task.Run(async () =>
+        {
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    using var server = new NamedPipeServerStream(
+                        ControlPipeName,
+                        PipeDirection.In,
+                        NamedPipeServerStream.MaxAllowedServerInstances,
+                        PipeTransmissionMode.Byte,
+                        PipeOptions.Asynchronous);
+
+                    await server.WaitForConnectionAsync(token);
+                    using var reader = new StreamReader(server);
+                    string? line = await reader.ReadLineAsync(token);
+                    if (!string.IsNullOrWhiteSpace(line))
+                    {
+                        _ = mainWindow.Dispatcher.InvokeAsync(() => ExecuteControlCommand(mainWindow, line));
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _log.WriteException("ControlPipeServer", ex);
+                    await Task.Delay(250, token);
+                }
+            }
+        }, token);
+    }
+
+    private static void ExecuteControlCommand(MainWindow mainWindow, string command)
+    {
+        string cmd = command.Trim();
+        if (cmd.Equals("expand", StringComparison.OrdinalIgnoreCase))
+        {
+            mainWindow.ExpandWithPreviewGrace();
+        }
+        else if (cmd.Equals("collapse", StringComparison.OrdinalIgnoreCase))
+        {
+            mainWindow.CollapsePanel();
+        }
+        else if (cmd.Equals("toggle", StringComparison.OrdinalIgnoreCase))
+        {
+            mainWindow.TogglePanel();
+        }
+        else if (cmd.StartsWith("notify:", StringComparison.OrdinalIgnoreCase))
+        {
+            string payload = cmd.Substring(7);
+            string[] parts = payload.Split('|', 2);
+            string title = parts.Length > 1 ? parts[0] : "Canopy Notification";
+            string msg = parts.Length > 1 ? parts[1] : parts[0];
+            mainWindow.TriggerNotification(msg, title);
+        }
+        else if (cmd.StartsWith("tab:", StringComparison.OrdinalIgnoreCase))
+        {
+            string tab = cmd.Substring(4).Trim();
+            mainWindow.NavigateTab(tab);
+        }
+        else if (cmd.Equals("next-wallpaper", StringComparison.OrdinalIgnoreCase))
+        {
+            _ = mainWindow.NextWallpaperAsync();
+        }
+        else if (cmd.StartsWith("theme:", StringComparison.OrdinalIgnoreCase))
+        {
+            string theme = cmd.Substring(6).Trim();
+            mainWindow.SetTheme(theme);
+        }
+        else if (cmd.Equals("media-play-pause", StringComparison.OrdinalIgnoreCase) || cmd.Equals("media-play", StringComparison.OrdinalIgnoreCase))
+        {
+            _ = mainWindow.MediaPlayPauseAsync();
+        }
+        else if (cmd.Equals("media-next", StringComparison.OrdinalIgnoreCase))
+        {
+            _ = mainWindow.MediaNextAsync();
+        }
+        else if (cmd.Equals("media-prev", StringComparison.OrdinalIgnoreCase))
+        {
+            _ = mainWindow.MediaPrevAsync();
         }
     }
 

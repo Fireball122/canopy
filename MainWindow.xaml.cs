@@ -2314,6 +2314,85 @@ public partial class MainWindow : Window
         EmitFrontendEvent("toggle-dropdown", false);
     }
 
+    public bool IsExpanded => _isExpanded;
+
+    public void TogglePanel()
+    {
+        if (_isExpanded)
+        {
+            CollapsePanel();
+        }
+        else
+        {
+            ExpandWithPreviewGrace();
+        }
+    }
+
+    public void TriggerNotification(string message, string title = "Canopy Notification", string? accent = null, string? bg = null)
+    {
+        string finalAccent = accent ?? _currentThemeAccent ?? "#74a86c";
+        string finalBg = bg ?? _currentThemeBg ?? "#111913";
+        NotificationWindow.ShowNotification(message, title, finalAccent, finalBg);
+        if (_isExpanded)
+        {
+            EmitFrontendEvent("canopy:notification", new
+            {
+                message,
+                title,
+                accentColorHex = finalAccent,
+                bgColorHex = finalBg
+            });
+        }
+    }
+
+    public void NavigateTab(string tab)
+    {
+        ExpandWithPreviewGrace();
+        EmitFrontendEvent("canopy:navigate_tab", new { tab });
+    }
+
+    public async Task NextWallpaperAsync()
+    {
+        try
+        {
+            if (Directory.Exists(_wallpaperService.WallpapersDirectory))
+            {
+                var files = Directory.EnumerateFiles(_wallpaperService.WallpapersDirectory)
+                    .Where(f => WallpaperService.SupportedExtensions.Contains(System.IO.Path.GetExtension(f)))
+                    .ToList();
+                if (files.Count > 0)
+                {
+                    int index = new Random().Next(files.Count);
+                    await _wallpaperService.ApplyWallpaperAsync(files[index]);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.WriteException("NextWallpaperAsync", ex);
+        }
+    }
+
+    public void SetTheme(string themeMode)
+    {
+        EmitFrontendEvent("canopy:theme-changed", new { theme = themeMode });
+    }
+
+    public async Task MediaPlayPauseAsync()
+    {
+        try { await _mediaController.PlayPauseAsync(); } catch (Exception ex) { _log.WriteException("MediaPlayPause", ex); }
+    }
+
+    public async Task MediaNextAsync()
+    {
+        try { await _mediaController.NextAsync(); } catch (Exception ex) { _log.WriteException("MediaNext", ex); }
+    }
+
+    public async Task MediaPrevAsync()
+    {
+        try { await _mediaController.PreviousAsync(); } catch (Exception ex) { _log.WriteException("MediaPrev", ex); }
+    }
+
     protected override void OnClosed(EventArgs e)
     {
         _cursorPollTimer.Stop();
