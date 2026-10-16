@@ -31,24 +31,11 @@ Instead of cluttering your desktop with widgets or pinned taskbars, Canopy stays
 
 When summoned, it glides down with an anti-aliased frosted glass panel containing your media controls, synchronized lyrics, audio visualizer, hardware telemetry, quick launcher, and wallpaper manager.
 
-```
-                  Top Edge of Screen (Y = 0)
-+-------------------------------------------------------------+
-|                      [ Hover Trigger ]                      |
-+-------------------------------------------------------------+
-                               |
-                       (Nudge top bezel)
-                               v
-   +-------------------------------------------------------+
-   |   CANOPY CONTROL CENTER (Frosted Glass Overlay)       |
-   |                                                       |
-   |   Clock & Weather  •  Live Hardware Telemetry (Gpu/Cpu)|
-   |   Now Playing      •  Synced Lyrics & Audio Spectrum  |
-   |   Volume Mixer     •  Per-App Audio Sliders           |
-   |   Quick Dock       •  6-Slot Application Launcher     |
-   |   Wallpapers       •  Per-Monitor Palette Extraction  |
-   +-------------------------------------------------------+
-```
+<p align="center">
+  <video src="https://github.com/Fireball122/canopy/releases/download/v1.0.2/test.mp4" controls="controls" muted="muted" width="100%">
+    Your browser does not support the video tag.
+  </video>
+</p>
 
 ---
 
