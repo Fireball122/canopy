@@ -630,6 +630,43 @@ export async function setMicMute(muted: boolean): Promise<void> {
   await invokeBridge<unknown>('set_mic_mute', { muted }, () => undefined);
 }
 
+export interface AudioDeviceInfo {
+  id: string;
+  name: string;
+  is_default: boolean;
+  flow: 'render' | 'capture';
+}
+
+export async function listAudioDevices(
+  flow: 'render' | 'capture' = 'render',
+): Promise<AudioDeviceInfo[]> {
+  return invokeBridge<AudioDeviceInfo[]>('list_audio_devices', { flow }, () => []);
+}
+
+export async function setDefaultAudioDevice(deviceId: string): Promise<boolean> {
+  return invokeBridge<boolean>('set_default_audio_device', { device_id: deviceId }, () => false);
+}
+
+export async function toggleCaffeine(): Promise<{ enabled: boolean }> {
+  return invokeBridge<{ enabled: boolean }>('toggle_caffeine', undefined, () => ({
+    enabled: false,
+  }));
+}
+
+export async function getCaffeineStatus(): Promise<{ enabled: boolean }> {
+  return invokeBridge<{ enabled: boolean }>('get_caffeine_status', undefined, () => ({
+    enabled: false,
+  }));
+}
+
+export async function triggerScreenSnip(): Promise<boolean> {
+  return invokeBridge<boolean>('trigger_screen_snip', undefined, () => false);
+}
+
+export async function toggleDnd(): Promise<{ enabled: boolean }> {
+  return invokeBridge<{ enabled: boolean }>('toggle_dnd', undefined, () => ({ enabled: false }));
+}
+
 export interface BatteryStatus {
   has_battery: boolean;
   percent: number;

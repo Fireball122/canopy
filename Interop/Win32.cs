@@ -61,6 +61,8 @@ public static class Win32
     public const int WM_DPICHANGED = 0x02E0;
     public const int WM_DISPLAYCHANGE = 0x007E;
     public const int WM_POWERBROADCAST = 0x0218;
+    public const int WM_WININICHANGE = 0x001A;
+    public const int WM_SETTINGCHANGE = 0x001A;
     public const int PBT_APMSUSPEND = 0x0004;
     public const int PBT_APMRESUMESUSPEND = 0x0007;
     public const int PBT_APMRESUMEAUTOMATIC = 0x0012;
@@ -195,6 +197,13 @@ public static class Win32
     public static extern short GetAsyncKeyState(int vKey);
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr WindowFromPoint(POINT point);
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    public static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
+    public const uint GA_ROOT = 2;
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -954,4 +963,27 @@ public static class Win32
 
     [DllImport("dxva2.dll", SetLastError = true)]
     public static extern bool SetMonitorBrightness(IntPtr hPhysicalMonitor, uint dwNewBrightness);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    public static extern uint SetThreadExecutionState(uint esFlags);
+    public const uint ES_SYSTEM_REQUIRED = 0x00000001;
+    public const uint ES_DISPLAY_REQUIRED = 0x00000002;
+    public const uint ES_CONTINUOUS = 0x80000000;
+
+    public static bool IsSystemInDarkMode()
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+            if (key?.GetValue("AppsUseLightTheme") is int val)
+            {
+                return val == 0;
+            }
+        }
+        catch
+        {
+        }
+        return true;
+    }
 }

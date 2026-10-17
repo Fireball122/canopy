@@ -170,6 +170,24 @@ function applyThemeVariables(vars: {
     '--theme-surface-hover',
     vars.isLight ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.08)',
   );
+
+  // Compute perceived luminance of the accent color to guarantee high-contrast text
+  let onAccent = '#ffffff';
+  const rgbMatch = vars.accent.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+  const hexMatch = vars.accent.match(/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i);
+  if (rgbMatch) {
+    const lum =
+      0.299 * Number(rgbMatch[1]) + 0.587 * Number(rgbMatch[2]) + 0.114 * Number(rgbMatch[3]);
+    if (lum > 140) onAccent = '#111913';
+  } else if (hexMatch) {
+    const r = parseInt(hexMatch[1], 16);
+    const g = parseInt(hexMatch[2], 16);
+    const b = parseInt(hexMatch[3], 16);
+    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+    if (lum > 140) onAccent = '#111913';
+  }
+  root.style.setProperty('--theme-on-accent', onAccent);
+
   try {
     setHostConfig({ themeAccent: vars.accent, themeBg: vars.bg }).catch(() => {});
   } catch {
@@ -440,5 +458,9 @@ export function initializeSystemThemeWatcher(onThemeChange: () => void): () => v
   const media = window.matchMedia('(prefers-color-scheme: light)');
   const listener = () => onThemeChange();
   media.addEventListener('change', listener);
-  return () => media.removeEventListener('change', listener);
+  window.addEventListener('canopy:system-theme-changed', listener);
+  return () => {
+    media.removeEventListener('change', listener);
+    window.removeEventListener('canopy:system-theme-changed', listener);
+  };
 }

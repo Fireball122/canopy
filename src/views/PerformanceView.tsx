@@ -215,9 +215,9 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
 
   const ramUsedGb = Number.isFinite(stats.ram_used_gb) ? stats.ram_used_gb : 5.4;
   const ramTotalGb = Number.isFinite(stats.ram_total_gb) ? stats.ram_total_gb : 16.0;
-  const diskTotalGb = stats.disk_total_gb || 953;
-  const diskUsedGb = stats.disk_used_gb || Math.round((diskUsage / 100) * diskTotalGb) || 230;
-  const storageFreeOrUsedGb = Math.max(1, Math.round(diskTotalGb - diskUsedGb || 230));
+  const diskTotalGb = stats.disk_total_gb || 0;
+  const diskUsedGb = stats.disk_used_gb || Math.round((diskUsage / 100) * (diskTotalGb || 100));
+  const storageFreeGb = Math.max(0, Math.round(diskTotalGb - diskUsedGb));
 
   const netDownKbps =
     Number.isFinite(stats.net_down_kbps) && stats.net_down_kbps >= 0 ? stats.net_down_kbps : 23.3;
@@ -358,8 +358,8 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
           outerColor="#a6e3a1"
           innerColor="var(--theme-accent, #cba6f7)"
           centerValue={`${ramUsedGb.toFixed(1)}GiB`}
-          centerSublabel="Memory"
-          pillText={`${storageFreeOrUsedGb}GiB Storage`}
+          centerSublabel={`of ${ramTotalGb.toFixed(0)}GiB RAM`}
+          pillText={`${ramUsage}% RAM • ${diskUsage}% Disk`}
           icon={
             <MemoryStick
               className="w-4 h-4"
@@ -605,7 +605,7 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
               </span>
               <span className="flex items-center gap-1">
                 <HardDrive className="w-3 h-3 text-[#a6e3a1]" />
-                NVMe: {diskUsedGb} / {diskTotalGb} GiB ({diskUsage}%)
+                Disk: {diskUsedGb} / {diskTotalGb} GiB ({storageFreeGb} GiB free)
               </span>
             </div>
           </div>

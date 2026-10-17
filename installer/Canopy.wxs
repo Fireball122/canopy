@@ -3,7 +3,8 @@
   <Package Name="Canopy"
            Manufacturer="Canopy Shell"
            Version="$(var.ProductVersion)"
-           UpgradeCode="4C6D518F-72E6-407F-8BC1-B071536E489E"
+           ProductCode="{4C6D518F-72E6-407F-8BC1-B071536E489E}"
+           UpgradeCode="{B8E85A82-5F3E-4B7D-9D27-E8826500F921}"
            Scope="perUser">
 
     <MajorUpgrade Schedule="afterInstallInitialize"

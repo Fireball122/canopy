@@ -71,10 +71,10 @@ function Assert-ReleaseAssetChecksum {
 
 function Test-WebView2Runtime {
     $programFilesX86 = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFilesX86)
-    $runtimeRoots = @(
-        (if ($programFilesX86) { Join-Path $programFilesX86 "Microsoft\EdgeWebView\Application" }),
-        (Join-Path $env:LOCALAPPDATA "Microsoft\EdgeWebView\Application")
-    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    $roots = @()
+    if ($programFilesX86) { $roots += Join-Path $programFilesX86 "Microsoft\EdgeWebView\Application" }
+    $roots += Join-Path $env:LOCALAPPDATA "Microsoft\EdgeWebView\Application"
+    $runtimeRoots = $roots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
 
     return $null -ne ($runtimeRoots | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1)
 }
@@ -144,11 +144,11 @@ if ($running) {
 # 2. Check if running from local repo build or downloading from GitHub
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $localZip = Join-Path $ScriptDir "dist-installer\Canopy-*-portable.zip"
-$resolvedLocalZip = Resolve-Path $localZip -ErrorAction SilentlyContinue | Select-Object -First 1
+$resolvedLocalZip = Get-Item $localZip -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 
 if ($resolvedLocalZip) {
-    Write-Host "==> Using local portable package: $($resolvedLocalZip.Path)" -ForegroundColor Green
-    $zipPath = $resolvedLocalZip.Path
+    Write-Host "==> Using local portable package: $($resolvedLocalZip.FullName)" -ForegroundColor Green
+    $zipPath = $resolvedLocalZip.FullName
 } else {
     Write-Host "==> Fetching latest release from GitHub: $Repo..." -ForegroundColor Cyan
     $apiUrl = "https://api.github.com/repos/$Repo/releases/latest"

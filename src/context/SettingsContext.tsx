@@ -234,6 +234,69 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       active = false;
     };
   }, []);
+  useEffect(() => {
+    const handleLoggingChanged = (e: Event) => {
+      const detail = (e as CustomEvent<{ enabled: boolean }>).detail;
+      if (detail && typeof detail.enabled === 'boolean') {
+        setSettings((prev) => {
+          if (prev.diagnosticLogging === detail.enabled) return prev;
+          return { ...prev, diagnosticLogging: detail.enabled };
+        });
+      }
+    };
+
+    const handleTopHoverTriggerChanged = (e: Event) => {
+      const detail = (e as CustomEvent<{ enabled: boolean }>).detail;
+      if (detail && typeof detail.enabled === 'boolean') {
+        setSettings((prev) => {
+          if (prev.topHoverTrigger === detail.enabled) return prev;
+          return { ...prev, topHoverTrigger: detail.enabled };
+        });
+      }
+    };
+
+    const handleHotkeyFallback = (e: Event) => {
+      const detail = (e as CustomEvent<{ hotkey: string }>).detail;
+      if (detail && typeof detail.hotkey === 'string') {
+        setSettings((prev) => {
+          if (prev.globalHotkey === detail.hotkey) return prev;
+          return { ...prev, globalHotkey: detail.hotkey };
+        });
+      }
+    };
+
+    const handleThemeChanged = (e: Event) => {
+      const detail = (e as CustomEvent<{ mode: string }>).detail;
+      if (detail && typeof detail.mode === 'string') {
+        const validModes: Array<CanopySettings['themeMode']> = [
+          'canopy',
+          'adaptive',
+          'dark',
+          'light',
+          'auto',
+        ];
+        if (validModes.includes(detail.mode as CanopySettings['themeMode'])) {
+          const nextMode = detail.mode as CanopySettings['themeMode'];
+          setSettings((prev) => {
+            if (prev.themeMode === nextMode) return prev;
+            return { ...prev, themeMode: nextMode };
+          });
+        }
+      }
+    };
+
+    window.addEventListener('diagnostic-logging-changed', handleLoggingChanged);
+    window.addEventListener('top-hover-trigger-changed', handleTopHoverTriggerChanged);
+    window.addEventListener('hotkey-fallback', handleHotkeyFallback);
+    window.addEventListener('canopy:theme-changed', handleThemeChanged);
+
+    return () => {
+      window.removeEventListener('diagnostic-logging-changed', handleLoggingChanged);
+      window.removeEventListener('top-hover-trigger-changed', handleTopHoverTriggerChanged);
+      window.removeEventListener('hotkey-fallback', handleHotkeyFallback);
+      window.removeEventListener('canopy:theme-changed', handleThemeChanged);
+    };
+  }, []);
 
   useEffect(() => {
     applyGlassCssVariables(settings.glassBlurStrength, settings.glassOpacity);
@@ -245,7 +308,10 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       // Ignore storage quota errors
     }
     if (!hydratedFromHost) return;
-    void saveSettingsJson(settings as unknown as Record<string, unknown>).catch(() => undefined);
+    const timer = window.setTimeout(() => {
+      void saveSettingsJson(settings as unknown as Record<string, unknown>).catch(() => undefined);
+    }, 250);
+    return () => window.clearTimeout(timer);
   }, [settings, hydratedFromHost]);
 
   // Push every host-relevant setting to the native host in one message.
@@ -255,6 +321,10 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       triggerHeight: settings.triggerHeight,
       triggerDelayMs: settings.triggerDelayMs,
       hideDebounceMs: settings.hideDebounceMs,
+      topHoverTrigger: settings.topHoverTrigger,
+      appWidth: settings.appWidth,
+      appHeight: settings.appHeight,
+      appScale: settings.appScale,
       pauseInFullscreen: settings.pauseTriggerInFullscreen,
       pauseInPresentation: settings.pauseTriggerDuringPresentations,
       quietHoursEnabled: settings.quietHoursEnabled,
@@ -274,6 +344,10 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     settings.triggerHeight,
     settings.triggerDelayMs,
     settings.hideDebounceMs,
+    settings.topHoverTrigger,
+    settings.appWidth,
+    settings.appHeight,
+    settings.appScale,
     settings.pauseTriggerInFullscreen,
     settings.pauseTriggerDuringPresentations,
     settings.quietHoursEnabled,

@@ -3,10 +3,14 @@ import {
   AppWindow,
   Battery,
   BatteryCharging,
+  BellOff,
   Calculator,
+  Calendar as CalendarIcon,
+  ChevronRight,
   Clock,
   CloudSun,
   Code2,
+  Coffee,
   Compass,
   Cpu,
   Disc,
@@ -25,15 +29,16 @@ import {
   Plus,
   Power as PowerIcon,
   RefreshCw,
+  Scissors,
   Search,
   Settings as SettingsIcon,
   SkipBack,
   SkipForward,
   Sliders,
+  Sun,
   Terminal as TerminalIcon,
-  User,
+  Volume2,
 } from 'lucide-react';
-import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarCard } from './components/CalendarCard';
 import { CanopyMascot } from './components/CanopyMascot';
@@ -52,6 +57,7 @@ import {
   getAudioSpectrum,
   getBatteryStatus,
   getBrightness,
+  getCaffeineStatus,
   getInstalledApps,
   getMasterVolume,
   getMediaInfo,
@@ -75,8 +81,12 @@ import {
   setDesktopWallpaper,
   setDropdownOpen,
   setMasterVolume,
+  setReminders,
   setTopHoverTrigger,
   setWindowSize,
+  toggleCaffeine,
+  toggleDnd,
+  triggerScreenSnip,
   type WallpaperEntry,
   setMicMute as writeMicMute,
   setMicVolume as writeMicVolume,
@@ -349,6 +359,18 @@ const CanopyShellContent: React.FC = () => {
   const [paletteOpen, setPaletteOpen] = useState<boolean>(false);
   const [paletteQuery, setPaletteQuery] = useState<string>('');
   const [paletteIndex, setPaletteIndex] = useState<number>(0);
+  const [caffeineActive, setCaffeineActive] = useState<boolean>(false);
+  const [dndActive, setDndActive] = useState<boolean>(settings.quietHoursEnabled);
+
+  useEffect(() => {
+    void getCaffeineStatus()
+      .then((s) => setCaffeineActive(s.enabled))
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    setDndActive(settings.quietHoursEnabled);
+  }, [settings.quietHoursEnabled]);
 
   useEffect(() => {
     const handleNavigateTab = (e: Event) => {
@@ -958,10 +980,135 @@ const CanopyShellContent: React.FC = () => {
     ];
   }, [visibleTabs, installedApps, refreshWallpapersList]);
 
-  const paletteMatches = useMemo(
-    () => filterPaletteCommands(paletteCommands, paletteQuery),
-    [paletteCommands, paletteQuery],
-  );
+  // Master Volume handler
+  const handleVolumeChange = useCallback(async (newVol: number) => {
+    const clamped = Math.max(0, Math.min(100, Math.round(newVol)));
+    setVolume(clamped);
+    try {
+      await setMasterVolume(clamped);
+    } catch {
+      try {
+        await setAudioVolume(clamped);
+      } catch {
+        // Reflected in local state
+      }
+    }
+  }, []);
+
+  // Brightness handler
+  const handleBrightnessChange = useCallback(async (newBri: number) => {
+    const clamped = Math.max(0, Math.min(100, Math.round(newBri)));
+    setBrightnessState(clamped);
+    try {
+      await setBrightness(clamped);
+    } catch {
+      // Reflected in local state
+    }
+  }, []);
+  const paletteMatches = useMemo(() => {
+    const dynamicCommands: CommandPaletteItem[] = [];
+    const trimmed = paletteQuery.trim();
+
+    // 1. Math calculation (= 120 * 1.08)
+    if (trimmed.startsWith('=')) {
+      const expr = trimmed.slice(1).trim();
+      if (expr.length > 0) {
+        try {
+          // Only permit safe math tokens
+          if (/^[0-9+\-*/().\s%^]+$/.test(expr)) {
+            // eslint-disable-next-line no-eval
+            const result = Function(`'use strict'; return (${expr})`)();
+            if (typeof result === 'number' && Number.isFinite(result)) {
+              dynamicCommands.push({
+                id: 'calc:result',
+                label: `${expr} = ${result}`,
+                hint: 'Copy Calculation',
+                icon: <Calculator className="w-3.5 h-3.5 text-amber-400" />,
+                run: () => {
+                  void navigator.clipboard.writeText(String(result));
+                },
+              });
+            }
+          }
+        } catch {
+          // Invalid expression while typing
+        }
+      }
+    }
+
+    // 2. Volume command (vol 75, volume 50)
+    const volMatch = trimmed.match(/^(?:vol|volume)\s+(\d{1,3})$/i);
+    if (volMatch) {
+      const targetVol = Math.max(0, Math.min(100, parseInt(volMatch[1], 10)));
+      dynamicCommands.push({
+        id: 'action:set-vol',
+        label: `Set Volume to ${targetVol}%`,
+        hint: 'Audio',
+        icon: <Volume2 className="w-3.5 h-3.5 text-sky-400" />,
+        run: () => {
+          void handleVolumeChange(targetVol);
+        },
+      });
+    }
+
+    // 3. Brightness command (bri 80, brightness 60)
+    const briMatch = trimmed.match(/^(?:bri|brightness)\s+(\d{1,3})$/i);
+    if (briMatch) {
+      const targetBri = Math.max(0, Math.min(100, parseInt(briMatch[1], 10)));
+      dynamicCommands.push({
+        id: 'action:set-bri',
+        label: `Set Brightness to ${targetBri}%`,
+        hint: 'Display',
+        icon: <Sun className="w-3.5 h-3.5 text-yellow-400" />,
+        run: () => {
+          void handleBrightnessChange(targetBri);
+        },
+      });
+    }
+
+    // 4. Quick reminder (remind Take a stretch, reminder Check email)
+    const remindMatch = trimmed.match(/^(?:remind|reminder)\s+(.+)$/i);
+    if (remindMatch && remindMatch[1].trim().length > 0) {
+      const reminderText = remindMatch[1].trim();
+      dynamicCommands.push({
+        id: 'action:add-reminder',
+        label: `Add Reminder: "${reminderText}"`,
+        hint: 'Calendar',
+        icon: <CalendarIcon className="w-3.5 h-3.5 text-emerald-400" />,
+        run: () => {
+          const now = new Date();
+          const nextHour = new Date(now.getTime() + 60 * 60 * 1000);
+          const hh = String(nextHour.getHours()).padStart(2, '0');
+          const mm = String(nextHour.getMinutes()).padStart(2, '0');
+          const yyyy = nextHour.getFullYear();
+          const mon = String(nextHour.getMonth() + 1).padStart(2, '0');
+          const dd = String(nextHour.getDate()).padStart(2, '0');
+          const newReminder = {
+            id: `rem_${Date.now()}`,
+            text: reminderText,
+            date: `${yyyy}-${mon}-${dd}`,
+            time: `${hh}:${mm}`,
+          };
+          try {
+            const raw = window.localStorage.getItem('shell_calendar_events');
+            const existing = raw ? JSON.parse(raw) : [];
+            const updated = Array.isArray(existing) ? [...existing, newReminder] : [newReminder];
+            window.localStorage.setItem('shell_calendar_events', JSON.stringify(updated));
+            window.dispatchEvent(new CustomEvent('calendar-events-updated', { detail: updated }));
+            void setReminders(updated);
+          } catch {
+            // Ignore
+          }
+        },
+      });
+    }
+
+    if (dynamicCommands.length > 0) {
+      return dynamicCommands;
+    }
+
+    return filterPaletteCommands(paletteCommands, paletteQuery);
+  }, [paletteCommands, paletteQuery, handleVolumeChange, handleBrightnessChange]);
 
   // Typing a printable key while the panel is expanded summons the palette; collapsing the panel
   // dismisses it. Escape / Ctrl-` handling stays in the host-event listener above.
@@ -1082,32 +1229,6 @@ const CanopyShellContent: React.FC = () => {
     }
   };
 
-  // Master Volume handler
-  const handleVolumeChange = async (newVol: number) => {
-    const clamped = Math.max(0, Math.min(100, Math.round(newVol)));
-    setVolume(clamped);
-    try {
-      await setMasterVolume(clamped);
-    } catch {
-      try {
-        await setAudioVolume(clamped);
-      } catch {
-        // Reflected in local state
-      }
-    }
-  };
-
-  // Brightness handler
-  const handleBrightnessChange = async (newBri: number) => {
-    const clamped = Math.max(0, Math.min(100, Math.round(newBri)));
-    setBrightnessState(clamped);
-    try {
-      await setBrightness(clamped);
-    } catch {
-      // Reflected in local state
-    }
-  };
-
   // Wallpaper apply + immediate dynamic palette extraction
   const handleApplyWallpaper = async (entry: WallpaperEntry, imgEl?: HTMLImageElement | null) => {
     setWallpapers((prev) =>
@@ -1211,12 +1332,14 @@ const CanopyShellContent: React.FC = () => {
           className="w-full shrink-0 flex items-center justify-center px-3 py-1.5 select-none relative"
           style={{ borderBottom: '1px solid var(--theme-border)' }}
         >
-          {settings.showBatteryChip && battery !== null && battery.has_battery && (
+          {settings.showBatteryChip && battery?.has_battery && (
             <div
               data-tauri-drag-region="false"
               className="canopy-pill absolute right-2.5 top-1/2 -translate-y-1/2 px-2 py-1 flex items-center gap-1 text-[10px] font-mono tabular-nums pointer-events-none"
               style={{
                 color: battery.charging ? 'var(--theme-accent)' : 'var(--theme-text-secondary)',
+                border: '1px solid var(--theme-border)',
+                background: 'var(--theme-card)',
               }}
               title={
                 battery.charging
@@ -1278,6 +1401,7 @@ const CanopyShellContent: React.FC = () => {
               );
             })}
           </nav>
+
         </header>
 
         {/* Main Content Viewport (386px height) with Fade & Slide Tab Transition */}
@@ -1450,10 +1574,12 @@ const CanopyShellContent: React.FC = () => {
                       {formattedDayDate}
                     </span>
                     <span
-                      className="text-[9px] font-mono tabular-nums"
+                      className="text-[9px] font-mono tabular-nums flex items-center gap-1"
                       style={{ color: 'var(--theme-text-secondary)' }}
+                      title={`Uptime: ${stats.uptime_formatted}`}
                     >
-                      :{formattedSeconds}s
+                      <Clock className="w-2.5 h-2.5 opacity-70" />
+                      <span>up {compactUptime}</span>
                     </span>
                   </div>
                 </div>
@@ -1462,7 +1588,7 @@ const CanopyShellContent: React.FC = () => {
               {/* ZONE 2: CENTER COLUMN (340px) — System Status Bar (Top) + Interactive Calendar (Bottom) */}
               <div className="w-[340px] shrink-0 flex flex-col gap-2 h-full">
                 {/* System Status Bar (Top) */}
-                <div className="bento-card h-[44px] shrink-0 px-2.5 flex items-center justify-between gap-1.5">
+                <div className="bento-card h-[44px] shrink-0 px-2.5 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-1.5 min-w-0">
                     <div
                       className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
@@ -1470,32 +1596,87 @@ const CanopyShellContent: React.FC = () => {
                         background: 'var(--theme-track)',
                         border: '1px solid var(--theme-accent)',
                       }}
+                      title={`Host: ${stats.hostname || 'Windows'}`}
                     >
-                      <User className="w-3.5 h-3.5" style={{ color: 'var(--theme-accent)' }} />
+                      <Monitor className="w-3.5 h-3.5" style={{ color: 'var(--theme-accent)' }} />
                     </div>
                     <span
-                      className="canopy-pill px-2 py-1 text-[10px] font-medium flex items-center gap-1 shrink-0"
+                      className="text-xs font-semibold tracking-tight truncate"
                       style={{ color: 'var(--theme-text-primary)' }}
-                    >
-                      <Monitor className="w-3 h-3" style={{ color: 'var(--theme-accent)' }} />
-                      <span>Windows 11</span>
-                    </span>
-                    <span
-                      className="canopy-pill px-2 py-1 text-[10px] font-mono truncate max-w-[105px]"
-                      style={{ color: 'var(--theme-text-secondary)' }}
                       title={stats.hostname}
                     >
-                      {stats.hostname}
+                      {stats.hostname || 'Windows 11'}
                     </span>
                   </div>
 
-                  <div
-                    className="canopy-pill px-2 py-1 text-[9px] font-mono flex items-center gap-1 shrink-0"
-                    style={{ color: 'var(--theme-accent)' }}
-                    title={stats.uptime_formatted}
-                  >
-                    <Clock className="w-2.5 h-2.5 shrink-0" />
-                    <span className="truncate max-w-[82px]">up {compactUptime}</span>
+                  {/* Dashboard Quick Utility Actions (Awake, DND, Snip) */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      data-tauri-drag-region="false"
+                      onClick={async () => {
+                        const res = await toggleCaffeine();
+                        setCaffeineActive(res.enabled);
+                      }}
+                      className="canopy-pill px-2 py-1 flex items-center gap-1 text-[10px] font-medium transition-all hover:scale-105 active:scale-95 cursor-pointer pointer-events-auto"
+                      style={{
+                        background: caffeineActive ? 'var(--theme-accent)' : 'var(--theme-track)',
+                        color: caffeineActive
+                          ? 'var(--theme-on-accent, #111913)'
+                          : 'var(--theme-text-secondary)',
+                        border: '1px solid var(--theme-border)',
+                      }}
+                      title={
+                        caffeineActive
+                          ? 'Caffeine active: system will not sleep'
+                          : 'Caffeine: click to keep system awake'
+                      }
+                    >
+                      <Coffee className="w-3 h-3" />
+                      <span>Awake</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      data-tauri-drag-region="false"
+                      onClick={async () => {
+                        const res = await toggleDnd();
+                        setDndActive(res.enabled);
+                        updateSettings({ quietHoursEnabled: res.enabled });
+                      }}
+                      className="canopy-pill px-2 py-1 flex items-center gap-1 text-[10px] font-medium transition-all hover:scale-105 active:scale-95 cursor-pointer pointer-events-auto"
+                      style={{
+                        background: dndActive ? 'var(--theme-accent)' : 'var(--theme-track)',
+                        color: dndActive
+                          ? 'var(--theme-on-accent, #111913)'
+                          : 'var(--theme-text-secondary)',
+                        border: '1px solid var(--theme-border)',
+                      }}
+                      title={
+                        dndActive
+                          ? 'Do Not Disturb active: hover & notifications silenced'
+                          : 'Do Not Disturb: click to silence hover and alerts'
+                      }
+                    >
+                      <BellOff className="w-3 h-3" />
+                      <span>DND</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      data-tauri-drag-region="false"
+                      onClick={() => void triggerScreenSnip()}
+                      className="canopy-pill px-2 py-1 flex items-center gap-1 text-[10px] font-medium transition-all hover:scale-105 active:scale-95 cursor-pointer pointer-events-auto"
+                      style={{
+                        background: 'var(--theme-track)',
+                        color: 'var(--theme-text-secondary)',
+                        border: '1px solid var(--theme-border)',
+                      }}
+                      title="Screen Snip: capture region and collapse Canopy"
+                    >
+                      <Scissors className="w-3 h-3" />
+                      <span>Snip</span>
+                    </button>
                   </div>
                 </div>
 
@@ -1608,12 +1789,36 @@ const CanopyShellContent: React.FC = () => {
                     <Disc className={`w-3 h-3 ${isMusicPlaying ? 'animate-spin' : ''}`} />
                     <span>{isMusicPlaying ? 'Playing' : 'Paused'}</span>
                   </span>
-                  <span
-                    className="text-[9px] font-mono truncate max-w-[90px]"
-                    style={{ color: 'var(--theme-text-secondary)' }}
-                  >
-                    {media.source_app || 'System Audio'}
-                  </span>
+                  {media.sessions && media.sessions.length > 1 ? (
+                    <button
+                      type="button"
+                      data-tauri-drag-region="false"
+                      onClick={() => {
+                        const sessions = media.sessions;
+                        if (!sessions || sessions.length <= 1) return;
+                        const currentIdx = sessions.findIndex((s) => s.is_current);
+                        const nextIdx = currentIdx >= 0 ? (currentIdx + 1) % sessions.length : 0;
+                        void handleSelectSession(sessions[nextIdx].id);
+                      }}
+                      title="Click to cycle media source (Spotify, Chrome, etc.)"
+                      className="text-[9px] font-mono truncate max-w-[100px] px-1.5 py-0.5 rounded border flex items-center gap-1 transition-colors cursor-pointer hover:border-[var(--theme-accent)]"
+                      style={{
+                        color: 'var(--theme-text-primary)',
+                        background: 'var(--theme-card, rgba(255, 255, 255, 0.05))',
+                        borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
+                      }}
+                    >
+                      <span className="truncate">{media.source_app || 'Audio'}</span>
+                      <ChevronRight className="w-2.5 h-2.5 shrink-0 opacity-70" />
+                    </button>
+                  ) : (
+                    <span
+                      className="text-[9px] font-mono truncate max-w-[90px]"
+                      style={{ color: 'var(--theme-text-secondary)' }}
+                    >
+                      {media.source_app || 'System Audio'}
+                    </span>
+                  )}
                 </div>
 
                 {/* Circular Vinyl Artwork with Circular Progress Ring */}
@@ -1660,6 +1865,13 @@ const CanopyShellContent: React.FC = () => {
                     <div
                       data-tauri-drag-region="false"
                       onClick={handlePlayPause}
+                      onWheel={(e) => {
+                        e.stopPropagation();
+                        const delta = e.deltaY < 0 ? 5 : -5;
+                        const duration = media.duration_secs || 300;
+                        const newPos = Math.max(0, Math.min(duration, media.position_secs + delta));
+                        void handleSeek(newPos);
+                      }}
                       className={`absolute w-[56px] h-[56px] rounded-full overflow-hidden border border-white/15 shadow-lg flex items-center justify-center pointer-events-auto cursor-pointer ${
                         isMusicPlaying ? 'animate-vinyl-spin' : ''
                       }`}
@@ -1667,7 +1879,7 @@ const CanopyShellContent: React.FC = () => {
                         background:
                           'radial-gradient(circle at center, #2a2438 0%, #181825 55%, #0d0d14 100%)',
                       }}
-                      title="Click vinyl to Play / Pause"
+                      title="Click vinyl to Play / Pause • Scroll wheel to seek ±5s"
                     >
                       {resolvedArtwork ? (
                         <img

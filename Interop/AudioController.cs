@@ -1,8 +1,8 @@
+using System.Runtime.InteropServices;
 using NAudio.CoreAudioApi;
 using NAudio.CoreAudioApi.Interfaces;
 using NAudio.Dsp;
 using NAudio.Wave;
-
 namespace Canopy.Interop;
 
 public sealed class AudioVolumeStateChangedEventArgs(float volumePercent, bool isMuted) : EventArgs
@@ -668,4 +668,81 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
     public void OnDeviceAdded(string pwstrDeviceId) { }
     public void OnDeviceRemoved(string deviceId) { }
     public void OnPropertyValueChanged(string pwstrDeviceId, PropertyKey key) { }
+
+    public record AudioDeviceInfo(string Id, string Name, bool IsDefault, string Flow);
+
+    public List<AudioDeviceInfo> GetAudioDevices(DataFlow dataFlow = DataFlow.Render)
+    {
+        var list = new List<AudioDeviceInfo>();
+        try
+        {
+            using var enumerator = new MMDeviceEnumerator();
+            string defaultId = string.Empty;
+            try
+            {
+                var defaultDevice = enumerator.GetDefaultAudioEndpoint(dataFlow, Role.Multimedia);
+                defaultId = defaultDevice?.ID ?? string.Empty;
+            }
+            catch { }
+
+            var devices = enumerator.EnumerateAudioEndPoints(dataFlow, DeviceState.Active);
+            foreach (var dev in devices)
+            {
+                try
+                {
+                    bool isDefault = !string.IsNullOrEmpty(defaultId) &&
+                                     string.Equals(dev.ID, defaultId, StringComparison.OrdinalIgnoreCase);
+                    list.Add(new AudioDeviceInfo(
+                        Id: dev.ID,
+                        Name: dev.FriendlyName,
+                        IsDefault: isDefault,
+                        Flow: dataFlow == DataFlow.Render ? "render" : "capture"
+                    ));
+                }
+                catch { }
+            }
+        }
+        catch { }
+        return list;
+    }
+
+    public bool SetDefaultAudioDevice(string deviceId)
+    {
+        if (string.IsNullOrWhiteSpace(deviceId)) return false;
+        try
+        {
+            var policyConfig = (IPolicyConfig)new _PolicyConfigClient();
+            int hr1 = policyConfig.SetDefaultEndpoint(deviceId, Role.Multimedia);
+            int hr2 = policyConfig.SetDefaultEndpoint(deviceId, Role.Console);
+            int hr3 = policyConfig.SetDefaultEndpoint(deviceId, Role.Communications);
+            return hr1 == 0 || hr2 == 0;
+        }
+        catch (Exception ex)
+        {
+            _lastError = ex.Message;
+            return false;
+        }
+    }
+}
+
+[ComImport, Guid("f8679f50-850a-41cf-9c72-430f290290c8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IPolicyConfig
+{
+    [PreserveSig] int GetMixFormat();
+    [PreserveSig] int GetDeviceFormat();
+    [PreserveSig] int ResetDeviceFormat();
+    [PreserveSig] int SetDeviceFormat();
+    [PreserveSig] int GetProcessingPeriod();
+    [PreserveSig] int SetProcessingPeriod();
+    [PreserveSig] int GetShareMode();
+    [PreserveSig] int SetShareMode();
+    [PreserveSig] int GetPropertyValue();
+    [PreserveSig] int SetPropertyValue();
+    [PreserveSig] int SetDefaultEndpoint([MarshalAs(UnmanagedType.LPWStr)] string wszDeviceId, Role eRole);
+    [PreserveSig] int SetEndpointVisibility();
+}
+
+[ComImport, Guid("870af99c-171d-4f9e-af0d-e63df40c2bc9")]
+internal class _PolicyConfigClient
+{
 }

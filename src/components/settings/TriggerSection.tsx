@@ -42,6 +42,29 @@ export function TriggerSection() {
 
       {settings.topHoverTrigger && (
         <div className="flex flex-col gap-2.5 p-2.5 rounded-xl border border-[var(--theme-border)] bg-[var(--theme-track)]">
+          {/* Live Top-Bezel Trigger Visualizer */}
+          <div className="flex flex-col gap-1.5 p-2.5 rounded-lg border border-[var(--theme-border)] bg-[var(--theme-card)]">
+            <div className="flex items-center justify-between text-[11px] text-[var(--theme-text-secondary)] font-mono">
+              <span>Top Bezel Catch Zone Preview</span>
+              <span className="text-[var(--theme-accent)] font-semibold">
+                {settings.triggerWidth}px × {settings.triggerHeight}px
+              </span>
+            </div>
+            <div className="relative w-full h-12 rounded-md border border-[var(--theme-border)] bg-black/20 flex flex-col items-center overflow-hidden">
+              <div
+                className="h-2 rounded-b-md transition-all duration-150 shadow-[0_0_8px_var(--theme-accent)]"
+                style={{
+                  width: `${Math.min(100, Math.max(10, (settings.triggerWidth / 1920) * 100))}%`,
+                  height: `${Math.max(3, settings.triggerHeight * 0.8)}px`,
+                  backgroundColor: 'var(--theme-accent)',
+                }}
+              />
+              <div className="absolute bottom-1 text-[10px] text-[var(--theme-text-secondary)] opacity-60">
+                1920px Display Frame
+              </div>
+            </div>
+          </div>
+
           <SliderRow
             label="Catch Zone Width"
             value={settings.triggerWidth}

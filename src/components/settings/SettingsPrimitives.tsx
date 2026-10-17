@@ -137,7 +137,7 @@ export function SegmentedChoice<T extends string>({
             className="px-2.5 py-1 rounded-lg text-[11px] font-mono transition-all flex items-center gap-1.5 pointer-events-auto cursor-pointer"
             style={{
               background: selected ? 'var(--theme-accent)' : 'transparent',
-              color: selected ? '#11111b' : 'var(--theme-text-secondary)',
+              color: selected ? 'var(--theme-on-accent, #111913)' : 'var(--theme-text-secondary)',
               fontWeight: selected ? 600 : 400,
             }}
           >

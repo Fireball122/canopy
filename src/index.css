@@ -7,6 +7,7 @@
   --theme-card: rgba(26, 38, 29, 0.78);
   --theme-border: rgba(116, 168, 108, 0.22);
   --theme-accent: #74a86c;
+  --theme-on-accent: #111913;
   --theme-accent-soft: rgba(116, 168, 108, 0.18);
   --theme-accent-warm: #e07a5f;
   --theme-text: #f5efe6;
@@ -24,8 +25,8 @@ html[data-theme="light"] {
   --theme-card: rgba(255, 255, 255, 0.9);
   --theme-border: rgba(45, 65, 50, 0.14);
   --theme-accent: #3b7537;
+  --theme-on-accent: #ffffff;
   --theme-accent-soft: rgba(59, 117, 55, 0.14);
-  --theme-text-primary: #152217;
   --theme-text-secondary: #4a6350;
   --theme-track: rgba(45, 65, 50, 0.08);
   --theme-surface-hover: rgba(0, 0, 0, 0.05);

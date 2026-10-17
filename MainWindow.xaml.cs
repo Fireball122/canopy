@@ -42,6 +42,7 @@ public partial class MainWindow : Window
         "Canopy",
         "settings.json");
     private static readonly JsonSerializerOptions IndentedJsonOptions = new() { WriteIndented = true };
+    private static readonly SemaphoreSlim _settingsFileLock = new(1, 1);
 
     private readonly DispatcherTimer _cursorPollTimer;
     private readonly DispatcherTimer _hideDebounceTimer;
@@ -54,6 +55,7 @@ public partial class MainWindow : Window
     private bool _webViewReady;
     private readonly bool _startExpanded;
     private volatile bool _isSuspending;
+    private CancellationTokenSource? _suspendCts;
     private volatile bool _isResizingWindow;
     private DateTime _ignoreAutoHideUntilUtc = DateTime.MinValue;
     private int _currentBrightness = 80;
@@ -85,6 +87,7 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, DateTime> _pendingReminders = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _firedReminders = new(StringComparer.OrdinalIgnoreCase);
     private bool _notificationVisible;
+    private bool _caffeineEnabled;
 
     /// <summary>Deferred reminders are dropped once they are this stale, so a long game session never
     /// dumps a burst of overdue alerts the moment gameplay ends.</summary>
@@ -175,7 +178,6 @@ public partial class MainWindow : Window
 
 
         _log.Write("MainWindow constructed");
-        _ = Task.Run(() => _currentBrightness = QueryHardwareBrightness());
     }
 
     private void OnWindowSourceInitialized(object? sender, EventArgs e)
@@ -198,6 +200,7 @@ public partial class MainWindow : Window
         Win32.RECT panelMonitor = GetPanelMonitor();
         PositionWindowAtTopCenter(panelMonitor, offscreen: !_startExpanded);
         _log.Write($"Source initialized; panel monitor {panelMonitor.Left},{panelMonitor.Top} {panelMonitor.Width}x{panelMonitor.Height}");
+        _ = Task.Run(() => _currentBrightness = QueryHardwareBrightness());
     }
 
     private const double BaseDesignWidth = 850.0;
@@ -380,7 +383,16 @@ public partial class MainWindow : Window
                     invoke(cmd, args = {}) {
                       return new Promise((resolve, reject) => {
                         const id = seq++;
-                        pending.set(id, { resolve, reject });
+                        const timer = setTimeout(() => {
+                          if (pending.has(id)) {
+                            pending.delete(id);
+                            reject(new Error(`RPC timeout: ${cmd}`));
+                          }
+                        }, 10000);
+                        pending.set(id, {
+                          resolve: (res) => { clearTimeout(timer); resolve(res); },
+                          reject: (err) => { clearTimeout(timer); reject(err); }
+                        });
                         window.chrome.webview.postMessage(JSON.stringify({ id, cmd, args }));
                       });
                     }
@@ -414,7 +426,8 @@ public partial class MainWindow : Window
                         string mascotPath = Path.Combine(mascotDir, filename);
                         if (File.Exists(mascotPath))
                         {
-                            FileStream fs = File.OpenRead(mascotPath);
+                            byte[] bytes = File.ReadAllBytes(mascotPath);
+                            var ms = new MemoryStream(bytes);
                             string ext = Path.GetExtension(filename).ToLowerInvariant();
                             string contentType = ext switch
                             {
@@ -425,10 +438,10 @@ public partial class MainWindow : Window
                                 _ => "application/octet-stream"
                             };
                             args.Response = core.Environment.CreateWebResourceResponse(
-                                fs,
+                                ms,
                                 200,
                                 "OK",
-                                $"Content-Type: {contentType}\r\nAccess-Control-Allow-Origin: *");
+                                $"Content-Type: {contentType}\r\nCache-Control: no-store, no-cache, must-revalidate\r\nAccess-Control-Allow-Origin: *");
                         }
                     }
                 }
@@ -700,14 +713,24 @@ public partial class MainWindow : Window
 
             case "save_settings_json":
             {
-                string dir = Path.GetDirectoryName(SettingsJsonPath)!;
-                if (!Directory.Exists(dir))
+                await _settingsFileLock.WaitAsync();
+                try
                 {
-                    Directory.CreateDirectory(dir);
+                    string dir = Path.GetDirectoryName(SettingsJsonPath)!;
+                    if (!Directory.Exists(dir))
+                    {
+                        Directory.CreateDirectory(dir);
+                    }
+                    string tempPath = SettingsJsonPath + ".tmp";
+                    string json = JsonSerializer.Serialize(args, IndentedJsonOptions);
+                    await File.WriteAllTextAsync(tempPath, json);
+                    File.Move(tempPath, SettingsJsonPath, overwrite: true);
+                    return true;
                 }
-                string json = JsonSerializer.Serialize(args, IndentedJsonOptions);
-                await File.WriteAllTextAsync(SettingsJsonPath, json);
-                return true;
+                finally
+                {
+                    _settingsFileLock.Release();
+                }
             }
 
             case "upload_mascot":
@@ -734,7 +757,8 @@ public partial class MainWindow : Window
                     Directory.CreateDirectory(targetDir);
                     string targetPath = Path.Combine(targetDir, filename);
                     await File.WriteAllBytesAsync(targetPath, fileBytes);
-                    return new { url = $"https://canopy.local/mascot/{filename}", path = targetPath };
+                    long ver = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                    return new { url = $"https://canopy.local/mascot/{Uri.EscapeDataString(filename)}?v={ver}", path = targetPath };
                 }
                 return null;
             }
@@ -864,6 +888,67 @@ public partial class MainWindow : Window
                     _audioController.SetMasterVolumePercent(vol);
                 }
                 return null;
+            }
+
+            case "list_audio_devices":
+            {
+                string flow = "render";
+                if (args.ValueKind == JsonValueKind.Object && args.TryGetProperty("flow", out var flowEl))
+                {
+                    flow = flowEl.GetString() ?? "render";
+                }
+                var dataFlow = string.Equals(flow, "capture", StringComparison.OrdinalIgnoreCase)
+                    ? NAudio.CoreAudioApi.DataFlow.Capture
+                    : NAudio.CoreAudioApi.DataFlow.Render;
+                return _audioController.GetAudioDevices(dataFlow);
+            }
+
+            case "set_default_audio_device":
+            {
+                if (args.ValueKind == JsonValueKind.Object && args.TryGetProperty("device_id", out var idEl))
+                {
+                    string devId = idEl.GetString() ?? string.Empty;
+                    return _audioController.SetDefaultAudioDevice(devId);
+                }
+                return false;
+            }
+
+            case "toggle_caffeine":
+            {
+                _caffeineEnabled = !_caffeineEnabled;
+                if (_caffeineEnabled)
+                {
+                    Win32.SetThreadExecutionState(Win32.ES_CONTINUOUS | Win32.ES_DISPLAY_REQUIRED | Win32.ES_SYSTEM_REQUIRED);
+                }
+                else
+                {
+                    Win32.SetThreadExecutionState(Win32.ES_CONTINUOUS);
+                }
+                return new { enabled = _caffeineEnabled };
+            }
+
+            case "get_caffeine_status":
+                return new { enabled = _caffeineEnabled };
+
+            case "trigger_screen_snip":
+            {
+                CollapsePanel();
+                try
+                {
+                    Process.Start(new ProcessStartInfo("ms-screenclip:") { UseShellExecute = true });
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    _log.WriteException("ScreenSnip", ex);
+                    return false;
+                }
+            }
+
+            case "toggle_dnd":
+            {
+                _quietHoursEnabled = !_quietHoursEnabled;
+                return new { enabled = _quietHoursEnabled };
             }
 
             case "get_wallpapers":
@@ -1239,9 +1324,14 @@ public partial class MainWindow : Window
             _log.WriteException("WmiBrightnessApply", ex);
         }
 
-        // 2. DDC/CI fallback
+        // 2. DDC/CI fallback: target the monitor under the cursor
         if (_hwnd == IntPtr.Zero) return;
-        IntPtr hMonitor = Win32.MonitorFromWindow(_hwnd, Win32.MONITOR_DEFAULTTONEAREST);
+        Win32.GetCursorPos(out Win32.POINT pt);
+        IntPtr hMonitor = Win32.MonitorFromPoint(pt, Win32.MONITOR_DEFAULTTONEAREST);
+        if (hMonitor == IntPtr.Zero)
+        {
+            hMonitor = Win32.MonitorFromWindow(_hwnd, Win32.MONITOR_DEFAULTTONEAREST);
+        }
         if (Win32.GetNumberOfPhysicalMonitorsFromHMONITOR(hMonitor, out uint count) && count > 0)
         {
             var monitors = new Win32.PHYSICAL_MONITOR[count];
@@ -1268,8 +1358,6 @@ public partial class MainWindow : Window
         if (!_webViewReady || ShellWebView.CoreWebView2 is null || id == 0)
             return;
 
-        if (_isSuspending)
-            return;
         string json = JsonSerializer.Serialize(new
         {
             type = "rpc-response",
@@ -1292,7 +1380,7 @@ public partial class MainWindow : Window
 
         if (!_isExpanded && !_slideTargetExpanded)
         {
-            bool isLifecycleEvent = eventName is "canopy:set-open" or "caelestia:set-open" or "toggle-dropdown" or "top-hover-trigger-changed";
+            bool isLifecycleEvent = eventName is "canopy:set-open" or "caelestia:set-open" or "toggle-dropdown" or "top-hover-trigger-changed" or "diagnostic-logging-changed" or "canopy:system-theme-changed";
             if (!isLifecycleEvent)
                 return;
         }
@@ -1396,6 +1484,16 @@ public partial class MainWindow : Window
     /// </summary>
     private void ApplyHostConfig(JsonElement args)
     {
+        if (TryGetBool(args, "topHoverTrigger", out bool topHover))
+        {
+            _topHoverTriggerEnabled = topHover;
+        }
+
+        if (TryGetInt(args, "appWidth", out int appW) && TryGetInt(args, "appHeight", out int appH))
+        {
+            SetCustomWindowSize(appW, appH);
+        }
+
         if (TryGetInt(args, "triggerWidth", out int width))
         {
             _topTriggerWidthPx = Math.Clamp(width, 100, 4096);
@@ -1653,6 +1751,15 @@ public partial class MainWindow : Window
             }
             handled = true;
         }
+        else if (msg == Win32.WM_WININICHANGE)
+        {
+            string? section = lParam != IntPtr.Zero ? Marshal.PtrToStringAuto(lParam) : null;
+            if (section == "ImmersiveColorSet" || section == null)
+            {
+                bool isDark = Win32.IsSystemInDarkMode();
+                EmitFrontendEvent("canopy:system-theme-changed", new { isDark });
+            }
+        }
 
         return IntPtr.Zero;
     }
@@ -1769,8 +1876,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _slideFromPhysicalY = currentPhysicalY;
-        if (expanded && _slideFromPhysicalY >= physicalTargetY)
+        if (expanded)
         {
             _slideFromPhysicalY = physicalTargetY - physicalHeight - (int)Math.Round(100 * scaleY);
             if (_hwnd != IntPtr.Zero)
@@ -1778,8 +1884,12 @@ public partial class MainWindow : Window
                 Win32.SetWindowPos(_hwnd, IntPtr.Zero, physicalX, _slideFromPhysicalY, physicalWidth, physicalHeight,
                     Win32.SWP_NOZORDER | Win32.SWP_NOACTIVATE);
             }
+            ApplyAdaptiveZoom(monitor);
         }
-
+        else
+        {
+            _slideFromPhysicalY = currentPhysicalY;
+        }
         _slideDurationMs = duration;
         _slideStopwatch.Restart();
         CompositionTarget.Rendering += OnCompositionRendering;
@@ -1850,15 +1960,23 @@ public partial class MainWindow : Window
             return;
         }
 
+        _suspendCts?.Cancel();
+        _suspendCts?.Dispose();
+        _suspendCts = new CancellationTokenSource();
+        var token = _suspendCts.Token;
         _isSuspending = true;
         try
         {
             ShellWebView.Visibility = Visibility.Collapsed;
-            await Task.Delay(100);
+            await Task.Delay(100, token);
             if (!_isExpanded && !_slideTargetExpanded && ShellWebView.CoreWebView2 is not null)
             {
                 await ShellWebView.CoreWebView2.TrySuspendAsync();
             }
+        }
+        catch (OperationCanceledException)
+        {
+            // Canceled by rapid ResumeWebView
         }
         catch (Exception ex)
         {
@@ -1872,14 +1990,16 @@ public partial class MainWindow : Window
 
     private void ResumeWebView()
     {
+        _suspendCts?.Cancel();
+        _suspendCts?.Dispose();
+        _suspendCts = null;
         _isSuspending = false;
+        ShellWebView.Visibility = Visibility.Visible;
         if (ShellWebView.CoreWebView2 is null)
         {
-            ShellWebView.Visibility = Visibility.Visible;
             return;
         }
 
-        ShellWebView.Visibility = Visibility.Visible;
         try
         {
             ShellWebView.CoreWebView2.Resume();
@@ -1897,42 +2017,66 @@ public partial class MainWindow : Window
     private bool IsForegroundWindowFullscreen(Win32.RECT monitor)
     {
         IntPtr fg = Win32.GetForegroundWindow();
-        if (fg == IntPtr.Zero || fg == _hwnd)
+        if (fg != IntPtr.Zero && fg != _hwnd)
         {
-            return false;
+            string className = Win32.GetWindowClassName(fg);
+            if (!string.Equals(className, "Progman", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(className, "WorkerW", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(className, "Shell_TrayWnd", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(className, "Shell_SecondaryTrayWnd", StringComparison.OrdinalIgnoreCase))
+            {
+                if (Win32.GetWindowRect(fg, out Win32.RECT fgRect))
+                {
+                    IntPtr hMon = Win32.MonitorFromWindow(fg, Win32.MONITOR_DEFAULTTONEAREST);
+                    Win32.MONITORINFO mi = new() { cbSize = Marshal.SizeOf<Win32.MONITORINFO>() };
+                    if (!Win32.GetMonitorInfo(hMon, ref mi))
+                    {
+                        mi.rcMonitor = monitor;
+                    }
+                    if (IsSameMonitor(mi.rcMonitor, monitor))
+                    {
+                        if (fgRect.Left <= mi.rcMonitor.Left &&
+                            fgRect.Top <= mi.rcMonitor.Top &&
+                            fgRect.Right >= mi.rcMonitor.Right &&
+                            fgRect.Bottom >= mi.rcMonitor.Bottom)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
         }
 
-        string className = Win32.GetWindowClassName(fg);
-        if (string.Equals(className, "Progman", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(className, "WorkerW", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(className, "Shell_TrayWnd", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(className, "Shell_SecondaryTrayWnd", StringComparison.OrdinalIgnoreCase))
+        // Secondary / unfocused check: probe the top-level window at the center of this monitor
+        // to detect borderless fullscreen games that lost foreground focus to another display.
+        Win32.POINT centerPoint = new() { X = monitor.Left + (monitor.Width / 2), Y = monitor.Top + (monitor.Height / 2) };
+        IntPtr centerHwnd = Win32.GetAncestor(Win32.WindowFromPoint(centerPoint), Win32.GA_ROOT);
+        if (centerHwnd != IntPtr.Zero && centerHwnd != _hwnd)
         {
-            return false;
+            string className = Win32.GetWindowClassName(centerHwnd);
+            if (!string.Equals(className, "Progman", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(className, "WorkerW", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(className, "Shell_TrayWnd", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(className, "Shell_SecondaryTrayWnd", StringComparison.OrdinalIgnoreCase))
+            {
+                if (Win32.GetWindowRect(centerHwnd, out Win32.RECT centerRect))
+                {
+                    if (centerRect.Left <= monitor.Left + 2 &&
+                        centerRect.Top <= monitor.Top + 2 &&
+                        centerRect.Right >= monitor.Right - 2 &&
+                        centerRect.Bottom >= monitor.Bottom - 2)
+                    {
+                        string proc = Win32.GetWindowProcessName(centerHwnd);
+                        if (!string.IsNullOrEmpty(proc) && !NonGameProcessNames.Contains(proc))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
         }
 
-        if (!Win32.GetWindowRect(fg, out Win32.RECT fgRect))
-        {
-            return false;
-        }
-
-        IntPtr hMon = Win32.MonitorFromWindow(fg, Win32.MONITOR_DEFAULTTONEAREST);
-        Win32.MONITORINFO mi = new() { cbSize = Marshal.SizeOf<Win32.MONITORINFO>() };
-        if (!Win32.GetMonitorInfo(hMon, ref mi))
-        {
-            mi.rcMonitor = monitor;
-        }
-        // Only suppress if the fullscreen window is on the SAME monitor the cursor is hovering
-        if (!IsSameMonitor(mi.rcMonitor, monitor))
-        {
-            return false;
-        }
-
-        // True borderless fullscreen game or video covers or exceeds the entire rcMonitor bounds
-        return fgRect.Left <= mi.rcMonitor.Left &&
-               fgRect.Top <= mi.rcMonitor.Top &&
-               fgRect.Right >= mi.rcMonitor.Right &&
-               fgRect.Bottom >= mi.rcMonitor.Bottom;
+        return false;
     }
 
     /// <summary>
@@ -2058,13 +2202,14 @@ public partial class MainWindow : Window
             if (!due && !deferred)
                 continue;
 
-            if (_fullscreenAppActive)
+            bool gameRunning = _fullscreenAppActive || ShouldSuppressTrigger(Win32.GetPrimaryMonitorBounds());
+            if (gameRunning)
             {
                 // Never cover gameplay: hold the alert, then drop it if it went stale.
                 if (!deferred)
                 {
                     _pendingReminders[fireKey] = now;
-                    _log.Write($"reminder deferred (game in foreground): {reminder.Text}");
+                    _log.Write($"reminder deferred (fullscreen app active): {reminder.Text}");
                 }
                 else if (now - deferredAt > ReminderDeferWindow)
                 {
@@ -2128,8 +2273,9 @@ public partial class MainWindow : Window
         // Out-of-scope monitors must not even be sampled, so a stray cursor at the top of a
         // secondary display can never summon the panel.
         bool scopeAllows = string.Equals(_triggerMonitorScope, "all", StringComparison.OrdinalIgnoreCase) || onPrimary;
-        int effectiveTriggerWidth = Math.Clamp(_topTriggerWidthPx, 100, cursorMonitor.Width);
-        int centerX = cursorMonitor.Left + (cursorMonitor.Width / 2);
+        Win32.RECT evaluationMonitor = _isExpanded && _expandedMonitor.Width > 0 ? _expandedMonitor : cursorMonitor;
+        int effectiveTriggerWidth = Math.Clamp(_topTriggerWidthPx, 100, evaluationMonitor.Width);
+        int centerX = evaluationMonitor.Left + (evaluationMonitor.Width / 2);
         int triggerHeight = Math.Max(26, _topTriggerHeightPx);
         bool inTopTriggerZone;
         if (!_isExpanded)
@@ -2144,8 +2290,8 @@ public partial class MainWindow : Window
         }
         else
         {
-            // Expanded: keep open while hovering inside the card (plus margin) or the trigger band
-            bool inTriggerBand = cursor.Y >= (cursorMonitor.Top - 10) && cursor.Y <= (cursorMonitor.Top + triggerHeight);
+            // Expanded: keep open while hovering inside the card (plus margin) or the trigger band on the active panel display
+            bool inTriggerBand = cursor.Y >= (evaluationMonitor.Top - 10) && cursor.Y <= (evaluationMonitor.Top + triggerHeight);
             inTopTriggerZone = scopeAllows && inTriggerBand && Math.Abs(cursor.X - centerX) <= (effectiveTriggerWidth / 2);
         }
         // If user set panelMonitorMode to "primary" but the primary monitor has a fullscreen game running,
@@ -2254,9 +2400,13 @@ public partial class MainWindow : Window
 
         if (Win32.GetCursorPos(out Win32.POINT cursor))
         {
-            Win32.RECT monitor = GetActiveMonitorBounds();
+            Win32.RECT monitor = _expandedMonitor.Width > 0 ? _expandedMonitor : GetActiveMonitorBounds();
+            int effectiveTriggerWidth = Math.Clamp(_topTriggerWidthPx, 100, monitor.Width);
+            int centerX = monitor.Left + (monitor.Width / 2);
             int triggerHeight = Math.Max(26, _topTriggerHeightPx);
-            bool inTrigger = cursor.Y >= (monitor.Top - 12) && cursor.Y <= (monitor.Top + triggerHeight);
+            bool inTrigger = cursor.Y >= (monitor.Top - 12) &&
+                             cursor.Y <= (monitor.Top + triggerHeight) &&
+                             Math.Abs(cursor.X - centerX) <= (effectiveTriggerWidth / 2);
             if (IsCursorInsideWindow(cursor) || inTrigger)
                 return;
         }
@@ -2398,6 +2548,11 @@ public partial class MainWindow : Window
         _cursorPollTimer.Stop();
         _hideDebounceTimer.Stop();
         StopSlideAnimation();
+        _reminderTimer.Stop();
+        _notificationCollapseTimer.Stop();
+        _brightnessCts?.Cancel();
+        _brightnessCts?.Dispose();
+        _brightnessCts = null;
         _audioController.VolumeStateChanged -= OnMasterVolumeChanged;
 
         if (_hwnd != IntPtr.Zero)
@@ -2408,12 +2563,12 @@ public partial class MainWindow : Window
         RemoveTrayIcon();
         _hwndSource?.RemoveHook(WndProc);
         _audioController.Dispose();
+        _mediaController.Dispose();
         _audioSessions.Dispose();
         _desktopWallpaper.Dispose();
         _wallpaperService.Dispose();
         _systemMonitorService.Dispose();
         ShellWebView.Dispose();
-        _log.Write("shutdown");
 
         base.OnClosed(e);
     }
@@ -2567,6 +2722,7 @@ public partial class MainWindow : Window
         {
             _log.Enabled = loggingItem.IsChecked;
             _log.Write($"diagnostic logging {(loggingItem.IsChecked ? "enabled" : "disabled")}");
+            EmitFrontendEvent("diagnostic-logging-changed", new { enabled = _log.Enabled });
         };
         menu.Items.Add(loggingItem);
 

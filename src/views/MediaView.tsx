@@ -27,10 +27,12 @@ import { useAlbumArt } from '../hooks/useAlbumArt';
 import { usePanelOpen } from '../hooks/usePanelOpen';
 import { usePlaybackClock } from '../hooks/usePlaybackClock';
 import {
+  type AudioDeviceInfo,
   type AudioSessionEntry,
   getAudioSessions,
   getAudioSpectrum,
   getMediaSessions,
+  listAudioDevices,
   type MediaInfo,
   type MediaSessionItem,
   mediaCycleRepeat,
@@ -38,6 +40,7 @@ import {
   selectMediaSession,
   setAudioSessionMute,
   setAudioSessionVolume,
+  setDefaultAudioDevice,
 } from '../services/hostBridge';
 
 export interface MediaViewProps {
@@ -482,6 +485,27 @@ export const MediaView: React.FC<MediaViewProps> = ({
     window.addEventListener('mousedown', handleOutsideClick);
     return () => window.removeEventListener('mousedown', handleOutsideClick);
   }, [sessionMenuOpen]);
+  const [audioDevices, setAudioDevices] = useState<AudioDeviceInfo[]>([]);
+  const [deviceDropdownOpen, setDeviceDropdownOpen] = useState(false);
+  const deviceDropdownRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!panelOpen) return;
+    void listAudioDevices()
+      .then(setAudioDevices)
+      .catch(() => undefined);
+  }, [panelOpen]);
+
+  useEffect(() => {
+    if (!deviceDropdownOpen) return;
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (deviceDropdownRef.current && !deviceDropdownRef.current.contains(e.target as Node)) {
+        setDeviceDropdownOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', handleOutsideClick);
+    return () => window.removeEventListener('mousedown', handleOutsideClick);
+  }, [deviceDropdownOpen]);
 
   const sessions: MediaSessionItem[] = useMemo(() => {
     const base =
@@ -1316,14 +1340,76 @@ export const MediaView: React.FC<MediaViewProps> = ({
               }}
             >
               <div
-                className="flex items-center justify-between pb-1.5 mb-1 border-b text-[10px] font-mono uppercase tracking-widest"
+                className="flex items-center justify-between pb-1.5 mb-1 border-b text-[10px] font-mono uppercase tracking-widest relative"
                 style={{
                   color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.65))',
                   borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
                 }}
               >
                 <span>Volume Mixer</span>
-                <span>{mixerSessions.length} apps</span>
+                <div className="flex items-center gap-2">
+                  {audioDevices.length > 0 && (
+                    <div className="relative" ref={deviceDropdownRef}>
+                      <button
+                        type="button"
+                        data-tauri-drag-region="false"
+                        onClick={() => setDeviceDropdownOpen((o) => !o)}
+                        className="flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-medium tracking-normal hover:border-[var(--theme-accent)] transition-all cursor-pointer pointer-events-auto"
+                        style={{
+                          borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.12))',
+                          background: 'var(--theme-track, rgba(255, 255, 255, 0.04))',
+                          color: 'var(--theme-text-primary, #cdd6f4)',
+                        }}
+                        title="Switch default audio output device"
+                      >
+                        <Headphones className="w-2.5 h-2.5 text-[var(--theme-accent)]" />
+                        <span className="truncate max-w-[84px]">
+                          {audioDevices.find((d) => d.is_default)?.name || 'Audio Output'}
+                        </span>
+                        <ChevronDown className="w-2 h-2 opacity-60" />
+                      </button>
+                      {deviceDropdownOpen && (
+                        <div
+                          className="absolute right-0 top-full mt-1 w-52 p-1 rounded-lg border shadow-xl z-50 backdrop-blur-xl"
+                          style={{
+                            background: 'var(--theme-card, #1e1e2e)',
+                            borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.12))',
+                          }}
+                        >
+                          <div className="text-[9px] uppercase tracking-wider px-2 py-1 text-[var(--theme-text-secondary)] font-mono border-b border-[var(--theme-border)]">
+                            Select Output Device
+                          </div>
+                          <div className="max-h-36 overflow-y-auto space-y-0.5 mt-1">
+                            {audioDevices.map((dev) => (
+                              <button
+                                key={dev.id}
+                                type="button"
+                                data-tauri-drag-region="false"
+                                onClick={async () => {
+                                  await setDefaultAudioDevice(dev.id);
+                                  setDeviceDropdownOpen(false);
+                                  const refreshed = await listAudioDevices();
+                                  setAudioDevices(refreshed);
+                                }}
+                                className="w-full text-left px-2 py-1 rounded text-[11px] flex items-center justify-between hover:bg-[var(--theme-track)] transition-colors cursor-pointer pointer-events-auto"
+                                style={{
+                                  color: dev.is_default
+                                    ? 'var(--theme-accent)'
+                                    : 'var(--theme-text-primary)',
+                                  fontWeight: dev.is_default ? 600 : 400,
+                                }}
+                              >
+                                <span className="truncate">{dev.name}</span>
+                                {dev.is_default && <Check className="w-3 h-3 shrink-0 ml-1" />}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <span>{mixerSessions.length} apps</span>
+                </div>
               </div>
 
               {mixerSessions.length === 0 ? (

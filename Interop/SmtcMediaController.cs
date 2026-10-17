@@ -33,8 +33,13 @@ public sealed record SmtcMediaSnapshot(
 /// active media sessions, timeline progress, and album artwork, with automatic Chromium/Brave
 /// verification and fallback to native Win32 virtual media keys (0xB3, 0xB0, 0xB1).
 /// </summary>
-public sealed class SmtcMediaController
+public sealed class SmtcMediaController : IDisposable
 {
+    public void Dispose()
+    {
+        _manager = null;
+    }
+
     private GlobalSystemMediaTransportControlsSessionManager? _manager;
     private string? _selectedSessionId;
     private string? _lastArtworkKey;

@@ -245,14 +245,8 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
     }
     setTransitioningPath(entry.path);
 
-    // When a wallpaper is clicked, automatically switch theme to 'adaptive' if currently on 'canopy'
-    const targetThemeMode = settings.themeMode === 'canopy' ? 'adaptive' : settings.themeMode;
-    if (settings.themeMode === 'canopy') {
-      updateSettings({ themeMode: 'adaptive', activeWallpaperPath: entry.path });
-    } else {
-      updateSettings({ activeWallpaperPath: entry.path });
-    }
-
+    updateSettings({ activeWallpaperPath: entry.path });
+    const targetThemeMode = settings.themeMode;
     const token = ++themeRequestRef.current;
     const imgEl = imgRefs.current[entry.path] ?? null;
     if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
@@ -647,7 +641,7 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
       {settings.wallpaperPerMonitor && (
         <div
           data-tauri-drag-region="false"
-          className="shrink-0 rounded-[13px] overflow-hidden pointer-events-auto"
+          className="shrink-0 rounded-[13px] pointer-events-auto relative"
           style={{
             background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
             border: '1px solid var(--theme-border, rgba(255, 255, 255, 0.07))',

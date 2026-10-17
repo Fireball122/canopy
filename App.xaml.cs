@@ -41,55 +41,7 @@ public partial class App : Application
         _singleInstanceMutex = new Mutex(initiallyOwned: true, MutexName, out _ownsMutex);
         if (!_ownsMutex)
         {
-            string? commandToSend = null;
-            if (HasArgument(e.Args, "--test-notify"))
-            {
-                commandToSend = "notify:Canopy Reminder|Raindrop to Pill Capsule alert working seamlessly!";
-            }
-            else if (HasArgument(e.Args, "--collapse"))
-            {
-                commandToSend = "collapse";
-            }
-            else if (HasArgument(e.Args, "--toggle"))
-            {
-                commandToSend = "toggle";
-            }
-            else if (HasArgument(e.Args, "--expand"))
-            {
-                commandToSend = "expand";
-            }
-            else if (HasArgument(e.Args, "--next-wallpaper"))
-            {
-                commandToSend = "next-wallpaper";
-            }
-            else
-            {
-                int notifyIdx = Array.FindIndex(e.Args, a => string.Equals(a, "--notify", StringComparison.OrdinalIgnoreCase));
-                if (notifyIdx >= 0 && notifyIdx + 1 < e.Args.Length)
-                {
-                    string msg = e.Args[notifyIdx + 1];
-                    string title = (notifyIdx + 2 < e.Args.Length && !e.Args[notifyIdx + 2].StartsWith("--", StringComparison.Ordinal)) ? e.Args[notifyIdx + 2] : "Canopy Notification";
-                    commandToSend = $"notify:{title}|{msg}";
-                }
-
-                int tabIdx = Array.FindIndex(e.Args, a => string.Equals(a, "--tab", StringComparison.OrdinalIgnoreCase));
-                if (tabIdx >= 0 && tabIdx + 1 < e.Args.Length)
-                {
-                    commandToSend = $"tab:{e.Args[tabIdx + 1]}";
-                }
-
-                int themeIdx = Array.FindIndex(e.Args, a => string.Equals(a, "--theme", StringComparison.OrdinalIgnoreCase));
-                if (themeIdx >= 0 && themeIdx + 1 < e.Args.Length)
-                {
-                    commandToSend = $"theme:{e.Args[themeIdx + 1]}";
-                }
-
-                int cmdIdx = Array.FindIndex(e.Args, a => string.Equals(a, "--cmd", StringComparison.OrdinalIgnoreCase));
-                if (cmdIdx >= 0 && cmdIdx + 1 < e.Args.Length)
-                {
-                    commandToSend = e.Args[cmdIdx + 1];
-                }
-            }
+            string? commandToSend = ParseCommandLineCommand(e.Args);
 
             if (commandToSend != null)
             {
@@ -151,10 +103,72 @@ public partial class App : Application
                     "Canopy Reminder");
             });
         }
+
+        string? startupCmd = ParseCommandLineCommand(e.Args);
+        if (!string.IsNullOrWhiteSpace(startupCmd))
+        {
+            _ = mainWindow.Dispatcher.InvokeAsync(async () =>
+            {
+                await Task.Delay(350);
+                ExecuteControlCommand(mainWindow, startupCmd);
+            });
+        }
     }
 
     private static bool HasArgument(string[] args, string name) =>
         args.Any(arg => string.Equals(arg, name, StringComparison.OrdinalIgnoreCase));
+
+    private static string? ParseCommandLineCommand(string[] args)
+    {
+        if (HasArgument(args, "--test-notify"))
+        {
+            return "notify:Canopy Reminder|Raindrop to Pill Capsule alert working seamlessly!";
+        }
+        if (HasArgument(args, "--collapse"))
+        {
+            return "collapse";
+        }
+        if (HasArgument(args, "--toggle"))
+        {
+            return "toggle";
+        }
+        if (HasArgument(args, "--expand"))
+        {
+            return "expand";
+        }
+        if (HasArgument(args, "--next-wallpaper"))
+        {
+            return "next-wallpaper";
+        }
+
+        int notifyIdx = Array.FindIndex(args, a => string.Equals(a, "--notify", StringComparison.OrdinalIgnoreCase));
+        if (notifyIdx >= 0 && notifyIdx + 1 < args.Length)
+        {
+            string msg = args[notifyIdx + 1];
+            string title = (notifyIdx + 2 < args.Length && !args[notifyIdx + 2].StartsWith("--", StringComparison.Ordinal)) ? args[notifyIdx + 2] : "Canopy Notification";
+            return $"notify:{title}|{msg}";
+        }
+
+        int tabIdx = Array.FindIndex(args, a => string.Equals(a, "--tab", StringComparison.OrdinalIgnoreCase));
+        if (tabIdx >= 0 && tabIdx + 1 < args.Length)
+        {
+            return $"tab:{args[tabIdx + 1]}";
+        }
+
+        int themeIdx = Array.FindIndex(args, a => string.Equals(a, "--theme", StringComparison.OrdinalIgnoreCase));
+        if (themeIdx >= 0 && themeIdx + 1 < args.Length)
+        {
+            return $"theme:{args[themeIdx + 1]}";
+        }
+
+        int cmdIdx = Array.FindIndex(args, a => string.Equals(a, "--cmd", StringComparison.OrdinalIgnoreCase));
+        if (cmdIdx >= 0 && cmdIdx + 1 < args.Length)
+        {
+            return args[cmdIdx + 1];
+        }
+
+        return null;
+    }
 
     private void TryCreateExpandEvent()
     {
@@ -300,8 +314,7 @@ public partial class App : Application
                         PipeDirection.In,
                         NamedPipeServerStream.MaxAllowedServerInstances,
                         PipeTransmissionMode.Byte,
-                        PipeOptions.Asynchronous);
-
+                        PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
                     await server.WaitForConnectionAsync(token);
                     using var reader = new StreamReader(server);
                     string? line = await reader.ReadLineAsync(token);
