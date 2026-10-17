@@ -110,21 +110,53 @@ export function AppearanceSection({
       icon={<ImageIcon className="w-4 h-4" />}
       badge="Theme Engine"
     >
-      <SettingRow title="Theme Mode" description="Color palette source for controls & HUD">
-        <SegmentedChoice
-          options={[
-            { id: 'canopy', label: 'Canopy', icon: <Sparkles className="w-3 h-3" /> },
-            { id: 'adaptive', label: 'Adaptive', icon: <ImageIcon className="w-3 h-3" /> },
-            { id: 'dark', label: 'Dark', icon: <Moon className="w-3 h-3" /> },
-            { id: 'light', label: 'Light', icon: <Sun className="w-3 h-3" /> },
-            { id: 'auto', label: 'Auto', icon: <Monitor className="w-3 h-3" /> },
-          ]}
-          value={settings.themeMode}
-          onChange={(val) =>
-            handleThemeModeSelect(val as 'canopy' | 'adaptive' | 'dark' | 'light' | 'auto')
-          }
-        />
-      </SettingRow>
+      <div className="flex flex-col gap-1.5 py-1">
+        <div>
+          <div className="text-xs font-medium" style={{ color: 'var(--theme-text-primary)' }}>
+            Theme Mode
+          </div>
+          <div className="text-[10px] leading-snug mt-0.5" style={{ color: 'var(--theme-text-secondary)' }}>
+            Color palette source for controls & HUD
+          </div>
+        </div>
+        <div className="w-full pt-1">
+          <div
+            className="grid grid-cols-5 p-0.5 rounded-xl border w-full"
+            style={{
+              background: 'var(--theme-track, rgba(0, 0, 0, 0.22))',
+              borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
+            }}
+          >
+            {[
+              { id: 'canopy', label: 'Canopy', icon: <Sparkles className="w-3 h-3" /> },
+              { id: 'adaptive', label: 'Adaptive', icon: <ImageIcon className="w-3 h-3" /> },
+              { id: 'dark', label: 'Dark', icon: <Moon className="w-3 h-3" /> },
+              { id: 'light', label: 'Light', icon: <Sun className="w-3 h-3" /> },
+              { id: 'auto', label: 'Auto', icon: <Monitor className="w-3 h-3" /> },
+            ].map((opt) => {
+              const selected = opt.id === settings.themeMode;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() =>
+                    handleThemeModeSelect(opt.id as 'canopy' | 'adaptive' | 'dark' | 'light' | 'auto')
+                  }
+                  className="py-1 px-1 rounded-lg text-[11px] font-mono transition-all flex items-center justify-center gap-1 pointer-events-auto cursor-pointer"
+                  style={{
+                    background: selected ? 'var(--theme-accent)' : 'transparent',
+                    color: selected ? 'var(--theme-on-accent, #111913)' : 'var(--theme-text-secondary)',
+                    fontWeight: selected ? 600 : 400,
+                  }}
+                >
+                  {opt.icon}
+                  <span className="truncate">{opt.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
 
       <SliderRow
         label="Glass Blur Strength"
@@ -182,17 +214,22 @@ export function AppearanceSection({
             <select
               value={settings.wallpaperSlideshowMinutes}
               onChange={(e) => applySlideshowMinutes(Number(e.target.value))}
-              className="px-2 py-1 rounded-lg text-xs font-mono border bg-[var(--theme-card)] text-[var(--theme-text-primary)] border-[var(--theme-border)]"
+              className="px-2.5 py-1 rounded-lg text-xs font-mono border focus:outline-none cursor-pointer"
+              style={{
+                background: 'var(--theme-card, #181825)',
+                color: 'var(--theme-text-primary, #ffffff)',
+                borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.15))',
+              }}
             >
-              <option value={5}>5 minutes</option>
-              <option value={10}>10 minutes</option>
-              <option value={15}>15 minutes</option>
-              <option value={30}>30 minutes</option>
-              <option value={60}>1 hour</option>
-              <option value={120}>2 hours</option>
-              <option value={360}>6 hours</option>
-              <option value={720}>12 hours</option>
-              <option value={1440}>24 hours</option>
+              <option value={5} style={{ background: '#181825', color: '#ffffff' }}>5 minutes</option>
+              <option value={10} style={{ background: '#181825', color: '#ffffff' }}>10 minutes</option>
+              <option value={15} style={{ background: '#181825', color: '#ffffff' }}>15 minutes</option>
+              <option value={30} style={{ background: '#181825', color: '#ffffff' }}>30 minutes</option>
+              <option value={60} style={{ background: '#181825', color: '#ffffff' }}>1 hour</option>
+              <option value={120} style={{ background: '#181825', color: '#ffffff' }}>2 hours</option>
+              <option value={360} style={{ background: '#181825', color: '#ffffff' }}>6 hours</option>
+              <option value={720} style={{ background: '#181825', color: '#ffffff' }}>12 hours</option>
+              <option value={1440} style={{ background: '#181825', color: '#ffffff' }}>24 hours</option>
             </select>
           </SettingRow>
           <SettingRow
@@ -214,7 +251,7 @@ export function AppearanceSection({
       >
         <SegmentedChoice
           options={[
-            { id: 'bongo', label: 'Bongo' },
+            { id: 'bongo', label: 'Capi' },
             { id: 'gif', label: 'Custom' },
             { id: 'none', label: 'Off' },
           ]}

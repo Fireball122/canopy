@@ -84,6 +84,21 @@ function Install-WebView2Runtime {
         return
     }
 
+    Write-Host ""
+    Write-Host "[DEPENDENCY NOTICE]" -ForegroundColor Yellow
+    Write-Host "Canopy requires the Microsoft Edge WebView2 Runtime to render its user interface." -ForegroundColor Yellow
+    
+    $isInteractive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
+    if ($isInteractive) {
+        $choice = Read-Host "Would you like to install the WebView2 Runtime now? [Y/N] (default: Y)"
+        if ($choice -match '^(n|no)$') {
+            Write-Host ""
+            Write-Host "[WARNING] Canopy cannot function without the Microsoft Edge WebView2 Runtime." -ForegroundColor Red
+            Write-Host "Installation cancelled by user. Please install WebView2 before running Canopy." -ForegroundColor Red
+            exit 1
+        }
+    }
+
     Write-Host "==> Installing the Microsoft Edge WebView2 Runtime..." -ForegroundColor Cyan
     $bootstrapperPath = Join-Path $env:TEMP "MicrosoftEdgeWebView2Setup.exe"
     try {
@@ -95,7 +110,7 @@ function Install-WebView2Runtime {
 
         $process = Start-Process -FilePath $bootstrapperPath -ArgumentList "/silent /install" -Wait -PassThru
         if (($process.ExitCode -notin 0, 3010) -or -not (Test-WebView2Runtime)) {
-            throw "WebView2 Runtime installation failed with exit code $($process.ExitCode)."
+            throw "WebView2 Runtime installation failed with exit code $($process.ExitCode). Canopy will not work without it."
         }
     }
     finally {

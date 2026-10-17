@@ -178,7 +178,13 @@ public sealed class AudioSessionController : IDisposable
                         if (enumerator.GetSession(i, out control) < 0 || control is null)
                             continue;
 
-                        if (GetSessionIdentifier(control) != id)
+                        string rawId = GetSessionIdentifier(control);
+                        uint ctrlPid = 0;
+                        (control as IAudioSessionControl2)?.GetProcessId(out ctrlPid);
+                        string fallbackId = ctrlPid > 0 ? $"pid_{ctrlPid}" : $"session_{control.GetHashCode()}";
+                        if (rawId != id && fallbackId != id && (ctrlPid > 0 && id == ctrlPid.ToString()))
+                            continue;
+                        if (string.IsNullOrEmpty(rawId) && fallbackId != id)
                             continue;
 
                         return action(control);
