@@ -85,6 +85,12 @@ declare global {
     __TAURI_INTERNALS__?: unknown;
   }
 }
+export function isWebViewHost(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    Boolean(window.__CANOPY_BRIDGE__ || window.__CAELESTIA_BRIDGE__ || window.__TAURI_INTERNALS__)
+  );
+}
 
 // Live interactive fallback state when running in browser or before native host attaches
 const sessionStartMs = Date.now() - (4 * 3600 + 27 * 60) * 1000;

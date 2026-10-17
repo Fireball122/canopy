@@ -65,6 +65,7 @@ import {
   getSystemStats,
   getWallpapers,
   type InstalledAppItem,
+  isWebViewHost,
   launchApp,
   type MediaInfo,
   mediaNext,
@@ -1306,7 +1307,7 @@ const CanopyShellContent: React.FC = () => {
       }`}
     >
       {/* Top-Screen 2px Transparent Trigger Strip (only active when closed so it never intercepts or resets open tabs) */}
-      {!isOpen && settings.topHoverTrigger && (
+      {!isOpen && settings.topHoverTrigger && !isWebViewHost() && (
         <div
           data-tauri-drag-region="false"
           className="fixed top-0 left-0 right-0 h-[2px] z-50 bg-transparent pointer-events-auto cursor-pointer"
@@ -1329,13 +1330,15 @@ const CanopyShellContent: React.FC = () => {
         {/* Top Centered Navigation Bar */}
         <header
           data-tauri-drag-region="false"
-          className="w-full shrink-0 flex items-center justify-center px-3 py-1.5 select-none relative"
+          className="w-full shrink-0 flex items-center justify-between px-3 py-1.5 select-none relative"
           style={{ borderBottom: '1px solid var(--theme-border)' }}
         >
+          {/* Left spacer for optical balance */}
+          <div className="w-16 shrink-0 flex items-center" />
 
           <nav
             data-tauri-drag-region="false"
-            className="flex items-center gap-1 p-1 rounded-full pointer-events-auto"
+            className="flex items-center gap-1 p-1 rounded-full pointer-events-auto min-w-0 overflow-x-auto no-scrollbar"
             style={{
               background: 'var(--theme-card)',
               border: '1px solid var(--theme-border)',
@@ -1352,7 +1355,7 @@ const CanopyShellContent: React.FC = () => {
                     setActiveTab(tab.id);
                     void notifyTabSwitched();
                   }}
-                  className={`relative flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium tracking-tight transition-all duration-200 pointer-events-auto cursor-pointer ${
+                  className={`relative flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium tracking-tight transition-all duration-200 pointer-events-auto cursor-pointer shrink-0 ${
                     active ? 'font-semibold shadow-sm' : 'opacity-75 hover:opacity-100'
                   }`}
                   style={{
@@ -1380,6 +1383,49 @@ const CanopyShellContent: React.FC = () => {
             })}
           </nav>
 
+          {/* Right Action Cluster: Search & Battery Readout */}
+          <div className="w-auto shrink-0 flex items-center gap-1.5 pointer-events-auto">
+            {settings.showBatteryChip && battery?.has_battery && (
+              <span
+                className="px-2 py-0.5 rounded-full text-[10px] font-mono flex items-center gap-1 shadow-sm select-none"
+                style={{
+                  background: 'var(--theme-card)',
+                  border: '1px solid var(--theme-border)',
+                  color: battery.charging ? 'var(--theme-accent)' : 'var(--theme-text-secondary)',
+                }}
+                title={
+                  battery.charging
+                    ? `Charging — ${Math.round(battery.percent)}%`
+                    : `On battery — ${Math.round(battery.percent)}%`
+                }
+              >
+                {battery.charging ? (
+                  <BatteryCharging className="w-3 h-3 shrink-0" />
+                ) : (
+                  <Battery className="w-3 h-3 shrink-0" />
+                )}
+                <span>{Math.round(battery.percent)}%</span>
+              </span>
+            )}
+            <button
+              type="button"
+              data-tauri-drag-region="false"
+              onClick={() => {
+                setPaletteQuery('');
+                setPaletteIndex(0);
+                setPaletteOpen(true);
+              }}
+              className="p-1 rounded-full text-xs transition-colors duration-150 cursor-pointer flex items-center justify-center opacity-75 hover:opacity-100"
+              style={{
+                background: 'var(--theme-card)',
+                border: '1px solid var(--theme-border)',
+                color: 'var(--theme-text-secondary)',
+              }}
+              title="Quick Search / Command Palette"
+            >
+              <Search className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </header>
 
         {/* Main Content Viewport (386px height) with Fade & Slide Tab Transition */}
@@ -1498,7 +1544,9 @@ const CanopyShellContent: React.FC = () => {
                           className="px-1.5 py-0.5 rounded-md text-[9px] font-mono flex items-center gap-1"
                           style={{
                             background: 'var(--theme-track)',
-                            color: battery.charging ? 'var(--theme-accent)' : 'var(--theme-text-secondary)',
+                            color: battery.charging
+                              ? 'var(--theme-accent)'
+                              : 'var(--theme-text-secondary)',
                           }}
                           title={
                             battery.charging

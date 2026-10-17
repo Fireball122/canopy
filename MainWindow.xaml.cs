@@ -106,8 +106,7 @@ public partial class MainWindow : Window
         "iexplore", "librewolf", "floorp", "waterfox", "zen", "arc", "thorium", "tor browser",
         // Chat, Media & Desktop Apps (Electron / Chromium D3D composited)
         "Discord", "DiscordPTB", "DiscordCanary", "Vesktop", "Slack", "Teams", "ms-teams",
-        "Spotify", "Code", "Cursor", "Notion", "Obsidian",
-        // Windows Shell & Terminals
+        "Spotify", "Code", "Cursor", "Notion", "Obsidian", "obs64", "obs32", "steamwebhelper",
         "explorer", "ApplicationFrameHost", "SearchHost", "ShellExperienceHost",
         "StartMenuExperienceHost", "TextInputHost", "Canopy", "dwm", "powershell", "pwsh", "cmd",
         "WindowsTerminal", "OpenConsole", "conhost", "taskmgr",
@@ -170,10 +169,6 @@ public partial class MainWindow : Window
         {
             _notificationCollapseTimer.Stop();
             _notificationVisible = false;
-            if (_isExpanded)
-            {
-                CollapsePanel();
-            }
         };
 
 
@@ -460,11 +455,31 @@ public partial class MainWindow : Window
             };
             core.NewWindowRequested += (_, args) => args.Handled = true;
 
+            core.ProcessFailed += (_, args) =>
+            {
+                _log.Write($"WebView2 ProcessFailed: kind={args.ProcessFailedKind}, reason={args.Reason}");
+                _ = Dispatcher.InvokeAsync(async () =>
+                {
+                    await Task.Delay(300);
+                    try
+                    {
+                        ShellWebView.CoreWebView2?.Reload();
+                    }
+                    catch (Exception reloadEx)
+                    {
+                        _log.WriteException("WebViewProcessFailedReload", reloadEx);
+                    }
+                });
+            };
+
             core.NavigationCompleted += (_, _) =>
             {
                 ApplyAdaptiveZoom(GetPanelMonitor());
             };
-            core.Navigate("https://canopy.local/index.html");
+
+            string indexHtmlPath = Path.Combine(distDir, "index.html");
+            long bundleTicks = File.Exists(indexHtmlPath) ? File.GetLastWriteTimeUtc(indexHtmlPath).Ticks : DateTime.UtcNow.Ticks;
+            core.Navigate($"https://canopy.local/index.html?v={bundleTicks}");
             _webViewReady = true;
             ApplyAdaptiveZoom(GetPanelMonitor());
         }
@@ -915,15 +930,19 @@ public partial class MainWindow : Window
 
             case "toggle_caffeine":
             {
-                _caffeineEnabled = !_caffeineEnabled;
-                if (_caffeineEnabled)
+                bool nextState = !_caffeineEnabled;
+                Dispatcher.Invoke(() =>
                 {
-                    Win32.SetThreadExecutionState(Win32.ES_CONTINUOUS | Win32.ES_DISPLAY_REQUIRED | Win32.ES_SYSTEM_REQUIRED);
-                }
-                else
-                {
-                    Win32.SetThreadExecutionState(Win32.ES_CONTINUOUS);
-                }
+                    _caffeineEnabled = nextState;
+                    if (_caffeineEnabled)
+                    {
+                        Win32.SetThreadExecutionState(Win32.ES_CONTINUOUS | Win32.ES_DISPLAY_REQUIRED | Win32.ES_SYSTEM_REQUIRED);
+                    }
+                    else
+                    {
+                        Win32.SetThreadExecutionState(Win32.ES_CONTINUOUS);
+                    }
+                });
                 return new { enabled = _caffeineEnabled };
             }
 
@@ -944,17 +963,24 @@ public partial class MainWindow : Window
                     {
                         try
                         {
-                            // Fallback to native Win+Shift+S keystroke
-                            Win32.keybd_event(0x5B, 0, 0, UIntPtr.Zero); // LWIN down
-                            Win32.keybd_event(0x10, 0, 0, UIntPtr.Zero); // SHIFT down
-                            Win32.keybd_event(0x53, 0, 0, UIntPtr.Zero); // 'S' down
-                            Win32.keybd_event(0x53, 0, 2, UIntPtr.Zero); // 'S' up
-                            Win32.keybd_event(0x10, 0, 2, UIntPtr.Zero); // SHIFT up
-                            Win32.keybd_event(0x5B, 0, 2, UIntPtr.Zero); // LWIN up
+                            Process.Start(new ProcessStartInfo("SnippingTool.exe", "/clip") { UseShellExecute = true });
                         }
-                        catch (Exception ex)
+                        catch
                         {
-                            _log.WriteException("ScreenSnipFallback", ex);
+                            try
+                            {
+                                // Fallback to native Win+Shift+S keystroke
+                                Win32.keybd_event(0x5B, 0, 0, UIntPtr.Zero); // LWIN down
+                                Win32.keybd_event(0x10, 0, 0, UIntPtr.Zero); // SHIFT down
+                                Win32.keybd_event(0x53, 0, 0, UIntPtr.Zero); // 'S' down
+                                Win32.keybd_event(0x53, 0, 2, UIntPtr.Zero); // 'S' up
+                                Win32.keybd_event(0x10, 0, 2, UIntPtr.Zero); // SHIFT up
+                                Win32.keybd_event(0x5B, 0, 2, UIntPtr.Zero); // LWIN up
+                            }
+                            catch (Exception ex)
+                            {
+                                _log.WriteException("ScreenSnipFallback", ex);
+                            }
                         }
                     }
                 });
@@ -2035,24 +2061,17 @@ public partial class MainWindow : Window
         IntPtr fg = Win32.GetForegroundWindow();
         if (fg != IntPtr.Zero && fg != _hwnd)
         {
+            if (Win32.IsZoomed(fg) || IsForegroundWindowNonGame())
+            {
+                return false;
+            }
+
             string className = Win32.GetWindowClassName(fg);
             if (!string.Equals(className, "Progman", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(className, "WorkerW", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(className, "Shell_TrayWnd", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(className, "Shell_SecondaryTrayWnd", StringComparison.OrdinalIgnoreCase))
             {
-                string fgProc = Win32.GetWindowProcessName(fg);
-                string fgTitle = Win32.GetWindowText(fg);
-                if (!string.IsNullOrEmpty(fgProc) && NonGameProcessNames.Contains(fgProc))
-                {
-                    return false;
-                }
-                if (fgTitle.Contains("Discord", StringComparison.OrdinalIgnoreCase) ||
-                    fgProc.Contains("Discord", StringComparison.OrdinalIgnoreCase))
-                {
-                    return false;
-                }
-
                 if (Win32.GetWindowRect(fg, out Win32.RECT fgRect))
                 {
                     IntPtr hMon = Win32.MonitorFromWindow(fg, Win32.MONITOR_DEFAULTTONEAREST);
@@ -2074,12 +2093,16 @@ public partial class MainWindow : Window
                 }
             }
         }
-        // Secondary / unfocused check: probe the top-level window at the center of this monitor
         // to detect borderless fullscreen games that lost foreground focus to another display.
         Win32.POINT centerPoint = new() { X = monitor.Left + (monitor.Width / 2), Y = monitor.Top + (monitor.Height / 2) };
         IntPtr centerHwnd = Win32.GetAncestor(Win32.WindowFromPoint(centerPoint), Win32.GA_ROOT);
         if (centerHwnd != IntPtr.Zero && centerHwnd != _hwnd)
         {
+            if (Win32.IsZoomed(centerHwnd))
+            {
+                return false;
+            }
+
             string className = Win32.GetWindowClassName(centerHwnd);
             if (!string.Equals(className, "Progman", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(className, "WorkerW", StringComparison.OrdinalIgnoreCase) &&
@@ -2108,7 +2131,6 @@ public partial class MainWindow : Window
                 }
             }
         }
-
         return false;
     }
 
@@ -2136,6 +2158,22 @@ public partial class MainWindow : Window
             return false;
         }
 
+        if (Win32.IsZoomed(fg))
+        {
+            return true;
+        }
+
+        string className = Win32.GetWindowClassName(fg);
+        if (string.Equals(className, "Progman", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(className, "WorkerW", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(className, "Shell_TrayWnd", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(className, "Shell_SecondaryTrayWnd", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(className, "CabinetWClass", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(className, "CASCADIA_HOSTING_WINDOW_CLASS", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
         string processName = Win32.GetWindowProcessName(fg);
         string windowTitle = Win32.GetWindowText(fg);
         if (processName.Contains("Discord", StringComparison.OrdinalIgnoreCase) ||
@@ -2146,7 +2184,6 @@ public partial class MainWindow : Window
 
         return processName.Length > 0 && NonGameProcessNames.Contains(processName);
     }
-
     /// <summary>
     /// True while the automatic hover trigger must stay silent: quiet hours, a full-screen game
     /// (borderless or exclusive fullscreen), or a presentation.
@@ -2594,6 +2631,14 @@ public partial class MainWindow : Window
         _brightnessCts?.Dispose();
         _brightnessCts = null;
         _audioController.VolumeStateChanged -= OnMasterVolumeChanged;
+        try
+        {
+            Win32.SetThreadExecutionState(Win32.ES_CONTINUOUS);
+        }
+        catch (Exception ex)
+        {
+            _log.WriteException("OnClosed_ResetCaffeine", ex);
+        }
 
         if (_hwnd != IntPtr.Zero)
         {

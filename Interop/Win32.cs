@@ -199,6 +199,10 @@ public static class Win32
     public static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool IsZoomed(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
     public static extern IntPtr WindowFromPoint(POINT point);
 
     [DllImport("user32.dll", ExactSpelling = true)]
@@ -758,9 +762,9 @@ public static class Win32
                 return (false, 0, false);
             }
 
-            bool hasBattery = status.BatteryFlag != 128 && status.BatteryLifePercent != 255;
-            int percent = status.BatteryLifePercent == 255 ? 0 : status.BatteryLifePercent;
-            bool charging = status.ACLineStatus == 1;
+            bool hasBattery = (status.BatteryFlag & 128) == 0 && status.BatteryFlag != 255 && status.BatteryLifePercent <= 100;
+            int percent = status.BatteryLifePercent <= 100 ? status.BatteryLifePercent : 0;
+            bool charging = status.ACLineStatus == 1 || (status.BatteryFlag & 8) != 0;
             return (hasBattery, percent, charging);
         }
         catch

@@ -68,6 +68,11 @@ jobs:
         shell: pwsh
         run: |
           ./build-portable.ps1 -Version "${{ steps.get_version.outputs.VERSION }}" -Configuration Release
+      - name: Build Inno Setup Wizard EXE
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          ./installer/build-setup-exe.ps1 -Version "${{ steps.get_version.outputs.VERSION }}" -Configuration Release
 
       - name: Generate Checksums
         shell: pwsh
@@ -86,6 +91,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
+            dist-installer/Canopy-*.exe
             dist-installer/Canopy-*.msi
             dist-installer/Canopy-*.zip
             dist-installer/checksums-sha256.txt

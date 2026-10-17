@@ -371,6 +371,10 @@ public sealed class WallpaperService : IDisposable
             if (!File.Exists(fullPath))
                 return null;
 
+            // Skip OneDrive or cloud offline placeholders to prevent network hangs
+            if ((File.GetAttributes(fullPath) & FileAttributes.Offline) != 0)
+                return null;
+
             DateTime lastWrite = File.GetLastWriteTimeUtc(fullPath);
             string cacheKey = $"{fullPath}|{lastWrite.Ticks}";
 
@@ -539,9 +543,6 @@ public sealed class WallpaperService : IDisposable
         {
             double monW = Math.Max(100, mon.Width);
             double monH = Math.Max(100, mon.Height);
-            double centerX = monW / 2.0;
-            double centerY = monH / 2.0;
-            double maxRadius = Math.Sqrt(centerX * centerX + centerY * centerY) + 120.0;
 
             var grid = new Grid();
             var oldImage = new Image
@@ -559,8 +560,8 @@ public sealed class WallpaperService : IDisposable
                 VerticalAlignment = VerticalAlignment.Stretch
             };
 
-            // Centered circular expand (iris wipe) clip anchored at THIS monitor's center, starting at exactly 0.0
-            var irisClip = new EllipseGeometry(new Point(centerX, centerY), 0.0, 0.0);
+            // Start with a zero-radius clip; geometry and radii will be calibrated to exact DPI on SourceInitialized
+            var irisClip = new EllipseGeometry(new Point(monW / 2.0, monH / 2.0), 0.0, 0.0);
             newImage.Clip = irisClip;
 
             grid.Children.Add(oldImage);
@@ -585,6 +586,8 @@ public sealed class WallpaperService : IDisposable
                 Content = grid
             };
 
+            double maxRadius = Math.Sqrt(monW * monW + monH * monH) + 120.0;
+
             overlay.SourceInitialized += (_, _) =>
             {
                 IntPtr hwnd = new WindowInteropHelper(overlay).Handle;
@@ -593,11 +596,26 @@ public sealed class WallpaperService : IDisposable
                 exStyle &= ~Win32.WS_EX_APPWINDOW;
                 _ = Win32.SetWindowLongPtr(hwnd, Win32.GWL_EXSTYLE, new IntPtr(exStyle));
 
+                uint dpi = Win32.GetDpiForWindow(hwnd);
+                double scale = dpi > 0 ? dpi / 96.0 : 1.0;
+
+                // Calibrate WPF window DIP dimensions
+                double dipWidth = mon.Width / scale;
+                double dipHeight = mon.Height / scale;
+                overlay.Width = dipWidth;
+                overlay.Height = dipHeight;
+
+                double dipCenterX = dipWidth / 2.0;
+                double dipCenterY = dipHeight / 2.0;
+                irisClip.Center = new Point(dipCenterX, dipCenterY);
+                maxRadius = Math.Sqrt(dipCenterX * dipCenterX + dipCenterY * dipCenterY) + 120.0;
+
+                // Explicitly position the native HWND in physical pixels across monitor boundaries
                 _ = Win32.SetWindowPos(
                     hwnd,
                     Win32.HWND_BOTTOM,
-                    0, 0, 0, 0,
-                    Win32.SWP_NOMOVE | Win32.SWP_NOSIZE | Win32.SWP_NOACTIVATE | Win32.SWP_SHOWWINDOW);
+                    mon.Left, mon.Top, mon.Width, mon.Height,
+                    Win32.SWP_NOACTIVATE | Win32.SWP_SHOWWINDOW);
             };
 
             // Start the circular expansion animation strictly when the window is composited on screen,
@@ -627,6 +645,11 @@ public sealed class WallpaperService : IDisposable
     {
         try
         {
+            if ((File.GetAttributes(fullPath) & FileAttributes.Offline) != 0)
+            {
+                return "1920 × 1080";
+            }
+
             using var stream = new FileStream(
                 fullPath,
                 FileMode.Open,
@@ -664,6 +687,11 @@ public sealed class WallpaperService : IDisposable
             {
                 var files = Directory.EnumerateFiles(WallpapersDirectory)
                     .Where(f => SupportedExtensions.Contains(Path.GetExtension(f)))
+                    .Where(f =>
+                    {
+                        try { return (File.GetAttributes(f) & FileAttributes.Offline) == 0; }
+                        catch { return true; }
+                    })
                     .OrderBy(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase)
                     .ToList();
 

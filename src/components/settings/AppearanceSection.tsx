@@ -115,7 +115,10 @@ export function AppearanceSection({
           <div className="text-xs font-medium" style={{ color: 'var(--theme-text-primary)' }}>
             Theme Mode
           </div>
-          <div className="text-[10px] leading-snug mt-0.5" style={{ color: 'var(--theme-text-secondary)' }}>
+          <div
+            className="text-[10px] leading-snug mt-0.5"
+            style={{ color: 'var(--theme-text-secondary)' }}
+          >
             Color palette source for controls & HUD
           </div>
         </div>
@@ -140,12 +143,16 @@ export function AppearanceSection({
                   key={opt.id}
                   type="button"
                   onClick={() =>
-                    handleThemeModeSelect(opt.id as 'canopy' | 'adaptive' | 'dark' | 'light' | 'auto')
+                    handleThemeModeSelect(
+                      opt.id as 'canopy' | 'adaptive' | 'dark' | 'light' | 'auto',
+                    )
                   }
                   className="py-1 px-1 rounded-lg text-[11px] font-mono transition-all flex items-center justify-center gap-1 pointer-events-auto cursor-pointer"
                   style={{
                     background: selected ? 'var(--theme-accent)' : 'transparent',
-                    color: selected ? 'var(--theme-on-accent, #111913)' : 'var(--theme-text-secondary)',
+                    color: selected
+                      ? 'var(--theme-on-accent, #111913)'
+                      : 'var(--theme-text-secondary)',
                     fontWeight: selected ? 600 : 400,
                   }}
                 >
@@ -221,15 +228,33 @@ export function AppearanceSection({
                 borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.15))',
               }}
             >
-              <option value={5} style={{ background: '#181825', color: '#ffffff' }}>5 minutes</option>
-              <option value={10} style={{ background: '#181825', color: '#ffffff' }}>10 minutes</option>
-              <option value={15} style={{ background: '#181825', color: '#ffffff' }}>15 minutes</option>
-              <option value={30} style={{ background: '#181825', color: '#ffffff' }}>30 minutes</option>
-              <option value={60} style={{ background: '#181825', color: '#ffffff' }}>1 hour</option>
-              <option value={120} style={{ background: '#181825', color: '#ffffff' }}>2 hours</option>
-              <option value={360} style={{ background: '#181825', color: '#ffffff' }}>6 hours</option>
-              <option value={720} style={{ background: '#181825', color: '#ffffff' }}>12 hours</option>
-              <option value={1440} style={{ background: '#181825', color: '#ffffff' }}>24 hours</option>
+              <option value={5} style={{ background: '#181825', color: '#ffffff' }}>
+                5 minutes
+              </option>
+              <option value={10} style={{ background: '#181825', color: '#ffffff' }}>
+                10 minutes
+              </option>
+              <option value={15} style={{ background: '#181825', color: '#ffffff' }}>
+                15 minutes
+              </option>
+              <option value={30} style={{ background: '#181825', color: '#ffffff' }}>
+                30 minutes
+              </option>
+              <option value={60} style={{ background: '#181825', color: '#ffffff' }}>
+                1 hour
+              </option>
+              <option value={120} style={{ background: '#181825', color: '#ffffff' }}>
+                2 hours
+              </option>
+              <option value={360} style={{ background: '#181825', color: '#ffffff' }}>
+                6 hours
+              </option>
+              <option value={720} style={{ background: '#181825', color: '#ffffff' }}>
+                12 hours
+              </option>
+              <option value={1440} style={{ background: '#181825', color: '#ffffff' }}>
+                24 hours
+              </option>
             </select>
           </SettingRow>
           <SettingRow

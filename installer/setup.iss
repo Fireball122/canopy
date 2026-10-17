@@ -5,7 +5,7 @@
 
 #define MyAppName "Canopy"
 #ifndef MyAppVersion
-#define MyAppVersion "1.0.3"
+#define MyAppVersion "1.0.4"
 #endif
 #define MyAppPublisher "Canopy Shell"
 #define MyAppURL "https://github.com/Fireball122/canopy"
@@ -72,6 +72,57 @@ Type: files; Name: "{app}\*.tmp"
 Type: filesandordirs; Name: "{app}\dist"
 
 [Code]
+// Helper to detect if Microsoft Edge WebView2 runtime is installed on the machine
+function IsWebView2Installed(): Boolean;
+var
+  InstalledVersion: String;
+begin
+  Result := RegQueryStringValue(HKLM, 'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv', InstalledVersion) or
+            RegQueryStringValue(HKCU, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv', InstalledVersion) or
+            RegQueryStringValue(HKLM, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv', InstalledVersion);
+  if Result and (InstalledVersion = '0.0.0.0') then
+    Result := False;
+end;
+
+function InitializeSetup(): Boolean;
+var
+  ErrorCode: Integer;
+  BootstrapperPath: String;
+  DownloadUrl: String;
+begin
+  Result := True;
+
+  // Terminate any running Canopy instance before proceeding
+  ShellExec('open', 'taskkill.exe', '/f /im Canopy.exe', '', SW_HIDE, ewWaitUntilTerminated, ErrorCode);
+
+  // Check if WebView2 runtime is missing
+  if not IsWebView2Installed() then
+  begin
+    if MsgBox('Canopy requires the Microsoft Edge WebView2 Runtime to display its interface.'#13#10#13#10 +
+              'Would you like Setup to download and install the official Microsoft WebView2 Runtime now?',
+              mbConfirmation, MB_YESNO) = IDYES then
+    begin
+      BootstrapperPath := ExpandConstant('{tmp}\MicrosoftEdgeWebview2Setup.exe');
+      DownloadUrl := 'https://go.microsoft.com/fwlink/p/?LinkId=2124703';
+      
+      // Download via PowerShell
+      if ShellExec('open', 'powershell.exe',
+                   '-NoProfile -Command "Invoke-WebRequest -Uri ''' + DownloadUrl + ''' -OutFile ''' + BootstrapperPath + '''"',
+                   '', SW_HIDE, ewWaitUntilTerminated, ErrorCode) and (ErrorCode = 0) then
+      begin
+        // Silently run the Evergreen bootstrapper
+        ShellExec('open', BootstrapperPath, '/silent /install', '', SW_SHOW, ewWaitUntilTerminated, ErrorCode);
+      end
+      else
+      begin
+        MsgBox('Unable to automatically download the WebView2 bootstrapper.'#13#10 +
+               'Please install it manually from https://go.microsoft.com/fwlink/p/?LinkId=2124703 before launching Canopy.',
+               mbInformation, MB_OK);
+      end;
+    end;
+  end;
+end;
+
 function InitializeUninstall(): Boolean;
 var
   ErrorCode: Integer;
