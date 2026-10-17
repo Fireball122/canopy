@@ -933,16 +933,32 @@ public partial class MainWindow : Window
             case "trigger_screen_snip":
             {
                 CollapsePanel();
-                try
+                _ = Task.Run(async () =>
                 {
-                    Process.Start(new ProcessStartInfo("ms-screenclip:") { UseShellExecute = true });
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    _log.WriteException("ScreenSnip", ex);
-                    return false;
-                }
+                    await Task.Delay(250);
+                    try
+                    {
+                        Process.Start(new ProcessStartInfo("ms-screenclip:") { UseShellExecute = true });
+                    }
+                    catch
+                    {
+                        try
+                        {
+                            // Fallback to native Win+Shift+S keystroke
+                            Win32.keybd_event(0x5B, 0, 0, UIntPtr.Zero); // LWIN down
+                            Win32.keybd_event(0x10, 0, 0, UIntPtr.Zero); // SHIFT down
+                            Win32.keybd_event(0x53, 0, 0, UIntPtr.Zero); // 'S' down
+                            Win32.keybd_event(0x53, 0, 2, UIntPtr.Zero); // 'S' up
+                            Win32.keybd_event(0x10, 0, 2, UIntPtr.Zero); // SHIFT up
+                            Win32.keybd_event(0x5B, 0, 2, UIntPtr.Zero); // LWIN up
+                        }
+                        catch (Exception ex)
+                        {
+                            _log.WriteException("ScreenSnipFallback", ex);
+                        }
+                    }
+                });
+                return true;
             }
 
             case "toggle_dnd":
@@ -2025,6 +2041,18 @@ public partial class MainWindow : Window
                 !string.Equals(className, "Shell_TrayWnd", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(className, "Shell_SecondaryTrayWnd", StringComparison.OrdinalIgnoreCase))
             {
+                string fgProc = Win32.GetWindowProcessName(fg);
+                string fgTitle = Win32.GetWindowText(fg);
+                if (!string.IsNullOrEmpty(fgProc) && NonGameProcessNames.Contains(fgProc))
+                {
+                    return false;
+                }
+                if (fgTitle.Contains("Discord", StringComparison.OrdinalIgnoreCase) ||
+                    fgProc.Contains("Discord", StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+
                 if (Win32.GetWindowRect(fg, out Win32.RECT fgRect))
                 {
                     IntPtr hMon = Win32.MonitorFromWindow(fg, Win32.MONITOR_DEFAULTTONEAREST);
@@ -2046,7 +2074,6 @@ public partial class MainWindow : Window
                 }
             }
         }
-
         // Secondary / unfocused check: probe the top-level window at the center of this monitor
         // to detect borderless fullscreen games that lost foreground focus to another display.
         Win32.POINT centerPoint = new() { X = monitor.Left + (monitor.Width / 2), Y = monitor.Top + (monitor.Height / 2) };
@@ -2067,6 +2094,12 @@ public partial class MainWindow : Window
                         centerRect.Bottom >= monitor.Bottom - 2)
                     {
                         string proc = Win32.GetWindowProcessName(centerHwnd);
+                        string title = Win32.GetWindowText(centerHwnd);
+                        if (title.Contains("Discord", StringComparison.OrdinalIgnoreCase) ||
+                            proc.Contains("Discord", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return false;
+                        }
                         if (!string.IsNullOrEmpty(proc) && !NonGameProcessNames.Contains(proc))
                         {
                             return true;
@@ -2104,6 +2137,13 @@ public partial class MainWindow : Window
         }
 
         string processName = Win32.GetWindowProcessName(fg);
+        string windowTitle = Win32.GetWindowText(fg);
+        if (processName.Contains("Discord", StringComparison.OrdinalIgnoreCase) ||
+            windowTitle.Contains("Discord", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
         return processName.Length > 0 && NonGameProcessNames.Contains(processName);
     }
 

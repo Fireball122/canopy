@@ -1332,29 +1332,7 @@ const CanopyShellContent: React.FC = () => {
           className="w-full shrink-0 flex items-center justify-center px-3 py-1.5 select-none relative"
           style={{ borderBottom: '1px solid var(--theme-border)' }}
         >
-          {settings.showBatteryChip && battery?.has_battery && (
-            <div
-              data-tauri-drag-region="false"
-              className="canopy-pill absolute right-2.5 top-1/2 -translate-y-1/2 px-2 py-1 flex items-center gap-1 text-[10px] font-mono tabular-nums pointer-events-none"
-              style={{
-                color: battery.charging ? 'var(--theme-accent)' : 'var(--theme-text-secondary)',
-                border: '1px solid var(--theme-border)',
-                background: 'var(--theme-card)',
-              }}
-              title={
-                battery.charging
-                  ? `Charging — ${Math.round(battery.percent)}%`
-                  : `On battery — ${Math.round(battery.percent)}%`
-              }
-            >
-              {battery.charging ? (
-                <BatteryCharging className="w-3 h-3 shrink-0" />
-              ) : (
-                <Battery className="w-3 h-3 shrink-0" />
-              )}
-              <span>{Math.round(battery.percent)}%</span>
-            </div>
-          )}
+
           <nav
             data-tauri-drag-region="false"
             className="flex items-center gap-1 p-1 rounded-full pointer-events-auto"
@@ -1514,17 +1492,40 @@ const CanopyShellContent: React.FC = () => {
                       <Clock className="w-2.5 h-2.5" style={{ color: 'var(--theme-accent)' }} />
                       <span>Time</span>
                     </span>
-                    {!use24Hour && (
-                      <span
-                        className="px-1.5 py-0.5 rounded-md text-[9px] font-mono"
-                        style={{
-                          background: 'var(--theme-track)',
-                          color: 'var(--theme-accent)',
-                        }}
-                      >
-                        {amPm}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1">
+                      {settings.showBatteryChip && battery?.has_battery && (
+                        <span
+                          className="px-1.5 py-0.5 rounded-md text-[9px] font-mono flex items-center gap-1"
+                          style={{
+                            background: 'var(--theme-track)',
+                            color: battery.charging ? 'var(--theme-accent)' : 'var(--theme-text-secondary)',
+                          }}
+                          title={
+                            battery.charging
+                              ? `Charging — ${Math.round(battery.percent)}%`
+                              : `On battery — ${Math.round(battery.percent)}%`
+                          }
+                        >
+                          {battery.charging ? (
+                            <BatteryCharging className="w-2.5 h-2.5 shrink-0" />
+                          ) : (
+                            <Battery className="w-2.5 h-2.5 shrink-0" />
+                          )}
+                          <span>{Math.round(battery.percent)}%</span>
+                        </span>
+                      )}
+                      {!use24Hour && (
+                        <span
+                          className="px-1.5 py-0.5 rounded-md text-[9px] font-mono"
+                          style={{
+                            background: 'var(--theme-track)',
+                            color: 'var(--theme-accent)',
+                          }}
+                        >
+                          {amPm}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   {/* Digital Clock Stack */}

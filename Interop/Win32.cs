@@ -330,6 +330,14 @@ public static class Win32
         int len = GetClassName(hwnd, sb, sb.Capacity);
         return len > 0 ? sb.ToString() : string.Empty;
     }
+
+    public static string GetWindowText(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return string.Empty;
+        var sb = new StringBuilder(512);
+        int len = GetWindowTextW(hwnd, sb, sb.Capacity);
+        return len > 0 ? sb.ToString() : string.Empty;
+    }
     public delegate bool MonitorEnumProc(IntPtr hMonitor, IntPtr hdcMonitor, ref RECT lprcMonitor, IntPtr dwData);
 
     [DllImport("user32.dll")]
