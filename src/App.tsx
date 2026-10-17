@@ -1330,15 +1330,36 @@ const CanopyShellContent: React.FC = () => {
         {/* Top Centered Navigation Bar */}
         <header
           data-tauri-drag-region="false"
-          className="w-full shrink-0 flex items-center justify-between px-3 py-1.5 select-none relative"
+          className="w-full shrink-0 flex items-center justify-between px-2.5 py-1 select-none relative gap-2"
           style={{ borderBottom: '1px solid var(--theme-border)' }}
         >
-          {/* Left spacer for optical balance */}
-          <div className="w-16 shrink-0 flex items-center" />
+          {/* Left: Quick Search / Command Palette Button */}
+          <div className="shrink-0 flex items-center pointer-events-auto">
+            <button
+              type="button"
+              data-tauri-drag-region="false"
+              onClick={() => {
+                setPaletteQuery('');
+                setPaletteIndex(0);
+                setPaletteOpen(true);
+              }}
+              className="flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-mono transition-all duration-150 cursor-pointer opacity-80 hover:opacity-100 shadow-sm"
+              style={{
+                background: 'var(--theme-card)',
+                border: '1px solid var(--theme-border)',
+                color: 'var(--theme-text-secondary)',
+              }}
+              title="Search commands and apps (` or Ctrl+P)"
+            >
+              <Search className="w-3 h-3 text-[var(--theme-accent)]" />
+              <span className="hidden sm:inline">Search</span>
+            </button>
+          </div>
 
+          {/* Center: Tabs sized to fit comfortably without scrolling */}
           <nav
             data-tauri-drag-region="false"
-            className="flex items-center gap-1 p-1 rounded-full pointer-events-auto min-w-0 overflow-x-auto no-scrollbar"
+            className="flex items-center gap-0.5 p-0.5 rounded-full pointer-events-auto flex-nowrap justify-center max-w-full"
             style={{
               background: 'var(--theme-card)',
               border: '1px solid var(--theme-border)',
@@ -1355,8 +1376,8 @@ const CanopyShellContent: React.FC = () => {
                     setActiveTab(tab.id);
                     void notifyTabSwitched();
                   }}
-                  className={`relative flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium tracking-tight transition-all duration-200 pointer-events-auto cursor-pointer shrink-0 ${
-                    active ? 'font-semibold shadow-sm' : 'opacity-75 hover:opacity-100'
+                  className={`relative flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-medium tracking-tight transition-all duration-200 pointer-events-auto cursor-pointer shrink-0 ${
+                    active ? 'font-semibold shadow-sm' : 'opacity-70 hover:opacity-100'
                   }`}
                   style={{
                     color: active ? 'var(--theme-text-primary)' : 'var(--theme-text-secondary)',
@@ -1374,7 +1395,7 @@ const CanopyShellContent: React.FC = () => {
                   <span>{tab.label}</span>
                   {active && (
                     <span
-                      className="absolute -bottom-[3px] left-1/2 -translate-x-1/2 w-5 h-[2px] rounded-full"
+                      className="absolute -bottom-[2px] left-1/2 -translate-x-1/2 w-4 h-[2px] rounded-full"
                       style={{ backgroundColor: 'var(--theme-accent)' }}
                     />
                   )}
@@ -1383,8 +1404,8 @@ const CanopyShellContent: React.FC = () => {
             })}
           </nav>
 
-          {/* Right Action Cluster: Search & Battery Readout */}
-          <div className="w-auto shrink-0 flex items-center gap-1.5 pointer-events-auto">
+          {/* Right: Battery and Percentage Readout */}
+          <div className="shrink-0 flex items-center justify-end pointer-events-auto min-w-[54px]">
             {settings.showBatteryChip && battery?.has_battery && (
               <span
                 className="px-2 py-0.5 rounded-full text-[10px] font-mono flex items-center gap-1 shadow-sm select-none"
@@ -1407,24 +1428,6 @@ const CanopyShellContent: React.FC = () => {
                 <span>{Math.round(battery.percent)}%</span>
               </span>
             )}
-            <button
-              type="button"
-              data-tauri-drag-region="false"
-              onClick={() => {
-                setPaletteQuery('');
-                setPaletteIndex(0);
-                setPaletteOpen(true);
-              }}
-              className="p-1 rounded-full text-xs transition-colors duration-150 cursor-pointer flex items-center justify-center opacity-75 hover:opacity-100"
-              style={{
-                background: 'var(--theme-card)',
-                border: '1px solid var(--theme-border)',
-                color: 'var(--theme-text-secondary)',
-              }}
-              title="Quick Search / Command Palette"
-            >
-              <Search className="w-3.5 h-3.5" />
-            </button>
           </div>
         </header>
 
