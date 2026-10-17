@@ -301,8 +301,15 @@ public partial class MainWindow : Window
     {
         Dispatcher.Invoke(() =>
         {
-            _customWidth = Math.Clamp(width, 700.0, 1600.0);
-            _customHeight = Math.Clamp(height, 360.0, 900.0);
+            double targetW = Math.Clamp(width, 700.0, 1600.0);
+            double targetH = Math.Clamp(height, 360.0, 900.0);
+            if (Math.Abs(_customWidth - targetW) < 0.5 && Math.Abs(_customHeight - targetH) < 0.5)
+            {
+                return;
+            }
+
+            _customWidth = targetW;
+            _customHeight = targetH;
             Width = _customWidth;
             Height = _customHeight;
             Win32.RECT panelMonitor = GetPanelMonitor();
@@ -990,6 +997,7 @@ public partial class MainWindow : Window
             case "toggle_dnd":
             {
                 _quietHoursEnabled = !_quietHoursEnabled;
+                RefreshFullscreenSuppression();
                 return new { enabled = _quietHoursEnabled };
             }
 
