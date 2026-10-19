@@ -127,34 +127,43 @@ export const DropletNotification: React.FC<DropletNotificationProps> = ({
       }}
     >
       <div
-        className={`relative flex items-center overflow-hidden border transition-all ${
+        className={`relative flex items-center transition-all ${
           isBead
             ? 'w-12 h-12 rounded-full justify-center p-0'
             : 'h-12 rounded-full px-3 gap-2.5 max-w-[calc(100vw-48px)] w-auto min-w-[340px] max-w-[520px]'
         }`}
         style={{
-          borderRadius: '9999px', // Always fully rounded - never rectangular!
-          backgroundColor: 'var(--theme-bg, rgba(17, 25, 19, 0.94))',
-          borderColor: 'var(--theme-border, rgba(116, 168, 108, 0.3))',
+          borderRadius: '9999px',
           boxShadow: isBead
-            ? '0 10px 28px -2px rgba(0,0,0,0.75), 0 0 20px 2px var(--theme-accent, rgba(116, 168, 108, 0.55))'
-            : '0 14px 36px -4px rgba(0,0,0,0.72), 0 0 24px -2px var(--theme-accent, rgba(116, 168, 108, 0.45))',
-          backdropFilter: 'blur(28px) saturate(180%)',
-          WebkitBackdropFilter: 'blur(28px) saturate(180%)',
+            ? '0 10px 24px -2px rgba(0,0,0,0.7), 0 0 16px -2px var(--theme-accent, rgba(116, 168, 108, 0.45))'
+            : '0 12px 30px -4px rgba(0,0,0,0.68), 0 0 20px -2px var(--theme-accent, rgba(116, 168, 108, 0.38))',
           transition:
-            'width 500ms cubic-bezier(0.14, 1, 0.2, 1), max-width 500ms cubic-bezier(0.14, 1, 0.2, 1), box-shadow 400ms ease, border-color 300ms ease, background-color 300ms ease',
+            'width 500ms cubic-bezier(0.14, 1, 0.2, 1), max-width 500ms cubic-bezier(0.14, 1, 0.2, 1), box-shadow 400ms ease',
           willChange: 'width, max-width, box-shadow',
         }}
       >
-        {/* Subtle interior glow sheen */}
+        {/* Strictly clipped backdrop blur & glass layer - eliminates rectangular blur quad bleeding past pill */}
         <div
-          className="absolute inset-0 opacity-15 pointer-events-none transition-opacity duration-300"
+          className="absolute inset-0 rounded-full border pointer-events-none overflow-hidden"
           style={{
-            background:
-              'radial-gradient(circle at 10% 50%, var(--theme-accent, #74a86c) 0%, transparent 60%)',
+            borderRadius: '9999px',
+            clipPath: 'inset(0 round 9999px)',
+            WebkitClipPath: 'inset(0 round 9999px)',
+            backgroundColor: 'var(--theme-bg, rgba(17, 25, 19, 0.94))',
+            borderColor: 'var(--theme-border, rgba(116, 168, 108, 0.3))',
+            backdropFilter: 'blur(28px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(28px) saturate(180%)',
           }}
-        />
-
+        >
+          {/* Subtle interior glow sheen */}
+          <div
+            className="absolute inset-0 opacity-15 pointer-events-none transition-opacity duration-300"
+            style={{
+              background:
+                'radial-gradient(circle at 10% 50%, var(--theme-accent, #74a86c) 0%, transparent 60%)',
+            }}
+          />
+        </div>
         {/* Bell Icon Badge (Invisible during bead drop & retract, blooms in pill) */}
         <div
           className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 border transition-all duration-300 ${
@@ -235,7 +244,7 @@ export const DropletNotification: React.FC<DropletNotificationProps> = ({
 
         {/* Auto-Dismiss Countdown Bar at bottom edge */}
         {!isBead && contentVisible && (
-          <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-white/5 overflow-hidden">
+          <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-white/5 overflow-hidden rounded-b-full">
             <div
               className="h-full w-full"
               style={{

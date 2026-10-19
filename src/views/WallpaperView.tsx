@@ -389,8 +389,8 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
     >
       {/* Minimal Top Bar: 3 Dynamic Palette Pills + Minimal Folder / Refresh Controls */}
       <div className="flex items-center justify-between px-1 shrink-0">
-        {/* 3 Dynamic Palette Pills */}
-        <div className="flex items-center gap-2">
+        {/* Theme Mode Segmented Track Container */}
+        <div className="flex items-center gap-1 bg-[var(--theme-track)] p-0.5 rounded-full border border-[var(--theme-border)]">
           {palettePills.map((pill) => {
             const isSelected = settings.themeMode === pill.id;
             return (
@@ -402,11 +402,11 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
                 className="flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-medium transition-all duration-200 pointer-events-auto cursor-pointer active:scale-95"
                 style={{
                   background: isSelected
-                    ? 'var(--theme-track, rgba(255, 255, 255, 0.12))'
-                    : 'var(--theme-card, rgba(255, 255, 255, 0.04))',
+                    ? 'var(--theme-card, rgba(255, 255, 255, 0.14))'
+                    : 'transparent',
                   border: isSelected
-                    ? '1.5px solid var(--theme-accent, #A29BFE)'
-                    : '1px solid var(--theme-border, rgba(255, 255, 255, 0.07))',
+                    ? '1px solid var(--theme-accent, #A29BFE)'
+                    : '1px solid transparent',
                   color: isSelected
                     ? 'var(--theme-text-primary, #F1F2F6)'
                     : 'var(--theme-text-secondary, #9E9EA7)',
@@ -427,7 +427,6 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
             );
           })}
         </div>
-
         {/* Center: Search Box & Favorites Filter */}
         <div className="flex items-center gap-1.5 flex-1 max-w-[280px] mx-2">
           <div

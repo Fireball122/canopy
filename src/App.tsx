@@ -228,7 +228,6 @@ const CanopyShellContent: React.FC = () => {
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
   }, []);
 
-  const [isOpen, setIsOpen] = useState<boolean>(true);
   // Always initialize to 'dashboard' on startup and clear any legacy stored tab state
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -339,7 +338,7 @@ const CanopyShellContent: React.FC = () => {
   const [spectrumBands, setSpectrumBands] = useState<number[]>(() => new Array(40).fill(0));
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!panelOpen) return;
     let active = true;
     const poll = async () => {
       try {
@@ -355,7 +354,7 @@ const CanopyShellContent: React.FC = () => {
       active = false;
       window.clearInterval(timer);
     };
-  }, [isOpen]);
+  }, [panelOpen]);
 
   const [paletteOpen, setPaletteOpen] = useState<boolean>(false);
   const [paletteQuery, setPaletteQuery] = useState<string>('');
@@ -481,11 +480,27 @@ const CanopyShellContent: React.FC = () => {
     }
   }, [settings.showTerminalTab, activeTab]);
 
+  const toastTimerRef = useRef<number | null>(null);
+
   const handleToastNotification = useCallback((msg: string) => {
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = null;
+    }
     setToastMessage(msg);
-    window.setTimeout(() => {
-      setToastMessage((curr) => (curr === msg ? null : curr));
+    toastTimerRef.current = window.setTimeout(() => {
+      setToastMessage(null);
+      toastTimerRef.current = null;
     }, 7000);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+        toastTimerRef.current = null;
+      }
+    };
   }, []);
 
   // Restore custom window dimensions if configured
@@ -554,13 +569,9 @@ const CanopyShellContent: React.FC = () => {
       if (nextOpen === null) {
         return;
       }
-      const resolvedOpen = nextOpen;
-      setIsOpen((prevOpen) => {
-        if (resolvedOpen && !prevOpen) {
-          setActiveTab('dashboard');
-        }
-        return resolvedOpen;
-      });
+      if (nextOpen) {
+        setActiveTab('dashboard');
+      }
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -570,17 +581,10 @@ const CanopyShellContent: React.FC = () => {
           setPaletteOpen(false);
           return;
         }
-        setIsOpen(false);
-        setDropdownOpen(false).catch(() => {});
+        void setDropdownOpen(false);
       } else if (e.key === '`' && (e.ctrlKey || e.altKey || e.metaKey)) {
         e.preventDefault();
-        setIsOpen((prev) => {
-          const next = !prev;
-          if (next && !prev) {
-            setActiveTab('dashboard');
-          }
-          return next;
-        });
+        void setDropdownOpen(!panelOpen);
       }
     };
     window.addEventListener('canopy:set-open', onSetOpen);
@@ -593,7 +597,7 @@ const CanopyShellContent: React.FC = () => {
       window.removeEventListener('caelestia:set-open', onSetOpen);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [paletteOpen]);
+  }, [paletteOpen, panelOpen]);
 
   // Apply dynamic theme palette whenever wallpapers or settings.themeMode change
   const syncThemeWithActiveWallpaper = useCallback(
@@ -1183,6 +1187,16 @@ const CanopyShellContent: React.FC = () => {
     }
   };
 
+  const handleMediaControl = (action: 'play_pause' | 'prev' | 'next') => {
+    if (action === 'play_pause') {
+      void handlePlayPause();
+    } else if (action === 'prev') {
+      void handlePrev();
+    } else if (action === 'next') {
+      void handleNext();
+    }
+  };
+
   const handlePrev = async () => {
     mediaActionLockUntilRef.current = Date.now() + 750;
     mediaClock.seek(0);
@@ -1307,12 +1321,12 @@ const CanopyShellContent: React.FC = () => {
       }`}
     >
       {/* Top-Screen 2px Transparent Trigger Strip (only active when closed so it never intercepts or resets open tabs) */}
-      {!isOpen && settings.topHoverTrigger && !isWebViewHost() && (
+      {!panelOpen && settings.topHoverTrigger && !isWebViewHost() && (
         <div
           data-tauri-drag-region="false"
           className="fixed top-0 left-0 right-0 h-[2px] z-50 bg-transparent pointer-events-auto cursor-pointer"
           onMouseEnter={() => {
-            setIsOpen(true);
+            void setDropdownOpen(true);
           }}
           title="Hover top edge to summon Canopy"
         />
@@ -1333,8 +1347,8 @@ const CanopyShellContent: React.FC = () => {
           className="w-full shrink-0 flex items-center justify-between px-3 py-1 select-none relative"
           style={{ borderBottom: '1px solid var(--theme-border)' }}
         >
-          {/* Left Wing: Quick Search Icon Button (anchored on left edge) */}
-          <div className="flex-1 flex items-center justify-start pointer-events-auto">
+          {/* Left Wing: Quick Search Icon Button (centered halfway between window start and tabs) */}
+          <div className="flex-1 flex items-center justify-center pointer-events-auto">
             <button
               type="button"
               data-tauri-drag-region="false"
@@ -1444,8 +1458,16 @@ const CanopyShellContent: React.FC = () => {
               <div className="w-[165px] shrink-0 flex flex-col gap-2 h-full">
                 {/* Weather Card (Top — No inline °C/°F toggle) */}
                 <div
+                  role="button"
+                  tabIndex={0}
                   data-tauri-drag-region="false"
                   onClick={() => setActiveTab('weather')}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setActiveTab('weather');
+                    }
+                  }}
                   className="bento-card bento-card-interactive flex-1 p-3 flex flex-col justify-between text-left group relative overflow-hidden pointer-events-auto cursor-pointer"
                   title="Click to open Weather station"
                 >
@@ -1465,10 +1487,10 @@ const CanopyShellContent: React.FC = () => {
                       </span>
                       <div className="mt-1.5 flex items-baseline gap-1">
                         <span
-                          className="text-3xl font-bold tracking-tight tabular-nums leading-none"
+                          className="text-2xl font-bold tracking-tight tabular-nums leading-none"
                           style={{ color: 'var(--theme-text-primary)' }}
                         >
-                          {weather.isLive ? `${weather.temp}${tempUnit}` : '—'}
+                          {weather.isLive ? `${weather.temp}${tempUnit}` : 'Offline'}
                         </span>
                       </div>
                     </div>
@@ -1496,7 +1518,7 @@ const CanopyShellContent: React.FC = () => {
                       className="text-xs font-semibold tracking-tight truncate"
                       style={{ color: 'var(--theme-accent)' }}
                     >
-                      {weather.isLive ? weather.condition : 'Weather unavailable'}
+                      {weather.isLive ? weather.condition : 'Click to configure'}
                     </div>
                     {weather.isLive ? (
                       <div className="mt-1.5 flex items-center gap-1">
@@ -1520,11 +1542,16 @@ const CanopyShellContent: React.FC = () => {
                         </span>
                       </div>
                     ) : (
-                      <div
-                        className="mt-1.5 text-[9px] font-mono"
-                        style={{ color: 'var(--theme-text-secondary)' }}
-                      >
-                        Open Weather to retry
+                      <div className="mt-1.5 flex items-center gap-1">
+                        <span
+                          className="px-1.5 py-0.5 rounded-md text-[9px] font-mono tabular-nums"
+                          style={{
+                            background: 'var(--theme-track)',
+                            color: 'var(--theme-text-secondary)',
+                          }}
+                        >
+                          Tap to connect
+                        </span>
                       </div>
                     )}
                   </div>
@@ -1915,8 +1942,16 @@ const CanopyShellContent: React.FC = () => {
                     </svg>
 
                     <div
+                      role="button"
+                      tabIndex={0}
                       data-tauri-drag-region="false"
-                      onClick={handlePlayPause}
+                      onClick={() => handleMediaControl('play_pause')}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          handleMediaControl('play_pause');
+                        }
+                      }}
                       onWheel={(e) => {
                         e.stopPropagation();
                         const delta = e.deltaY < 0 ? 5 : -5;
@@ -2139,7 +2174,7 @@ const CanopyShellContent: React.FC = () => {
                   setAppPickerMode(false);
                   setActiveTab('settings');
                 }}
-                onAppLaunched={() => setIsOpen(false)}
+                onAppLaunched={() => void setDropdownOpen(false)}
               />
             </ErrorBoundary>
           )}
@@ -2190,7 +2225,7 @@ const CanopyShellContent: React.FC = () => {
               stats={stats}
               onActionTriggered={(act) => {
                 if (act !== 'lock') {
-                  setIsOpen(false);
+                  void setDropdownOpen(false);
                 }
               }}
             />

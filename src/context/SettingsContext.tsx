@@ -1,5 +1,13 @@
 import type React from 'react';
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { getSettingsJson, saveSettingsJson, setHostConfig } from '../services/hostBridge';
 
 export type TabId =
@@ -208,6 +216,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return initial;
   });
   const [hydratedFromHost, setHydratedFromHost] = useState(false);
+  const pendingUpdatesRef = useRef<Partial<CanopySettings>>({});
 
   // The host copy at %LOCALAPPDATA%\Canopy\settings.json is the durable store; the WebView2
   // localStorage copy is only a fast cache. Read the host file first — writing it before this
@@ -217,12 +226,21 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     void (async () => {
       try {
         const hostSettings = await getSettingsJson<Partial<CanopySettings>>();
-        if (active && hostSettings && typeof hostSettings === 'object') {
+        if (active) {
           setSettings((prev) => {
-            const merged: CanopySettings = { ...prev, ...hostSettings };
+            const merged: CanopySettings = {
+              ...prev,
+              ...(hostSettings && typeof hostSettings === 'object' ? hostSettings : {}),
+              ...pendingUpdatesRef.current,
+            };
+            pendingUpdatesRef.current = {};
             applyGlassCssVariables(merged.glassBlurStrength, merged.glassOpacity);
+            void saveSettingsJson(merged as unknown as Record<string, unknown>).catch(
+              () => undefined,
+            );
             return merged;
           });
+          setHydratedFromHost(true);
         }
       } catch {
         // Unreadable host file (first run, permissions): keep the localStorage copy.
@@ -363,23 +381,32 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     settings.diagnosticLogging,
   ]);
 
-  const updateSettings = useCallback((partial: Partial<CanopySettings>) => {
-    setSettings((prev) => {
-      const next: CanopySettings = {
-        ...prev,
-        ...partial,
-      };
-      applyGlassCssVariables(next.glassBlurStrength, next.glassOpacity);
-      try {
-        if (typeof window !== 'undefined') {
-          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-        }
-      } catch {
-        // Ignore storage errors
+  const updateSettings = useCallback(
+    (partial: Partial<CanopySettings>) => {
+      if (!hydratedFromHost) {
+        pendingUpdatesRef.current = {
+          ...pendingUpdatesRef.current,
+          ...partial,
+        };
       }
-      return next;
-    });
-  }, []);
+      setSettings((prev) => {
+        const next: CanopySettings = {
+          ...prev,
+          ...partial,
+        };
+        applyGlassCssVariables(next.glassBlurStrength, next.glassOpacity);
+        try {
+          if (typeof window !== 'undefined') {
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+          }
+        } catch {
+          // Ignore storage errors
+        }
+        return next;
+      });
+    },
+    [hydratedFromHost],
+  );
 
   const resetSettings = useCallback(() => {
     const fresh: CanopySettings = { ...DEFAULT_SETTINGS };
@@ -393,6 +420,9 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } catch {
       // Ignore storage errors
     }
+    void saveSettingsJson(DEFAULT_SETTINGS as unknown as Record<string, unknown>).catch(
+      () => undefined,
+    );
   }, []);
 
   const contextValue = useMemo<SettingsContextValue>(

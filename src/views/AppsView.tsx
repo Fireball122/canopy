@@ -426,7 +426,11 @@ export const AppsView: React.FC<AppsViewProps> = ({
       {/* Scrollable 4-Column App Cards Grid */}
       <div
         data-tauri-drag-region="false"
-        className="flex-1 overflow-y-auto pr-0.5 pointer-events-auto"
+        className="flex-1 overflow-y-auto pr-1 pointer-events-auto"
+        style={{
+          maskImage: 'linear-gradient(to bottom, black calc(100% - 24px), transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(to bottom, black calc(100% - 24px), transparent 100%)',
+        }}
       >
         {filteredApps.length === 0 ? (
           <div

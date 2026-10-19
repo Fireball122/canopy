@@ -458,6 +458,7 @@ public partial class MainWindow : Window
                 if (!IsTrustedCanopyUri(args.Uri))
                 {
                     args.Cancel = true;
+                    _log.Write($"rejected WebView navigation to untrusted URI '{args.Uri}'");
                 }
             };
             core.NewWindowRequested += (_, args) => args.Handled = true;
@@ -555,10 +556,27 @@ public partial class MainWindow : Window
 
     private static bool IsTrustedCanopyUri(string? source)
     {
-        return Uri.TryCreate(source, UriKind.Absolute, out Uri? uri) &&
-               string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
-               string.Equals(uri.Host, "canopy.local", StringComparison.OrdinalIgnoreCase) &&
-               uri.IsDefaultPort;
+        if (!Uri.TryCreate(source, UriKind.Absolute, out Uri? uri))
+        {
+            return false;
+        }
+
+        if (string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(uri.Host, "canopy.local", StringComparison.OrdinalIgnoreCase) &&
+            uri.IsDefaultPort)
+        {
+            return true;
+        }
+
+        if (string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
+            (string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(uri.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)) &&
+            (uri.Port == 1420 || uri.IsDefaultPort))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private async Task<object?> HandleBridgeCommandAsync(string cmd, JsonElement args)
@@ -2398,7 +2416,19 @@ public partial class MainWindow : Window
             if (!_topHoverTriggerEnabled || _fullscreenAppActive || !inTopTriggerZone)
             {
                 _hoverEnteredTriggerUtc = DateTime.MinValue;
+                if (_fullscreenAppActive && _cursorPollTimer.Interval.TotalMilliseconds < 500)
+                {
+                    _cursorPollTimer.Interval = TimeSpan.FromMilliseconds(500);
+                }
+                else if (!_fullscreenAppActive && _cursorPollTimer.Interval.TotalMilliseconds > 60)
+                {
+                    _cursorPollTimer.Interval = TimeSpan.FromMilliseconds(60);
+                }
                 return;
+            }
+            if (_cursorPollTimer.Interval.TotalMilliseconds > 25)
+            {
+                _cursorPollTimer.Interval = TimeSpan.FromMilliseconds(25);
             }
 
             // Require ~120ms hover dwell time before expanding to avoid accidental triggers

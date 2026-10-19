@@ -27,16 +27,11 @@ const CAPI_FRAMES = [
 
 /**
  * "Capi" — The Mushroom Spirit Mascot for Canopy
- * - Adorable headphone-wearing mushroom spirit with 7 dancing animation frames:
- *   Frame 1: Preparation (Idle)
- *   Frame 2: Sway Left
- *   Frame 3: Jump
- *   Frame 4: Bounce Up
- *   Frame 5: Sway Right (Wink)
- *   Frame 6: Squish / Beat Drop
- *   Frame 7: Return
- * - Music-Reactive: Cycles through all 7 frames rhythmically when music plays.
- * - Idle Mode: Rests on Frame 1 with gentle breathing when paused.
+ * - Adorable headphone-wearing mushroom spirit with 12 dancing animation frames:
+ *   Frames 1-12: Full rhythmic dance cycle bouncing and swaying to the beat.
+ * - Music-Reactive: Cycles through all 12 frames rhythmically when music plays.
+ * - Idle Mode: Rests peacefully on Idle Frame with gentle breathing when paused.
+ * - Interactive: Clicking or pressing Enter/Space triggers a playful wiggle reaction.
  * - Supports custom user GIF uploads via settings.
  */
 export const CanopyMascot: React.FC<CanopyMascotProps> = ({
@@ -51,6 +46,7 @@ export const CanopyMascot: React.FC<CanopyMascotProps> = ({
   const [frozenGifDataUrl, setFrozenGifDataUrl] = useState<string | null>(null);
   const [customGifError, setCustomGifError] = useState<boolean>(false);
   const [isWiggling, setIsWiggling] = useState<boolean>(false);
+  const wiggleTimerRef = useRef<number | null>(null);
   const lastSampledGifRef = useRef<string>('');
 
   const activeGifUrl = (customGifUrl ?? settings.customMascotGifUrl ?? '').trim();
@@ -111,6 +107,25 @@ export const CanopyMascot: React.FC<CanopyMascotProps> = ({
     return () => window.clearInterval(timer);
   }, [isPlaying]);
 
+  const triggerWiggle = () => {
+    if (wiggleTimerRef.current !== null) {
+      window.clearTimeout(wiggleTimerRef.current);
+    }
+    setIsWiggling(true);
+    wiggleTimerRef.current = window.setTimeout(() => {
+      setIsWiggling(false);
+      wiggleTimerRef.current = null;
+    }, 700);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (wiggleTimerRef.current !== null) {
+        window.clearTimeout(wiggleTimerRef.current);
+      }
+    };
+  }, []);
+
   if (settings.mascotMode === 'none') {
     return null;
   }
@@ -137,11 +152,16 @@ export const CanopyMascot: React.FC<CanopyMascotProps> = ({
 
   return (
     <div
-      onClick={() => {
-        setIsWiggling(true);
-        window.setTimeout(() => setIsWiggling(false), 700);
+      role="button"
+      tabIndex={0}
+      onClick={triggerWiggle}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          triggerWiggle();
+        }
       }}
-      className={`relative flex flex-col items-center justify-center select-none pointer-events-auto cursor-pointer group h-full max-h-full overflow-hidden ${className}`}
+      className={`relative flex flex-col items-center justify-center select-none pointer-events-auto cursor-pointer group h-full max-h-full overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent)] rounded-xl ${className}`}
       title={isPlaying ? 'Capi is dancing to your music!' : 'Capi is resting (click to bounce!)'}
     >
       {/* Ambient soft circular glow behind Capi (strictly circular, never clips) */}

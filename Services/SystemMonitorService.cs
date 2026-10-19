@@ -71,6 +71,7 @@ public sealed class SystemMonitorService : IDisposable
     private double[] _cachedCoreUsages;
     private IReadOnlyList<ProcessSnapshot> _cachedTopProcesses = [];
     private double? _cachedCpuTempC;
+    private int _wmiThermalFailures;
     private long _lastHeavySampleTick;
     private int _heavySampleInFlight;
     private long _prevNetBytesRecv;
@@ -428,28 +429,40 @@ public sealed class SystemMonitorService : IDisposable
             Log.WriteException(nameof(RefreshHeavyTelemetry), ex);
         }
 
-        try
+        if (_wmiThermalFailures < 3)
         {
-            using var searcher = new ManagementObjectSearcher(@"root\WMI", "SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature");
-            using ManagementObjectCollection results = searcher.Get();
-            foreach (ManagementObject obj in results)
+            try
             {
-                using (obj)
+                using var searcher = new ManagementObjectSearcher(@"root\WMI", "SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature");
+                using ManagementObjectCollection results = searcher.Get();
+                bool foundTemp = false;
+                foreach (ManagementObject obj in results)
                 {
-                    double kelvinTenths = Convert.ToDouble(obj["CurrentTemperature"]);
-                    double celsius = (kelvinTenths / 10.0) - 273.15;
-                    if (celsius is > 15.0 and < 115.0)
+                    using (obj)
                     {
-                        _cachedCpuTempC = celsius;
-                        break;
+                        double kelvinTenths = Convert.ToDouble(obj["CurrentTemperature"]);
+                        double celsius = (kelvinTenths / 10.0) - 273.15;
+                        if (celsius is > 15.0 and < 115.0)
+                        {
+                            _cachedCpuTempC = celsius;
+                            foundTemp = true;
+                            _wmiThermalFailures = 0;
+                            break;
+                        }
                     }
                 }
+                if (!foundTemp)
+                {
+                    _wmiThermalFailures++;
+                    _cachedCpuTempC = null;
+                }
             }
-        }
-        catch (Exception ex)
-        {
-            _ = ex;
-            _cachedCpuTempC = null;
+            catch (Exception ex)
+            {
+                _ = ex;
+                _wmiThermalFailures++;
+                _cachedCpuTempC = null;
+            }
         }
         RefreshGpuTelemetry();
     }

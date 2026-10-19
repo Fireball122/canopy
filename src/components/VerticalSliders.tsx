@@ -243,7 +243,7 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
             <div
               data-tauri-drag-region="false"
               style={{
-                height: `${slider.value}%`,
+                height: `${Math.max(6, slider.value)}%`,
                 pointerEvents: 'none',
                 ...slider.fillStyle,
                 boxShadow: `0 -4px 16px ${slider.glowColor}40`,

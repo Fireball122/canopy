@@ -27,7 +27,26 @@ public sealed class DiagnosticsLog
         }
         catch
         {
-            // Fall back to the install directory if the profile is not writable.
+            // Fall back to the install directory if the profile is not writable,
+            // probing for write permissions before falling back to temp path.
+            directory = AppContext.BaseDirectory;
+            bool baseWritable = false;
+            try
+            {
+                string probeFile = Path.Combine(directory, $".probe_{Guid.NewGuid():N}.tmp");
+                File.WriteAllText(probeFile, string.Empty);
+                File.Delete(probeFile);
+                baseWritable = true;
+            }
+            catch
+            {
+                baseWritable = false;
+            }
+
+            if (!baseWritable)
+            {
+                directory = Path.GetTempPath();
+            }
         }
 
         _filePath = Path.Combine(directory, "canopy.log");

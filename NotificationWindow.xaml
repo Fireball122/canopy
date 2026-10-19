@@ -27,7 +27,7 @@
                 BorderBrush="#4D74A86C"
                 BorderThickness="1"
                 CornerRadius="24"
-                ClipToBounds="True"
+                ClipToBounds="False"
                 RenderTransformOrigin="0.5,0.5">
             <Border.Effect>
                 <DropShadowEffect x:Name="PillShadow"
@@ -138,12 +138,13 @@
                 </Grid>
 
                 <!-- Auto-Dismiss Countdown Line at Bottom -->
-                <Border VerticalAlignment="Bottom" Height="2" Background="#11FFFFFF">
+                <Border VerticalAlignment="Bottom" Height="2" Background="#11FFFFFF" CornerRadius="0,0,24,24">
                     <Border x:Name="CountdownBar"
                             Height="2"
                             HorizontalAlignment="Left"
                             Background="#74A86C"
-                            Width="0" />
+                            Width="0"
+                            CornerRadius="0,0,0,24" />
                 </Border>
             </Grid>
         </Border>

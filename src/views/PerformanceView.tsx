@@ -8,6 +8,7 @@ import {
   HardDrive,
   Layers,
   MemoryStick,
+  Wifi,
 } from 'lucide-react';
 import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
@@ -202,9 +203,21 @@ const SparklineMini: React.FC<{
 
 export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
   const [detailsOpen, setDetailsOpen] = useState<boolean>(false);
+  const [gpuHistory, setGpuHistory] = useState<number[]>(() => new Array(30).fill(0));
   const [cpuHistory, setCpuHistory] = useState<number[]>(() => new Array(30).fill(0));
   const [ramHistory, setRamHistory] = useState<number[]>(() => new Array(30).fill(0));
   const [netDownHistory, setNetDownHistory] = useState<number[]>(() => new Array(30).fill(0));
+  const [netUpHistory, setNetUpHistory] = useState<number[]>(() => new Array(30).fill(0));
+  const [networkViewMode, setNetworkViewMode] = useState<'bars' | 'graph'>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = window.localStorage.getItem('canopy_network_view_mode');
+        if (stored === 'graph' || stored === 'bars') return stored;
+      } catch {}
+    }
+    return 'bars';
+  });
+
   const gpuAvailable = stats.gpu_usage != null || stats.gpu_temp_c != null;
   const gpuTempC = stats.gpu_temp_c != null ? Math.round(stats.gpu_temp_c) : null;
   const gpuUsage = stats.gpu_usage != null ? Math.round(stats.gpu_usage) : 0;
@@ -225,20 +238,34 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
     Number.isFinite(stats.net_up_kbps) && stats.net_up_kbps >= 0 ? stats.net_up_kbps : 1433.6;
 
   useEffect(() => {
+    setGpuHistory((prev) => [...prev.slice(1), gpuUsage]);
     setCpuHistory((prev) => [...prev.slice(1), cpuUsage]);
     setRamHistory((prev) => [...prev.slice(1), ramUsage]);
     setNetDownHistory((prev) => [
       ...prev.slice(1),
       Math.min(100, Math.round((netDownKbps / 1024) * 10)),
     ]);
-  }, [cpuUsage, ramUsage, netDownKbps]);
+    setNetUpHistory((prev) => [
+      ...prev.slice(1),
+      Math.min(100, Math.round((netUpKbps / 1024) * 10)),
+    ]);
+  }, [gpuUsage, cpuUsage, ramUsage, netDownKbps, netUpKbps]);
+
+  const toggleNetworkViewMode = (mode: 'bars' | 'graph') => {
+    setNetworkViewMode(mode);
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('canopy_network_view_mode', mode);
+      }
+    } catch {}
+  };
+
   const downFormatted =
     netDownKbps >= 1024
       ? `${(netDownKbps / 1024).toFixed(1)} MB/s`
       : `${netDownKbps.toFixed(1)} KB/s`;
   const upFormatted =
     netUpKbps >= 1024 ? `${(netUpKbps / 1024).toFixed(1)} MB/s` : `${netUpKbps.toFixed(1)} KB/s`;
-
   const downBarPercent = Math.min(
     100,
     Math.max(6, Math.round((Math.log10(netDownKbps + 1) / 5) * 100)),
@@ -370,125 +397,234 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
         />
       </div>
 
-      {/* 30-Sample Rolling History Mini-Sparklines Bar */}
-      <div
-        className="bento-card px-3 py-1.5 flex items-center justify-between gap-3 shrink-0 rounded-xl"
-        style={{
-          background: 'var(--theme-card, rgba(255, 255, 255, 0.035))',
-          borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
-        }}
-      >
-        <div className="flex items-center gap-2">
+      {/* 30-Sample Rolling History Mini-Sparklines Bar (Aligned 1-to-1 with Gauges: GPU, CPU, RAM) */}
+      <div className="grid grid-cols-3 gap-2.5 shrink-0">
+        <div
+          className="bento-card px-3 py-1.5 flex items-center justify-between gap-2 rounded-xl"
+          style={{
+            background: 'var(--theme-card, rgba(255, 255, 255, 0.035))',
+            borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
+          }}
+        >
+          <span className="text-[10px] font-mono font-medium text-[var(--theme-text-secondary)]">
+            GPU Activity
+          </span>
+          <SparklineMini data={gpuHistory} color="#89dceb" width={96} height={20} />
+        </div>
+
+        <div
+          className="bento-card px-3 py-1.5 flex items-center justify-between gap-2 rounded-xl"
+          style={{
+            background: 'var(--theme-card, rgba(255, 255, 255, 0.035))',
+            borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
+          }}
+        >
           <span className="text-[10px] font-mono font-medium text-[var(--theme-text-secondary)]">
             CPU Activity
           </span>
           <SparklineMini
             data={cpuHistory}
             color="var(--theme-accent, #cba6f7)"
-            width={90}
+            width={96}
             height={20}
           />
         </div>
-        <div className="flex items-center gap-2">
+
+        <div
+          className="bento-card px-3 py-1.5 flex items-center justify-between gap-2 rounded-xl"
+          style={{
+            background: 'var(--theme-card, rgba(255, 255, 255, 0.035))',
+            borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
+          }}
+        >
           <span className="text-[10px] font-mono font-medium text-[var(--theme-text-secondary)]">
             Memory Load
           </span>
-          <SparklineMini data={ramHistory} color="#a6e3a1" width={90} height={20} />
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-mono font-medium text-[var(--theme-text-secondary)]">
-            Network I/O
-          </span>
-          <SparklineMini data={netDownHistory} color="#89dceb" width={90} height={20} />
+          <SparklineMini data={ramHistory} color="#a6e3a1" width={96} height={20} />
         </div>
       </div>
-      {/* Centered Download (↓) and Upload (↑) Live Throughput Indicators */}
+
+      {/* Network Live Throughput & Activity Panel (Expanded to cleanly fill out vertical space) */}
       <div
-        className="bento-card px-4 py-2 flex items-center justify-center gap-4 shrink-0"
+        className="bento-card p-3 flex flex-col justify-between gap-2.5 shrink-0"
         style={{
           background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
           borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
         }}
       >
-        <div className="flex items-center gap-3 w-full max-w-[480px] justify-center">
-          <div
-            className="flex-1 px-3 py-1.5 rounded-xl border flex flex-col gap-1 min-w-[132px]"
-            style={{
-              background: 'var(--theme-track, rgba(255, 255, 255, 0.04))',
-              borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.07))',
-            }}
-          >
-            <div className="flex items-center justify-between gap-2 text-[11px] font-mono tabular-nums">
-              <span
-                className="flex items-center gap-1 font-medium"
-                style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))' }}
-              >
-                <ArrowDown className="w-3 h-3 text-[#89dceb]" strokeWidth={2.2} />
-                <span>Down</span>
-              </span>
-              <span
-                className="font-semibold"
-                style={{ color: 'var(--theme-text-primary, #cdd6f4)' }}
-              >
-                {downFormatted}
-              </span>
-            </div>
-            <div
-              className="w-full h-1.5 rounded-full overflow-hidden"
-              style={{ background: 'var(--theme-track, rgba(255, 255, 255, 0.08))' }}
+        {/* Network Header with Wifi Symbol & View Mode Toggle (Bars vs Live Graph) */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <Wifi className="w-3.5 h-3.5 text-[#89dceb]" strokeWidth={2.2} />
+            <span
+              className="text-[10.5px] font-mono uppercase tracking-wider font-semibold"
+              style={{ color: 'var(--theme-accent, #cba6f7)' }}
             >
-              <div
-                className="h-full rounded-full transition-all duration-300"
-                style={{
-                  width: `${downBarPercent}%`,
-                  background:
-                    'linear-gradient(90deg, #89dceb 0%, var(--theme-accent, #cba6f7) 100%)',
-                }}
-              />
-            </div>
+              Network
+            </span>
           </div>
 
-          <div
-            className="flex-1 px-3 py-1.5 rounded-xl border flex flex-col gap-1 min-w-[132px]"
-            style={{
-              background: 'var(--theme-track, rgba(255, 255, 255, 0.04))',
-              borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.07))',
-            }}
-          >
-            <div className="flex items-center justify-between gap-2 text-[11px] font-mono tabular-nums">
-              <span
-                className="flex items-center gap-1 font-medium"
-                style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))' }}
-              >
-                <ArrowUp className="w-3 h-3 text-[#a6e3a1]" strokeWidth={2.2} />
-                <span>Up</span>
-              </span>
-              <span
-                className="font-semibold"
-                style={{ color: 'var(--theme-text-primary, #cdd6f4)' }}
-              >
-                {upFormatted}
-              </span>
-            </div>
-            <div
-              className="w-full h-1.5 rounded-full overflow-hidden"
-              style={{ background: 'var(--theme-track, rgba(255, 255, 255, 0.08))' }}
+          <div className="flex items-center gap-1 bg-[var(--theme-track, rgba(255,255,255,0.05))] p-0.5 rounded-full border border-[var(--theme-border, rgba(255,255,255,0.08))]">
+            <button
+              type="button"
+              data-tauri-drag-region="false"
+              onClick={() => toggleNetworkViewMode('bars')}
+              className={`px-2 py-0.5 rounded-full text-[9.5px] font-mono transition-all pointer-events-auto cursor-pointer ${
+                networkViewMode === 'bars'
+                  ? 'bg-[var(--theme-card)] font-semibold shadow-sm text-white'
+                  : 'opacity-60 hover:opacity-100 text-[var(--theme-text-secondary)]'
+              }`}
             >
-              <div
-                className="h-full rounded-full transition-all duration-300"
-                style={{
-                  width: `${upBarPercent}%`,
-                  background:
-                    'linear-gradient(90deg, #a6e3a1 0%, var(--theme-accent, #cba6f7) 100%)',
-                }}
-              />
-            </div>
+              Bars
+            </button>
+            <button
+              type="button"
+              data-tauri-drag-region="false"
+              onClick={() => toggleNetworkViewMode('graph')}
+              className={`px-2 py-0.5 rounded-full text-[9.5px] font-mono transition-all pointer-events-auto cursor-pointer ${
+                networkViewMode === 'graph'
+                  ? 'bg-[var(--theme-card)] font-semibold shadow-sm text-white'
+                  : 'opacity-60 hover:opacity-100 text-[var(--theme-text-secondary)]'
+              }`}
+            >
+              Live Graph
+            </button>
           </div>
         </div>
+
+        {networkViewMode === 'bars' ? (
+          <div className="flex items-center gap-3 w-full justify-center">
+            <div
+              className="flex-1 px-3 py-2 rounded-xl border flex flex-col gap-1.5 min-w-[132px]"
+              style={{
+                background: 'var(--theme-track, rgba(255, 255, 255, 0.04))',
+                borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.07))',
+              }}
+            >
+              <div className="flex items-center justify-between gap-2 text-[11px] font-mono tabular-nums">
+                <span
+                  className="flex items-center gap-1 font-medium"
+                  style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))' }}
+                >
+                  <ArrowDown className="w-3 h-3 text-[#89dceb]" strokeWidth={2.2} />
+                  <span>Down</span>
+                </span>
+                <span
+                  className="font-semibold"
+                  style={{ color: 'var(--theme-text-primary, #cdd6f4)' }}
+                >
+                  {downFormatted}
+                </span>
+              </div>
+              <div
+                className="w-full h-2 rounded-full overflow-hidden"
+                style={{ background: 'var(--theme-track, rgba(255, 255, 255, 0.08))' }}
+              >
+                <div
+                  className="h-full rounded-full transition-all duration-300"
+                  style={{
+                    width: `${downBarPercent}%`,
+                    background:
+                      'linear-gradient(90deg, #89dceb 0%, var(--theme-accent, #cba6f7) 100%)',
+                  }}
+                />
+              </div>
+            </div>
+
+            <div
+              className="flex-1 px-3 py-2 rounded-xl border flex flex-col gap-1.5 min-w-[132px]"
+              style={{
+                background: 'var(--theme-track, rgba(255, 255, 255, 0.04))',
+                borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.07))',
+              }}
+            >
+              <div className="flex items-center justify-between gap-2 text-[11px] font-mono tabular-nums">
+                <span
+                  className="flex items-center gap-1 font-medium"
+                  style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))' }}
+                >
+                  <ArrowUp className="w-3 h-3 text-[#a6e3a1]" strokeWidth={2.2} />
+                  <span>Up</span>
+                </span>
+                <span
+                  className="font-semibold"
+                  style={{ color: 'var(--theme-text-primary, #cdd6f4)' }}
+                >
+                  {upFormatted}
+                </span>
+              </div>
+              <div
+                className="w-full h-2 rounded-full overflow-hidden"
+                style={{ background: 'var(--theme-track, rgba(255, 255, 255, 0.08))' }}
+              >
+                <div
+                  className="h-full rounded-full transition-all duration-300"
+                  style={{
+                    width: `${upBarPercent}%`,
+                    background:
+                      'linear-gradient(90deg, #a6e3a1 0%, var(--theme-accent, #cba6f7) 100%)',
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-3 w-full justify-center">
+            <div
+              className="flex-1 px-3 py-2 rounded-xl border flex items-center justify-between gap-2 min-w-[132px]"
+              style={{
+                background: 'var(--theme-track, rgba(255, 255, 255, 0.04))',
+                borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.07))',
+              }}
+            >
+              <div className="flex flex-col">
+                <span
+                  className="flex items-center gap-1 text-[11px] font-mono font-medium"
+                  style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))' }}
+                >
+                  <ArrowDown className="w-3 h-3 text-[#89dceb]" strokeWidth={2.2} />
+                  <span>Down</span>
+                </span>
+                <span
+                  className="font-semibold text-xs font-mono"
+                  style={{ color: 'var(--theme-text-primary, #cdd6f4)' }}
+                >
+                  {downFormatted}
+                </span>
+              </div>
+              <SparklineMini data={netDownHistory} color="#89dceb" width={140} height={26} />
+            </div>
+
+            <div
+              className="flex-1 px-3 py-2 rounded-xl border flex items-center justify-between gap-2 min-w-[132px]"
+              style={{
+                background: 'var(--theme-track, rgba(255, 255, 255, 0.04))',
+                borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.07))',
+              }}
+            >
+              <div className="flex flex-col">
+                <span
+                  className="flex items-center gap-1 text-[11px] font-mono font-medium"
+                  style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))' }}
+                >
+                  <ArrowUp className="w-3 h-3 text-[#a6e3a1]" strokeWidth={2.2} />
+                  <span>Up</span>
+                </span>
+                <span
+                  className="font-semibold text-xs font-mono"
+                  style={{ color: 'var(--theme-text-primary, #cdd6f4)' }}
+                >
+                  {upFormatted}
+                </span>
+              </div>
+              <SparklineMini data={netUpHistory} color="#a6e3a1" width={140} height={26} />
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Centered Subtle Chevron Drawer Toggle Button Directly Beneath Gauges & Network Metric */}
-      <div className="flex items-center justify-center shrink-0">
+      {/* Centered Subtle Chevron Drawer Toggle Button Sitting Comfortably at the Bottom of Open Space */}
+      <div className="flex items-center justify-center shrink-0 mt-auto pt-1">
         <button
           type="button"
           data-tauri-drag-region="false"

@@ -116,7 +116,7 @@ export const CANOPY_FOREST_THEME = {
 export const OBSIDIAN_DARK_THEME = {
   bg: 'rgba(18, 18, 24, 0.92)',
   card: 'rgba(255, 255, 255, 0.04)',
-  border: 'rgba(255, 255, 255, 0.08)',
+  border: 'rgba(162, 155, 254, 0.28)',
   accent: '#a29bfe',
   accentSoft: 'rgba(162, 155, 254, 0.18)',
   accentWarm: '#fab387',
@@ -418,7 +418,7 @@ export function applyThemePalette(
       applyThemeVariables({
         bg: `rgba(${bgRgb[0]}, ${bgRgb[1]}, ${bgRgb[2]}, 0.92)`,
         card: `rgba(255, 255, 255, 0.05)`,
-        border: `rgba(${accentRgb[0]}, ${accentRgb[1]}, ${accentRgb[2]}, 0.22)`,
+        border: `rgba(${accentRgb[0]}, ${accentRgb[1]}, ${accentRgb[2]}, 0.32)`,
         accent: accentHex,
         accentSoft: `rgba(${accentRgb[0]}, ${accentRgb[1]}, ${accentRgb[2]}, 0.18)`,
         accentWarm: warmHex,

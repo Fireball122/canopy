@@ -40,6 +40,7 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
     // Diagnostics: last failure surfaced to the host instead of being swallowed by catch {}.
     private volatile string? _lastError;
     private long _lastRestartTick;
+    private int _restartAttempt;
     private float _lastFrameRms;
 
     // Spectrum dB window: magnitudes at/below -80 dB map to 0, at/above -10 dB map to 1.
@@ -178,6 +179,10 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
                 }
                 catch { }
             }
+            if (newCaptures.Count > 0)
+            {
+                Interlocked.Exchange(ref _restartAttempt, 0);
+            }
 
             lock (_syncLock)
             {
@@ -219,7 +224,9 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
 
         _ = Task.Run(async () =>
         {
-            await Task.Delay(300);
+            int attempt = Interlocked.Increment(ref _restartAttempt);
+            int delayMs = Math.Min(3000, 200 * (1 << Math.Min(attempt, 4)));
+            await Task.Delay(delayMs);
             if (!_disposed)
             {
                 StartCaptureInternal();
