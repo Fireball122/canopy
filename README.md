@@ -43,11 +43,11 @@ When summoned, it glides down with an anti-aliased frosted glass panel containin
 
 ### Method 1: Windows Setup Wizard (Recommended)
 Download the latest Windows setup wizard from [**Releases**](https://github.com/Fireball122/canopy/releases/latest):
-* **`Canopy-v1.0.4-Setup.exe`**: Official branded setup wizard. Checks for dependencies (WebView2), configures desktop & startup auto-run options, and installs without requiring administrator privileges.
-* **`Canopy-v1.0.4-x64.msi`**: Enterprise Windows Installer (MSI) package for automated network deployments and silent upgrades.
+* **`Canopy-v1.0.5-Setup.exe`**: Official branded setup wizard. Checks for dependencies (WebView2), configures desktop & startup auto-run options, and installs without requiring administrator privileges.
+* **`Canopy-v1.0.5-x64.msi`**: Enterprise Windows Installer (MSI) package for automated network deployments and silent upgrades.
 
 ### Method 2: Portable ZIP
-Grab **`Canopy-v1.0.4-win-x64-portable.zip`** from [**Releases**](https://github.com/Fireball122/canopy/releases/latest). Unzip it anywhere and double-click `Start Canopy.bat` or `Canopy.exe`. Zero registry changes required.
+Grab **`Canopy-v1.0.5-win-x64-portable.zip`** from [**Releases**](https://github.com/Fireball122/canopy/releases/latest). Unzip it anywhere and double-click `Start Canopy.bat` or `Canopy.exe`. Zero registry changes required.
 ### Method 3: One-Line PowerShell
 Run this in PowerShell (no admin privileges required; installs cleanly to `%LOCALAPPDATA%\Programs\Canopy`):
 
@@ -121,7 +121,7 @@ If you want to build Canopy yourself or tweak the code:
 
 4. **Package local installer (optional):**
    ```powershell
-   # Builds dist-installer/Canopy-v1.0.4-Setup.exe (requires Inno Setup 6)
+   # Builds dist-installer/Canopy-v1.0.5-Setup.exe (requires Inno Setup 6)
    .\installer\build-setup-exe.ps1
    ```
 ---

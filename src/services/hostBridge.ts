@@ -990,6 +990,88 @@ export async function notifyTabSwitched(): Promise<void> {
   await invokeBridge<unknown>('tab_changed', undefined, () => undefined);
 }
 
+export async function openExternalUrl(url: string): Promise<boolean> {
+  return invokeBridge<boolean>('open_url', { url }, () => {
+    if (typeof window !== 'undefined') {
+      window.open(url, '_blank');
+      return true;
+    }
+    return false;
+  });
+}
+
+export async function applyUpdate(downloadUrl: string): Promise<boolean> {
+  return invokeBridge<boolean>('apply_update', { downloadUrl }, () => false);
+}
+
+export interface UpdateCheckResult {
+  currentVersion: string;
+  latestVersion: string;
+  updateAvailable: boolean;
+  downloadUrl?: string;
+  releaseUrl?: string;
+  releaseNotes?: string;
+}
+
+export async function checkForUpdates(currentVersion = '1.0.5'): Promise<UpdateCheckResult> {
+  try {
+    const res = await fetch('https://api.github.com/repos/Fireball122/canopy/releases/latest', {
+      headers: {
+        Accept: 'application/vnd.github.v3+json',
+      },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const tagName = (data.tag_name || '').replace(/^v/i, '').trim();
+    const cleanCurrent = currentVersion.replace(/^v/i, '').trim();
+
+    // Semantic version compare: latest > current
+    const latestParts = tagName.split('.').map((n: string) => Number.parseInt(n, 10) || 0);
+    const currentParts = cleanCurrent.split('.').map((n: string) => Number.parseInt(n, 10) || 0);
+
+    let isNewer = false;
+    for (let i = 0; i < Math.max(latestParts.length, currentParts.length); i++) {
+      const l = latestParts[i] || 0;
+      const c = currentParts[i] || 0;
+      if (l > c) {
+        isNewer = true;
+        break;
+      }
+      if (l < c) {
+        break;
+      }
+    }
+
+    let downloadUrl: string | undefined;
+    if (Array.isArray(data.assets)) {
+      const exeAsset = data.assets.find(
+        (a: { name?: string; browser_download_url?: string }) =>
+          typeof a.name === 'string' &&
+          a.name.endsWith('.exe') &&
+          !a.name.toLowerCase().includes('portable'),
+      );
+      if (exeAsset) {
+        downloadUrl = exeAsset.browser_download_url;
+      }
+    }
+
+    return {
+      currentVersion: cleanCurrent,
+      latestVersion: tagName,
+      updateAvailable: isNewer,
+      downloadUrl,
+      releaseUrl: data.html_url,
+      releaseNotes: data.body,
+    };
+  } catch {
+    return {
+      currentVersion,
+      latestVersion: currentVersion,
+      updateAvailable: false,
+    };
+  }
+}
+
 const FALLBACK_INSTALLED_APPS: InstalledAppItem[] = [
   {
     id: 'brave',

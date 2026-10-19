@@ -4,7 +4,10 @@ import {
   Clock,
   CloudSun,
   Download,
+  ExternalLink,
+  GitBranch,
   Power,
+  RefreshCw,
   RotateCcw,
   Search,
   Sliders,
@@ -12,7 +15,7 @@ import {
   Upload,
 } from 'lucide-react';
 import type React from 'react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AppearanceSection } from '../components/settings/AppearanceSection';
 import { AudioSection } from '../components/settings/AudioSection';
 import { DockSlotsSection } from '../components/settings/DockSlotsSection';
@@ -26,14 +29,17 @@ import {
 import { TriggerSection } from '../components/settings/TriggerSection';
 import { type CanopySettings, useSettings } from '../context/SettingsContext';
 import {
+  applyUpdate,
+  checkForUpdates,
+  openExternalUrl,
   openLogFolder,
   pickWallpaperFolder,
   setLaunchOnStartup,
   setWallpaperDirectory,
   testNotification,
+  type UpdateCheckResult,
   type WallpaperEntry,
 } from '../services/hostBridge';
-
 export interface SettingsViewProps {
   onDirectoryChanged?: (newDir: string, entries: WallpaperEntry[]) => void;
   onThemeChanged?: () => void;
@@ -47,8 +53,61 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const { settings, updateSettings, resetSettings } = useSettings();
   const [browsingFolder, setBrowsingFolder] = useState(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [applyingUpdate, setApplyingUpdate] = useState(false);
+  const [updateStatusText, setUpdateStatusText] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    setCheckingUpdate(true);
+    checkForUpdates('1.0.5')
+      .then((res) => {
+        if (active) {
+          setUpdateInfo(res);
+          setCheckingUpdate(false);
+        }
+      })
+      .catch(() => {
+        if (active) setCheckingUpdate(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleManualCheckUpdate = async () => {
+    setCheckingUpdate(true);
+    setUpdateStatusText(null);
+    try {
+      const res = await checkForUpdates('1.0.5');
+      setUpdateInfo(res);
+      if (!res.updateAvailable) {
+        setUpdateStatusText('Canopy is currently up to date!');
+        window.setTimeout(() => setUpdateStatusText(null), 4000);
+      }
+    } catch {
+      setUpdateStatusText('Could not reach GitHub releases.');
+      window.setTimeout(() => setUpdateStatusText(null), 4000);
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
+
+  const handleApplyUpdate = async () => {
+    if (!updateInfo?.downloadUrl) return;
+    setApplyingUpdate(true);
+    setUpdateStatusText('Downloading update & launching installer...');
+    try {
+      await applyUpdate(updateInfo.downloadUrl);
+    } catch {
+      setApplyingUpdate(false);
+      setUpdateStatusText('Failed to apply update.');
+      window.setTimeout(() => setUpdateStatusText(null), 4000);
+    }
+  };
   const q = searchQuery.trim().toLowerCase();
   const matches = (keywords: string[]) => !q || keywords.some((k) => k.toLowerCase().includes(q));
   const hasMatches =
@@ -685,6 +744,98 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   {importStatus && (
                     <div className="text-[10px] font-mono text-center text-[var(--theme-accent)]">
                       {importStatus}
+                    </div>
+                  )}
+                </SettingSection>
+              )}
+
+              {/* 8. UPDATES & REPOSITORY */}
+              {matches([
+                'update',
+                'github',
+                'version',
+                'repo',
+                'upgrade',
+                'install',
+                'release',
+              ]) && (
+                <SettingSection
+                  title="Updates & Repository"
+                  icon={<GitBranch className="w-4 h-4" />}
+                  badge="v1.0.5"
+                >
+                  <SettingRow
+                    title="GitHub Repository"
+                    description="View open-source repository, releases, and issue tracker"
+                  >
+                    <button
+                      type="button"
+                      data-tauri-drag-region="false"
+                      onClick={() => void openExternalUrl('https://github.com/Fireball122/canopy')}
+                      className="px-3 py-1.5 rounded-xl text-xs font-mono border flex items-center gap-1.5 transition-all hover:bg-[var(--theme-track)] hover:scale-[1.02] active:scale-95 pointer-events-auto cursor-pointer"
+                      style={{
+                        borderColor: 'var(--theme-border)',
+                        color: 'var(--theme-text-primary)',
+                      }}
+                    >
+                      <span>Fireball122/canopy</span>
+                      <ExternalLink className="w-3 h-3 text-[var(--theme-accent)]" />
+                    </button>
+                  </SettingRow>
+
+                  <SettingRow
+                    title="Version & Status"
+                    description={
+                      updateInfo?.updateAvailable
+                        ? `A new release (v${updateInfo.latestVersion}) is available on GitHub!`
+                        : 'Canopy is up to date (v1.0.5)'
+                    }
+                  >
+                    <div className="flex items-center gap-2">
+                      {updateInfo?.updateAvailable ? (
+                        <button
+                          type="button"
+                          data-tauri-drag-region="false"
+                          disabled={applyingUpdate}
+                          onClick={handleApplyUpdate}
+                          className="px-3 py-1.5 rounded-xl text-xs font-semibold border flex items-center gap-1.5 transition-all shadow-md active:scale-95 pointer-events-auto cursor-pointer animate-pulse"
+                          style={{
+                            background: 'var(--theme-accent, #74a86c)',
+                            color: 'var(--theme-on-accent, #111913)',
+                            borderColor: 'var(--theme-accent, #74a86c)',
+                          }}
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>
+                            {applyingUpdate
+                              ? 'Updating...'
+                              : `Update to v${updateInfo.latestVersion}`}
+                          </span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          data-tauri-drag-region="false"
+                          disabled={checkingUpdate}
+                          onClick={handleManualCheckUpdate}
+                          className="px-3 py-1.5 rounded-xl text-xs font-mono border flex items-center gap-1.5 transition-all hover:bg-[var(--theme-track)] active:scale-95 pointer-events-auto cursor-pointer"
+                          style={{
+                            borderColor: 'var(--theme-border)',
+                            color: 'var(--theme-text-primary)',
+                          }}
+                        >
+                          <RefreshCw
+                            className={`w-3 h-3 ${checkingUpdate ? 'animate-spin' : ''}`}
+                          />
+                          <span>{checkingUpdate ? 'Checking...' : 'Check for Updates'}</span>
+                        </button>
+                      )}
+                    </div>
+                  </SettingRow>
+
+                  {updateStatusText && (
+                    <div className="text-[10px] font-mono text-center text-[var(--theme-accent)] pt-1">
+                      {updateStatusText}
                     </div>
                   )}
                 </SettingSection>

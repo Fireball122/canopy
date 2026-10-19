@@ -5,7 +5,7 @@
 
 #define MyAppName "Canopy"
 #ifndef MyAppVersion
-#define MyAppVersion "1.0.4"
+#define MyAppVersion "1.0.5"
 #endif
 #define MyAppPublisher "Canopy Shell"
 #define MyAppURL "https://github.com/Fireball122/canopy"

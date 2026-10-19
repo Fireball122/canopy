@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
@@ -1096,10 +1097,78 @@ public partial class MainWindow : Window
                 OpenLogFolder();
                 return null;
 
+            case "open_url":
+            {
+                if (args.ValueKind == JsonValueKind.Object &&
+                    args.TryGetProperty("url", out JsonElement urlEl) &&
+                    urlEl.GetString() is string targetUrl &&
+                    (targetUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+                     targetUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase)))
+                {
+                    try
+                    {
+                        Process.Start(new ProcessStartInfo(targetUrl) { UseShellExecute = true });
+                        return true;
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.WriteException("open_url", ex);
+                        return false;
+                    }
+                }
+                return false;
+            }
+
+            case "apply_update":
+            {
+                if (args.ValueKind == JsonValueKind.Object &&
+                    args.TryGetProperty("downloadUrl", out JsonElement urlEl) &&
+                    urlEl.GetString() is string downloadUrl &&
+                    (downloadUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+                     downloadUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase)))
+                {
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            string tempDir = Path.Combine(Path.GetTempPath(), "CanopyUpdates");
+                            Directory.CreateDirectory(tempDir);
+                            string installerPath = Path.Combine(tempDir, $"Canopy-Update-{Guid.NewGuid():N}.exe");
+                            using var client = new HttpClient();
+                            client.DefaultRequestHeaders.UserAgent.ParseAdd("Canopy-Updater");
+                            using var response = await client.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
+                            response.EnsureSuccessStatusCode();
+                            await using (var fs = new FileStream(installerPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                            {
+                                await response.Content.CopyToAsync(fs);
+                            }
+
+                            var psi = new ProcessStartInfo
+                            {
+                                FileName = installerPath,
+                                Arguments = "/CLOSEAPPLICATIONS",
+                                UseShellExecute = true
+                            };
+                            Process.Start(psi);
+
+                            await Dispatcher.InvokeAsync(() =>
+                            {
+                                Application.Current.Shutdown();
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            _log.WriteException("apply_update", ex);
+                        }
+                    });
+                    return true;
+                }
+                return false;
+            }
+
             case "reload_ui":
                 ShellWebView.CoreWebView2?.Reload();
                 return null;
-
             case "pick_wallpaper_folder":
             {
                 _ignoreAutoHideUntilUtc = DateTime.UtcNow.AddSeconds(60);
