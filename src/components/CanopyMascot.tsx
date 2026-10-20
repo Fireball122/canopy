@@ -140,7 +140,7 @@ export const CanopyMascot: React.FC<CanopyMascotProps> = ({
         <img
           src={isPlaying ? activeGifUrl : frozenGifDataUrl || activeGifUrl}
           alt="Canopy Mascot"
-          className="max-h-[82px] max-w-full h-full w-auto object-contain rounded-xl drop-shadow-md transition-all duration-300"
+          className="max-h-full max-w-full h-full w-auto object-contain rounded-xl drop-shadow-md transition-all duration-300 scale-95"
           style={{ opacity: isPlaying ? 1 : 0.85 }}
         />
       </div>
@@ -185,14 +185,14 @@ export const CanopyMascot: React.FC<CanopyMascotProps> = ({
       {/* Capi Character Frame Image */}
       {/* Capi Character Frame Image — Scaled slightly larger than custom GIFs for prominence */}
       <div
-        className={`relative flex items-center justify-center transition-transform duration-200 h-full max-h-full scale-[1.08] ${
-          isWiggling ? 'scale-[1.18]' : 'group-hover:scale-[1.14]'
+        className={`relative flex items-center justify-center transition-transform duration-200 h-full max-h-full scale-[1.05] ${
+          isWiggling ? 'scale-[1.15]' : 'group-hover:scale-[1.10]'
         }`}
       >
         <img
           src={currentSrc}
           alt="Capi - Canopy Mushroom Mascot"
-          className={`max-h-[92px] h-full w-auto object-contain drop-shadow-[0_4px_16px_rgba(0,0,0,0.35)] select-none ${
+          className={`max-h-full max-w-full h-full w-auto object-contain drop-shadow-[0_4px_16px_rgba(0,0,0,0.35)] select-none ${
             !isPlaying ? 'opacity-90' : 'opacity-100'
           }`}
           draggable={false}
