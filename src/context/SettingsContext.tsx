@@ -50,6 +50,7 @@ export interface CanopySettings {
   customApps?: Record<string, { label: string; path: string; icon_data_url?: string | null }>; // Metadata for custom pinned apps
   visualizerStyle: 'radial' | 'bars' | 'wave'; // Audio visualizer mode
   wallpaperFavorites: string[]; // List of favorite wallpaper paths
+  favoriteApps: string[]; // List of favorite app IDs that float to the top of Apps view
 
   // Panel Motion
   animationsEnabled: boolean; // default true
@@ -130,6 +131,7 @@ export const DEFAULT_SETTINGS: CanopySettings = {
   customApps: {},
   visualizerStyle: 'radial',
   wallpaperFavorites: [],
+  favoriteApps: [],
   animationsEnabled: true,
   animationDurationMs: 280,
   pauseTriggerInFullscreen: true,

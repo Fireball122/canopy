@@ -13,19 +13,20 @@ import {
   Search,
   Settings,
   Sparkles,
+  Star,
   Terminal,
   Wrench,
   X,
 } from 'lucide-react';
 import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
+import { useSettings } from '../context/SettingsContext';
 import {
   getInstalledApps,
   type InstalledAppItem,
   launchApp,
   pickExecutable,
 } from '../services/hostBridge';
-
 export interface AppsViewProps {
   onAppLaunched?: () => void;
   isPickerMode?: boolean;
@@ -117,6 +118,18 @@ export const AppsView: React.FC<AppsViewProps> = ({
   onPinApp,
   onCancelPicker,
 }) => {
+  const { settings, updateSettings } = useSettings();
+  const favoriteApps = useMemo(
+    () => (Array.isArray(settings.favoriteApps) ? settings.favoriteApps : []),
+    [settings.favoriteApps],
+  );
+
+  const toggleFavorite = (appId: string) => {
+    const isFav = favoriteApps.includes(appId);
+    const next = isFav ? favoriteApps.filter((id) => id !== appId) : [appId, ...favoriteApps];
+    updateSettings({ favoriteApps: next });
+  };
+
   const [apps, setApps] = useState<InstalledAppItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -157,6 +170,10 @@ export const AppsView: React.FC<AppsViewProps> = ({
   const categories = useMemo(() => {
     const seen: Record<string, true> = {};
     const list: string[] = [];
+    if (favoriteApps.length > 0) {
+      list.push('Favorites');
+      seen.favorites = true;
+    }
     for (const base of BASE_CATEGORIES) {
       seen[base.toLowerCase()] = true;
       list.push(base);
@@ -169,11 +186,10 @@ export const AppsView: React.FC<AppsViewProps> = ({
       }
     }
     return list;
-  }, [apps]);
-
+  }, [apps, favoriteApps.length]);
   const filteredApps = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    return apps.filter((app) => {
+    const filtered = apps.filter((app) => {
       const combinedKey =
         `${app.id} ${app.name} ${app.path} ${app.category} ${app.description || ''}`.toLowerCase();
       const isBrowser =
@@ -189,19 +205,33 @@ export const AppsView: React.FC<AppsViewProps> = ({
         combinedKey.includes('firefox') ||
         combinedKey.includes('msedge');
 
-      const matchesCategory =
-        activeCategory === 'All' ||
-        app.category.toLowerCase() === activeCategory.toLowerCase() ||
-        (activeCategory.toLowerCase() === 'browser' && isBrowser);
-      if (!matchesCategory) {
-        return false;
+      const isFav = favoriteApps.includes(app.id);
+      if (activeCategory.toLowerCase() === 'favorites') {
+        if (!isFav) return false;
+      } else {
+        const matchesCategory =
+          activeCategory === 'All' ||
+          app.category.toLowerCase() === activeCategory.toLowerCase() ||
+          (activeCategory.toLowerCase() === 'browser' && isBrowser);
+        if (!matchesCategory) {
+          return false;
+        }
       }
       if (!query) {
         return true;
       }
       return combinedKey.includes(query);
     });
-  }, [apps, activeCategory, searchQuery]);
+
+    // Float favorites to the very top!
+    return filtered.sort((a, b) => {
+      const aFav = favoriteApps.includes(a.id);
+      const bFav = favoriteApps.includes(b.id);
+      if (aFav && !bFav) return -1;
+      if (!aFav && bFav) return 1;
+      return 0;
+    });
+  }, [apps, activeCategory, searchQuery, favoriteApps]);
 
   const handleLaunch = async (app: InstalledAppItem) => {
     setLaunchingId(app.id);
@@ -480,6 +510,7 @@ export const AppsView: React.FC<AppsViewProps> = ({
             {filteredApps.map((app) => {
               const isLaunching = launchingId === app.id;
               const isLaunched = launchedId === app.id;
+              const isFavorite = favoriteApps.includes(app.id);
               return (
                 <button
                   key={app.id}
@@ -494,7 +525,7 @@ export const AppsView: React.FC<AppsViewProps> = ({
                   }}
                   className={`bento-card bento-card-interactive p-2.5 text-left flex flex-col justify-between gap-2 group transition-all hover:-translate-y-0.5 active:scale-[0.98] pointer-events-auto cursor-pointer ${
                     isPickerMode ? 'ring-1 ring-[var(--theme-accent)] shadow-md' : ''
-                  }`}
+                  } ${isFavorite ? 'border-[var(--theme-accent)]/35' : ''}`}
                   style={{
                     background: isPickerMode
                       ? 'var(--theme-track, rgba(255, 255, 255, 0.07))'
@@ -505,7 +536,9 @@ export const AppsView: React.FC<AppsViewProps> = ({
                         ? 'var(--theme-accent, #cba6f7)'
                         : isLaunching
                           ? 'var(--theme-accent, #cba6f7)'
-                          : 'var(--theme-border, rgba(255, 255, 255, 0.08))',
+                          : isFavorite
+                            ? 'var(--theme-accent, rgba(203, 166, 247, 0.4))'
+                            : 'var(--theme-border, rgba(255, 255, 255, 0.08))',
                   }}
                   title={
                     isPickerMode
@@ -574,6 +607,29 @@ export const AppsView: React.FC<AppsViewProps> = ({
                             </span>
                             <ExternalLink className="w-2.5 h-2.5 opacity-70 group-hover:opacity-100" />
                           </span>
+
+                          {/* Star Favorite Button */}
+                          <button
+                            type="button"
+                            data-tauri-drag-region="false"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleFavorite(app.id);
+                            }}
+                            className={`p-1 rounded-md border transition-all active:scale-90 pointer-events-auto cursor-pointer ${
+                              isFavorite
+                                ? 'bg-[#f9e2af]/15 border-[#f9e2af]/40 text-[#f9e2af]'
+                                : 'opacity-40 hover:opacity-100 hover:bg-white/10 text-[var(--theme-text-secondary)] border-[var(--theme-border)]'
+                            }`}
+                            title={
+                              isFavorite
+                                ? `Remove ${app.name} from Favorites`
+                                : `Favorite ${app.name} (floats to top)`
+                            }
+                          >
+                            <Star className={`w-3 h-3 ${isFavorite ? 'fill-current' : ''}`} />
+                          </button>
+
                           {onPinApp && (
                             <button
                               type="button"
