@@ -8,12 +8,12 @@ import {
   ExternalLink,
   FileText,
   FolderOpen,
+  Heart,
   Palette,
   RefreshCw,
   Search,
   Settings,
   Sparkles,
-  Star,
   Terminal,
   Wrench,
   X,
@@ -115,7 +115,7 @@ export const AppsView: React.FC<AppsViewProps> = ({
   onAppLaunched,
   isPickerMode = false,
   onPickApp,
-  onPinApp,
+  onPinApp: _onPinApp,
   onCancelPicker,
 }) => {
   const { settings, updateSettings } = useSettings();
@@ -608,7 +608,7 @@ export const AppsView: React.FC<AppsViewProps> = ({
                             <ExternalLink className="w-2.5 h-2.5 opacity-70 group-hover:opacity-100" />
                           </span>
 
-                          {/* Star Favorite Button */}
+                          {/* Heart Favorite Button (Puts it at the top) */}
                           <button
                             type="button"
                             data-tauri-drag-region="false"
@@ -618,36 +618,17 @@ export const AppsView: React.FC<AppsViewProps> = ({
                             }}
                             className={`p-1 rounded-md border transition-all active:scale-90 pointer-events-auto cursor-pointer ${
                               isFavorite
-                                ? 'bg-[#f9e2af]/15 border-[#f9e2af]/40 text-[#f9e2af]'
+                                ? 'bg-rose-500/15 border-rose-500/40 text-rose-400'
                                 : 'opacity-40 hover:opacity-100 hover:bg-white/10 text-[var(--theme-text-secondary)] border-[var(--theme-border)]'
                             }`}
                             title={
                               isFavorite
                                 ? `Remove ${app.name} from Favorites`
-                                : `Favorite ${app.name} (floats to top)`
+                                : `Favorite ${app.name} (moves to top)`
                             }
                           >
-                            <Star className={`w-3 h-3 ${isFavorite ? 'fill-current' : ''}`} />
+                            <Heart className={`w-3 h-3 ${isFavorite ? 'fill-current' : ''}`} />
                           </button>
-
-                          {onPinApp && (
-                            <button
-                              type="button"
-                              data-tauri-drag-region="false"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onPinApp(app);
-                              }}
-                              className="px-1.5 py-0.5 rounded-md border text-[9px] font-mono hover:bg-white/10 active:scale-90 transition-all pointer-events-auto cursor-pointer"
-                              style={{
-                                borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.12))',
-                                color: 'var(--theme-accent, #cba6f7)',
-                              }}
-                              title={`Pin ${app.name} to Dashboard Quick Launch`}
-                            >
-                              +Pin
-                            </button>
-                          )}
                         </>
                       )}
                     </div>
