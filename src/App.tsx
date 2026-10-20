@@ -2070,12 +2070,12 @@ const CanopyShellContent: React.FC = () => {
 
                 {/* Mascot */}
                 {settings.mascotMode !== 'none' && (
-                  <div className="pt-1 pb-1 flex items-center justify-center h-[72px] shrink-0">
+                  <div className="pt-0.5 pb-0.5 flex items-center justify-center h-[90px] shrink-0">
                     <CanopyMascot
                       isPlaying={isMusicPlaying}
                       showSleepZzz={false}
                       showAmbientGlow={false}
-                      className="h-full max-h-[66px] w-auto drop-shadow-sm select-none"
+                      className="h-full max-h-[88px] w-auto drop-shadow-sm select-none"
                     />
                   </div>
                 )}
