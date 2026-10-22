@@ -376,7 +376,10 @@ export const MediaView: React.FC<MediaViewProps> = ({
   const [mixerSessions, setMixerSessions] = useState<AudioSessionEntry[]>([]);
   const [mixerLoading, setMixerLoading] = useState<boolean>(false);
   const mixerInFlightRef = useRef<boolean>(false);
-
+  const mixerInteractionsRef = useRef<
+    Map<string, { volume: number; muted: boolean; timestamp: number }>
+  >(new Map());
+  const mixerVolumeDebounceRef = useRef<Map<string, number>>(new Map());
   // Poll the real 40-band WASAPI Loopback FFT spectrum only while music is playing AND the
   // panel is expanded. A poll is skipped while the previous one is still in flight, so the
   // host is never queued with more than one outstanding get_audio_spectrum request.
@@ -428,7 +431,26 @@ export const MediaView: React.FC<MediaViewProps> = ({
       try {
         const list = await getAudioSessions();
         if (active) {
-          setMixerSessions(Array.isArray(list) ? list : []);
+          const now = Date.now();
+          const cleanList = Array.isArray(list) ? list : [];
+          const merged = cleanList.map((session) => {
+            const pending = mixerInteractionsRef.current.get(session.id);
+            if (pending && now - pending.timestamp < 2000) {
+              if (
+                Math.abs(session.volume - pending.volume) <= 1 &&
+                session.muted === pending.muted
+              ) {
+                mixerInteractionsRef.current.delete(session.id);
+                return session;
+              }
+              return { ...session, volume: pending.volume, muted: pending.muted };
+            }
+            if (pending && now - pending.timestamp >= 2000) {
+              mixerInteractionsRef.current.delete(session.id);
+            }
+            return session;
+          });
+          setMixerSessions(merged);
           setMixerLoading(false);
         }
       } catch {
@@ -447,18 +469,41 @@ export const MediaView: React.FC<MediaViewProps> = ({
   }, [showMixer, panelOpen]);
 
   const handleMixerVolume = (id: string, level: number) => {
+    const clamped = Math.round(Math.min(100, Math.max(0, level)));
+    mixerInteractionsRef.current.set(id, {
+      volume: clamped,
+      muted: false,
+      timestamp: Date.now(),
+    });
     setMixerSessions((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, volume: level, muted: false } : s)),
+      prev.map((s) => (s.id === id ? { ...s, volume: clamped, muted: false } : s)),
     );
-    void setAudioSessionVolume(id, level).catch(() => {});
+
+    // Immediate visual update + debounced host IPC to prevent flooding CoreAudio
+    const existingTimer = mixerVolumeDebounceRef.current.get(id);
+    if (existingTimer) {
+      window.clearTimeout(existingTimer);
+    }
+    const timerId = window.setTimeout(() => {
+      mixerVolumeDebounceRef.current.delete(id);
+      void setAudioSessionVolume(id, clamped).catch(() => {});
+    }, 25);
+    mixerVolumeDebounceRef.current.set(id, timerId);
   };
 
   const handleMixerMute = (id: string, muted: boolean) => {
+    const existing = mixerInteractionsRef.current.get(id);
+    mixerInteractionsRef.current.set(id, {
+      volume: existing?.volume ?? 100,
+      muted,
+      timestamp: Date.now(),
+    });
     setMixerSessions((prev) => prev.map((s) => (s.id === id ? { ...s, muted } : s)));
     void setAudioSessionMute(id, muted).catch(() => {});
   };
   // Load available SMTC sessions when popover opens or media updates
   useEffect(() => {
+    if (!sessionMenuOpen && !media.source_app) return;
     let mounted = true;
     getMediaSessions()
       .then((list) => {
@@ -524,7 +569,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
 
   const currentSession = useMemo(() => {
     const base = sessions && sessions.length > 0 ? sessions : DEFAULT_FALLBACK_SESSIONS;
-    const active = base.find((s) => s && s.is_current);
+    const active = base.find((s) => s?.is_current);
     if (active) return active;
     if (media.source_app) {
       const src = (media.source_app || '').toLowerCase();
@@ -738,7 +783,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
   // Smoothly center the active lyric line in the scrollable stage. Keyed on the active index only,
   // so the column never animates on every clock tick.
   useEffect(() => {
-    if (!showLyrics || !panelOpen) return;
+    if (!showLyrics || !panelOpen || activeLyricIndex < 0) return;
     const container = lyricsScrollRef.current;
     const item = activeLyricItemRef.current;
     if (!container || !item) return;

@@ -1,6 +1,6 @@
 import { Bell, X } from 'lucide-react';
 import type React from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export interface DropletNotificationProps {
   message: string | null;
@@ -25,6 +25,22 @@ export const DropletNotification: React.FC<DropletNotificationProps> = ({
   const isHoveredRef = useRef<boolean>(false);
   isHoveredRef.current = isHovered;
 
+  // Symmetrical reverse dismiss animation
+  const startDismissAnimation = useCallback(() => {
+    setContentVisible(false);
+
+    // Step 2: Shrink pill back to bead
+    window.setTimeout(() => {
+      setPhase('drop');
+
+      // Step 3: Retract up into bezel
+      window.setTimeout(() => {
+        setPhase('retract');
+        window.setTimeout(onDismiss, 340);
+      }, 340);
+    }, 120);
+  }, [onDismiss]);
+
   // Trigger sequence whenever a message arrives
   useEffect(() => {
     if (!message) {
@@ -38,15 +54,14 @@ export const DropletNotification: React.FC<DropletNotificationProps> = ({
     setContentVisible(false);
 
     // Phase 2: Zero-stutter momentum transfer: bloom to pill begins at 200ms
+    let revealTimer: number | null = null;
     const expandTimer = window.setTimeout(() => {
       setPhase('expand');
 
       // Phase 3: Reveal bell badge and text as capsule reaches ~80% expansion
-      const revealTimer = window.setTimeout(() => {
+      revealTimer = window.setTimeout(() => {
         setContentVisible(true);
       }, 260);
-
-      return () => window.clearTimeout(revealTimer);
     }, 200);
 
     // Auto-dismiss countdown
@@ -59,9 +74,10 @@ export const DropletNotification: React.FC<DropletNotificationProps> = ({
 
     return () => {
       window.clearTimeout(expandTimer);
+      if (revealTimer) window.clearTimeout(revealTimer);
       window.clearTimeout(dismissTimer);
     };
-  }, [message, durationMs]);
+  }, [message, durationMs, startDismissAnimation]);
 
   // Measure text width to enable smooth gradient marquee if message is extra long
   useEffect(() => {
@@ -75,26 +91,12 @@ export const DropletNotification: React.FC<DropletNotificationProps> = ({
       setIsOverflowing(false);
       setOverflowOffset(0);
     }
-  }, [contentVisible, message]);
+  }, [contentVisible]);
 
   // Symmetrical reverse dismiss animation:
   // Step 1: Content and icon badge fade out
   // Step 2: Pill width smoothly shrinks back to 48px circular bead
   // Step 3: Pure bead retracts straight up into top bezel
-  const startDismissAnimation = () => {
-    setContentVisible(false);
-
-    // Step 2: Shrink pill back to bead
-    window.setTimeout(() => {
-      setPhase('drop');
-
-      // Step 3: Retract up into bezel
-      window.setTimeout(() => {
-        setPhase('retract');
-        window.setTimeout(onDismiss, 340);
-      }, 340);
-    }, 120);
-  };
 
   if (!message || phase === 'idle') return null;
 
