@@ -14,7 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import type React from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSettings } from '../context/SettingsContext';
 import {
   type DesktopWallpaperState,
@@ -68,7 +68,7 @@ function extractImageSwatches(imgEl: HTMLImageElement | null): ExtractedSwatches
     surface: 'var(--theme-bg, #181824)',
   };
 
-  if (!imgEl || !imgEl.complete || imgEl.naturalWidth <= 0) {
+  if (!imgEl?.complete || imgEl.naturalWidth <= 0) {
     return fallback;
   }
 
@@ -171,7 +171,10 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
   const [busyMonitorId, setBusyMonitorId] = useState<string | null>(null);
   const [slideshowMinutes, setSlideshowMinutes] = useState<number>(30);
   const [pickingMonitorId, setPickingMonitorId] = useState<string | null>(null);
-  const isFavorite = (path: string) => settings.wallpaperFavorites?.includes(path) ?? false;
+  const isFavorite = useCallback(
+    (path: string) => settings.wallpaperFavorites?.includes(path) ?? false,
+    [settings.wallpaperFavorites],
+  );
 
   const toggleFavorite = (e: React.MouseEvent, path: string) => {
     e.stopPropagation();
@@ -194,7 +197,7 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
       });
     }
     return list;
-  }, [wallpapers, searchQuery, filterFavoritesOnly, settings.wallpaperFavorites]);
+  }, [wallpapers, searchQuery, filterFavoritesOnly, isFavorite]);
 
   const getResolutionBadge = (res?: string): string => {
     if (!res) return 'FHD';
@@ -207,10 +210,10 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
   useEffect(() => {
     if (!activeWallpaper) return;
     const imgEl = imgRefs.current[activeWallpaper.path] ?? null;
-    if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
+    if (imgEl?.complete && imgEl.naturalWidth > 0) {
       setSwatches(extractImageSwatches(imgEl));
     }
-  }, [activeWallpaper?.path, activeWallpaper?.data_url]);
+  }, [activeWallpaper]);
 
   useEffect(() => {
     return () => {
@@ -249,7 +252,7 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
     const targetThemeMode = settings.themeMode;
     const token = ++themeRequestRef.current;
     const imgEl = imgRefs.current[entry.path] ?? null;
-    if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
+    if (imgEl?.complete && imgEl.naturalWidth > 0) {
       applyThemePalette(imgEl, targetThemeMode);
       setSwatches(extractImageSwatches(imgEl));
     } else if (entry.data_url) {
@@ -295,7 +298,7 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
     updateSettings({ themeMode: mode });
     if (activeWallpaper) {
       const imgEl = imgRefs.current[activeWallpaper.path] ?? null;
-      if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
+      if (imgEl?.complete && imgEl.naturalWidth > 0) {
         applyThemePalette(imgEl, mode);
         return;
       }

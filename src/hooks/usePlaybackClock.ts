@@ -207,15 +207,7 @@ export function usePlaybackClock(
     core.setHold(hold);
     core.update(media);
     setPosition(core.sample());
-  }, [
-    core,
-    hold,
-    media.title,
-    media.artist,
-    media.is_playing,
-    media.position_secs,
-    media.duration_secs,
-  ]);
+  }, [core, hold, media]);
 
   useEffect(() => {
     if (!enabled) return;

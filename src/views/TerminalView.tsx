@@ -62,7 +62,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ stats }) => {
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (terminalHistory.length > 0) {
+      terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [terminalHistory]);
   useEffect(() => {
     let active = true;

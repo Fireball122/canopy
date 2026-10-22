@@ -1786,10 +1786,25 @@ public partial class MainWindow : Window
     private static bool TryGetInt(JsonElement args, string name, out int value)
     {
         value = 0;
-        return args.ValueKind == JsonValueKind.Object &&
-               args.TryGetProperty(name, out JsonElement element) &&
-               element.ValueKind == JsonValueKind.Number &&
-               element.TryGetInt32(out value);
+        if (args.ValueKind != JsonValueKind.Object ||
+            !args.TryGetProperty(name, out JsonElement element) ||
+            element.ValueKind != JsonValueKind.Number)
+        {
+            return false;
+        }
+
+        if (element.TryGetInt32(out value))
+        {
+            return true;
+        }
+
+        if (element.TryGetDouble(out double d))
+        {
+            value = (int)Math.Round(d);
+            return true;
+        }
+
+        return false;
     }
 
     private static bool TryGetBool(JsonElement args, string name, out bool value)
@@ -1813,14 +1828,24 @@ public partial class MainWindow : Window
     {
         value = string.Empty;
         if (args.ValueKind != JsonValueKind.Object ||
-            !args.TryGetProperty(name, out JsonElement element) ||
-            element.ValueKind != JsonValueKind.String)
+            !args.TryGetProperty(name, out JsonElement element))
         {
             return false;
         }
 
-        value = element.GetString() ?? string.Empty;
-        return true;
+        if (element.ValueKind == JsonValueKind.String)
+        {
+            value = element.GetString() ?? string.Empty;
+            return true;
+        }
+
+        if (element.ValueKind == JsonValueKind.Number)
+        {
+            value = element.GetRawText();
+            return true;
+        }
+
+        return false;
     }
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)

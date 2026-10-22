@@ -10,6 +10,11 @@ if exist "%LOCALAPPDATA%\Programs\Canopy\Canopy.exe" (
     start "" "Canopy.exe" --expand
     exit /b 0
 )
+if exist "%LOCALAPPDATA%\Programs\Programs\Canopy\Canopy.exe" (
+    cd /d "%LOCALAPPDATA%\Programs\Programs\Canopy"
+    start "" "Canopy.exe" --expand
+    exit /b 0
+)
 if exist "%LOCALAPPDATA%\Canopy\Canopy.exe" (
     cd /d "%LOCALAPPDATA%\Canopy"
     start "" "Canopy.exe" --expand

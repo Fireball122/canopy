@@ -1254,7 +1254,7 @@ const CanopyShellContent: React.FC = () => {
     );
     setWallpaperStatus(`Applying ${entry.name}...`);
 
-    if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
+    if (imgEl?.complete && imgEl.naturalWidth > 0) {
       applyThemePalette(imgEl, settings.themeMode);
     } else if (entry.data_url) {
       await applyThemeFromImageSrc(entry.data_url, settings.themeMode);

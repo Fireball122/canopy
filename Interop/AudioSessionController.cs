@@ -28,6 +28,15 @@ public sealed class AudioSessionInfo
 
     [JsonPropertyName("icon_data_url")]
     public string? IconDataUrl { get; init; }
+
+    [JsonIgnore]
+    public uint ProcessId { get; init; }
+
+    [JsonIgnore]
+    public string? ProcessName { get; init; }
+
+    [JsonIgnore]
+    public string? ExePath { get; init; }
 }
 
 /// <summary>
@@ -86,6 +95,7 @@ public sealed class AudioSessionController : IDisposable
 
                 if (count <= 0)
                     return results;
+                var sessionMap = new Dictionary<string, AudioSessionInfo>(StringComparer.OrdinalIgnoreCase);
 
                 for (int i = 0; i < count; i++)
                 {
@@ -96,14 +106,51 @@ public sealed class AudioSessionController : IDisposable
                             continue;
 
                         var info = DescribeSession(control);
-                        if (info is not null)
-                            results.Add(info);
+                        if (info is null)
+                            continue;
+
+                        // Group multiple audio streams belonging to the same application (e.g. Discord voice + SFX,
+                        // multi-process browsers with multiple tabs, games with separate audio processes),
+                        // while keeping distinct entries for system sounds or sessions without PID.
+                        string groupKey;
+                        if (!string.IsNullOrWhiteSpace(info.ExePath))
+                            groupKey = info.ExePath;
+                        else if (!string.IsNullOrWhiteSpace(info.ProcessName))
+                            groupKey = "proc_" + info.ProcessName;
+                        else if (info.ProcessId > 0)
+                            groupKey = "pid_" + info.ProcessId;
+                        else
+                            groupKey = info.Id;
+
+                        if (sessionMap.TryGetValue(groupKey, out var existing))
+                        {
+                            bool preferNew = (!existing.IsActive && info.IsActive) ||
+                                             (Math.Abs(existing.VolumePercent - 100f) < 0.01f && info.VolumePercent < 99.9f);
+                            sessionMap[groupKey] = new AudioSessionInfo
+                            {
+                                Id = existing.Id,
+                                ProcessId = existing.ProcessId > 0 ? existing.ProcessId : info.ProcessId,
+                                ProcessName = existing.ProcessName ?? info.ProcessName,
+                                ExePath = existing.ExePath ?? info.ExePath,
+                                Name = string.IsNullOrWhiteSpace(existing.Name) || existing.Name.StartsWith("Process (", StringComparison.OrdinalIgnoreCase) ? info.Name : existing.Name,
+                                VolumePercent = preferNew ? info.VolumePercent : existing.VolumePercent,
+                                Muted = preferNew ? info.Muted : (existing.Muted && info.Muted),
+                                IsActive = existing.IsActive || info.IsActive,
+                                IconDataUrl = existing.IconDataUrl ?? info.IconDataUrl,
+                            };
+                        }
+                        else
+                        {
+                            sessionMap[groupKey] = info;
+                        }
                     }
                     finally
                     {
                         ReleaseCom(control);
                     }
                 }
+
+                results.AddRange(sessionMap.Values);
             }
             catch (Exception ex)
             {
@@ -130,7 +177,12 @@ public sealed class AudioSessionController : IDisposable
             if (control is ISimpleAudioVolume volume)
             {
                 Guid ctx = Guid.Empty;
-                return volume.SetMasterVolume(scalar, ref ctx) >= 0;
+                int hr = volume.SetMasterVolume(scalar, ref ctx);
+                if (scalar > 0.001f)
+                {
+                    volume.SetMute(false, ref ctx);
+                }
+                return hr >= 0;
             }
             return false;
         });
@@ -170,6 +222,21 @@ public sealed class AudioSessionController : IDisposable
                 if (enumerator.GetCount(out int count) < 0)
                     return false;
 
+                // Pass 1: Resolve target process identity (PID, process name, exe path) if id belongs to an app
+                uint targetPid = 0;
+                string? targetProcName = null;
+                string? targetExePath = null;
+
+                if (id.StartsWith("pid_", StringComparison.OrdinalIgnoreCase) &&
+                    uint.TryParse(id.AsSpan(4), out uint parsedPid))
+                {
+                    targetPid = parsedPid;
+                }
+                else if (uint.TryParse(id, out uint directPid))
+                {
+                    targetPid = directPid;
+                }
+
                 for (int i = 0; i < count; i++)
                 {
                     IAudioSessionControl? control = null;
@@ -181,19 +248,124 @@ public sealed class AudioSessionController : IDisposable
                         string rawId = GetSessionIdentifier(control);
                         uint ctrlPid = 0;
                         (control as IAudioSessionControl2)?.GetProcessId(out ctrlPid);
-                        string fallbackId = ctrlPid > 0 ? $"pid_{ctrlPid}" : $"session_{control.GetHashCode()}";
-                        if (rawId != id && fallbackId != id && (ctrlPid > 0 && id == ctrlPid.ToString()))
-                            continue;
-                        if (string.IsNullOrEmpty(rawId) && fallbackId != id)
-                            continue;
 
-                        return action(control);
+                        bool isDirectMatch = (!string.IsNullOrEmpty(rawId) && string.Equals(rawId, id, StringComparison.OrdinalIgnoreCase)) ||
+                                             (ctrlPid > 0 && (targetPid == ctrlPid || string.Equals(id, $"pid_{ctrlPid}", StringComparison.OrdinalIgnoreCase)));
+
+                        if (isDirectMatch)
+                        {
+                            if (ctrlPid > 0)
+                            {
+                                targetPid = ctrlPid;
+                                try
+                                {
+                                    using var p = Process.GetProcessById((int)ctrlPid);
+                                    targetProcName = p.ProcessName;
+                                    try { targetExePath = p.MainModule?.FileName; } catch { }
+                                }
+                                catch { }
+                            }
+                            if (string.IsNullOrWhiteSpace(targetProcName) && !string.IsNullOrWhiteSpace(rawId))
+                            {
+                                int exeIdx = rawId.IndexOf(".exe", StringComparison.OrdinalIgnoreCase);
+                                if (exeIdx > 0)
+                                {
+                                    int startIdx = rawId.LastIndexOf('\\', exeIdx);
+                                    if (startIdx < 0) startIdx = rawId.LastIndexOf('/', exeIdx);
+                                    int begin = startIdx >= 0 ? startIdx + 1 : 0;
+                                    targetProcName = rawId.Substring(begin, exeIdx - begin);
+                                }
+                            }
+                            break;
+                        }
                     }
                     finally
                     {
                         ReleaseCom(control);
                     }
                 }
+
+                bool applied = false;
+                for (int i = 0; i < count; i++)
+                {
+                    IAudioSessionControl? control = null;
+                    try
+                    {
+                        if (enumerator.GetSession(i, out control) < 0 || control is null)
+                            continue;
+
+                        string rawId = GetSessionIdentifier(control);
+                        uint ctrlPid = 0;
+                        (control as IAudioSessionControl2)?.GetProcessId(out ctrlPid);
+                        string fallbackId = ctrlPid > 0 ? $"pid_{ctrlPid}" : string.Empty;
+
+                        string? ctrlProcName = null;
+                        string? ctrlExePath = null;
+                        if (ctrlPid > 0)
+                        {
+                            try
+                            {
+                                using var p = Process.GetProcessById((int)ctrlPid);
+                                ctrlProcName = p.ProcessName;
+                                try { ctrlExePath = p.MainModule?.FileName; } catch { }
+                            }
+                            catch { }
+                        }
+                        if (string.IsNullOrWhiteSpace(ctrlProcName) && !string.IsNullOrWhiteSpace(rawId))
+                        {
+                            int exeIdx = rawId.IndexOf(".exe", StringComparison.OrdinalIgnoreCase);
+                            if (exeIdx > 0)
+                            {
+                                int startIdx = rawId.LastIndexOf('\\', exeIdx);
+                                if (startIdx < 0) startIdx = rawId.LastIndexOf('/', exeIdx);
+                                int begin = startIdx >= 0 ? startIdx + 1 : 0;
+                                ctrlProcName = rawId.Substring(begin, exeIdx - begin);
+                            }
+                        }
+
+                        bool isMatch = false;
+                        if (!string.IsNullOrEmpty(targetExePath) && !string.IsNullOrEmpty(ctrlExePath) &&
+                            string.Equals(targetExePath, ctrlExePath, StringComparison.OrdinalIgnoreCase))
+                        {
+                            isMatch = true;
+                        }
+                        else if (!string.IsNullOrEmpty(targetProcName) && !string.IsNullOrEmpty(ctrlProcName) &&
+                                 string.Equals(targetProcName, ctrlProcName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            isMatch = true;
+                        }
+                        else if (targetPid > 0 && ctrlPid == targetPid)
+                        {
+                            isMatch = true;
+                        }
+                        else if (!string.IsNullOrEmpty(rawId) && string.Equals(rawId, id, StringComparison.OrdinalIgnoreCase))
+                        {
+                            isMatch = true;
+                        }
+                        else if (!string.IsNullOrEmpty(fallbackId) && string.Equals(fallbackId, id, StringComparison.OrdinalIgnoreCase))
+                        {
+                            isMatch = true;
+                        }
+                        else if (ctrlPid > 0 && string.Equals(id, ctrlPid.ToString(), StringComparison.OrdinalIgnoreCase))
+                        {
+                            isMatch = true;
+                        }
+
+                        if (!isMatch)
+                            continue;
+
+                        if (action(control))
+                        {
+                            applied = true;
+                        }
+                    }
+                    finally
+                    {
+                        ReleaseCom(control);
+                    }
+                }
+
+                return applied;
             }
             catch
             {
@@ -204,8 +376,6 @@ public sealed class AudioSessionController : IDisposable
                 ReleaseCom(enumerator);
                 ReleaseCom(manager);
             }
-
-            return false;
         }
     }
 
@@ -241,9 +411,40 @@ public sealed class AudioSessionController : IDisposable
 
         string name = ResolveProcessDisplayName(control, pid, identifier);
 
+        string? procName = null;
+        string? exePath = null;
+        if (pid > 0)
+        {
+            try
+            {
+                using var p = Process.GetProcessById((int)pid);
+                procName = p.ProcessName;
+                try { exePath = p.MainModule?.FileName; } catch { }
+            }
+            catch { }
+        }
+        if (string.IsNullOrWhiteSpace(procName) && !string.IsNullOrWhiteSpace(identifier))
+        {
+            int exeIdx = identifier.IndexOf(".exe", StringComparison.OrdinalIgnoreCase);
+            if (exeIdx > 0)
+            {
+                int startIdx = identifier.LastIndexOf('\\', exeIdx);
+                if (startIdx < 0) startIdx = identifier.LastIndexOf('/', exeIdx);
+                int begin = startIdx >= 0 ? startIdx + 1 : 0;
+                string extracted = identifier.Substring(begin, exeIdx - begin);
+                if (!string.IsNullOrWhiteSpace(extracted))
+                {
+                    procName = extracted;
+                }
+            }
+        }
+
         return new AudioSessionInfo
         {
             Id = identifier,
+            ProcessId = pid,
+            ProcessName = procName,
+            ExePath = exePath,
             Name = name,
             VolumePercent = Math.Clamp(volumeScalar * 100f, 0f, 100f),
             Muted = muted,
