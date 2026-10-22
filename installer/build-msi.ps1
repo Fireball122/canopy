@@ -1,6 +1,6 @@
 # build-msi.ps1 - Compiles a native Windows Installer (.msi) using WiX v4
 param(
-    [string]$Version = "1.0.5",
+    [string]$Version = "1.0.6",
     [string]$Configuration = "Release"
 )
 
