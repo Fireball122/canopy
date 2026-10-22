@@ -391,7 +391,7 @@ public partial class MainWindow : Window
                             pending.delete(id);
                             reject(new Error(`RPC timeout: ${cmd}`));
                           }
-                        }, 10000);
+                        }, 20000);
                         pending.set(id, {
                           resolve: (res) => { clearTimeout(timer); resolve(res); },
                           reject: (err) => { clearTimeout(timer); reject(err); }

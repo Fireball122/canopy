@@ -516,7 +516,17 @@ const CanopyShellContent: React.FC = () => {
   useEffect(() => {
     const onBridgeError = (event: Event) => {
       const detail = (event as CustomEvent<{ cmd?: string; message?: string }>).detail;
-      const action = detail?.cmd?.replaceAll('_', ' ') || 'native action';
+      const cmd = detail?.cmd || '';
+      // Never spam user toast notifications for background polling operations
+      if (
+        cmd.startsWith('get_') ||
+        cmd === 'tab_changed' ||
+        cmd === 'set_resizing' ||
+        cmd === 'set_dropdown_open'
+      ) {
+        return;
+      }
+      const action = cmd.replaceAll('_', ' ') || 'native action';
       const reason = detail?.message?.trim();
       handleToastNotification(`Canopy couldn't complete ${action}${reason ? `: ${reason}` : '.'}`);
     };

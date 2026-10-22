@@ -52,6 +52,29 @@ public sealed class AudioSessionController : IDisposable
     private const int ClsctxAll = 0x17; // INPROC_SERVER | INPROC_HANDLER | LOCAL_SERVER | REMOTE_SERVER
 
     private readonly object _lock = new();
+    private static readonly char[] PathSeparators = ['\\', '/'];
+    private static (string Name, string Path) ExtractExeInfoFromIdentifier(string? identifier)
+    {
+        if (string.IsNullOrWhiteSpace(identifier))
+            return (string.Empty, string.Empty);
+
+        int exeIdx = identifier.IndexOf(".exe", StringComparison.OrdinalIgnoreCase);
+        if (exeIdx <= 0)
+            return (string.Empty, string.Empty);
+
+        int endIdx = exeIdx + 4;
+        int pipeIdx = identifier.LastIndexOf('|', exeIdx);
+        int startPath = pipeIdx >= 0 ? pipeIdx + 1 : 0;
+        string path = identifier.Substring(startPath, endIdx - startPath);
+
+        int sepIdx = path.LastIndexOfAny(PathSeparators);
+        int startName = sepIdx >= 0 ? sepIdx + 1 : 0;
+        int nameLen = (path.Length - 4) - startName;
+        string name = nameLen > 0 ? path.Substring(startName, nameLen) : string.Empty;
+
+        return (name, path);
+    }
+
     private bool _disposed;
     private volatile bool _isPaused;
 
@@ -254,28 +277,10 @@ public sealed class AudioSessionController : IDisposable
 
                         if (isDirectMatch)
                         {
-                            if (ctrlPid > 0)
-                            {
-                                targetPid = ctrlPid;
-                                try
-                                {
-                                    using var p = Process.GetProcessById((int)ctrlPid);
-                                    targetProcName = p.ProcessName;
-                                    try { targetExePath = p.MainModule?.FileName; } catch { }
-                                }
-                                catch { }
-                            }
-                            if (string.IsNullOrWhiteSpace(targetProcName) && !string.IsNullOrWhiteSpace(rawId))
-                            {
-                                int exeIdx = rawId.IndexOf(".exe", StringComparison.OrdinalIgnoreCase);
-                                if (exeIdx > 0)
-                                {
-                                    int startIdx = rawId.LastIndexOf('\\', exeIdx);
-                                    if (startIdx < 0) startIdx = rawId.LastIndexOf('/', exeIdx);
-                                    int begin = startIdx >= 0 ? startIdx + 1 : 0;
-                                    targetProcName = rawId.Substring(begin, exeIdx - begin);
-                                }
-                            }
+                            if (ctrlPid > 0) targetPid = ctrlPid;
+                            var (exeName, exePath) = ExtractExeInfoFromIdentifier(rawId);
+                            targetProcName = exeName;
+                            targetExePath = exePath;
                             break;
                         }
                     }
@@ -299,29 +304,7 @@ public sealed class AudioSessionController : IDisposable
                         (control as IAudioSessionControl2)?.GetProcessId(out ctrlPid);
                         string fallbackId = ctrlPid > 0 ? $"pid_{ctrlPid}" : string.Empty;
 
-                        string? ctrlProcName = null;
-                        string? ctrlExePath = null;
-                        if (ctrlPid > 0)
-                        {
-                            try
-                            {
-                                using var p = Process.GetProcessById((int)ctrlPid);
-                                ctrlProcName = p.ProcessName;
-                                try { ctrlExePath = p.MainModule?.FileName; } catch { }
-                            }
-                            catch { }
-                        }
-                        if (string.IsNullOrWhiteSpace(ctrlProcName) && !string.IsNullOrWhiteSpace(rawId))
-                        {
-                            int exeIdx = rawId.IndexOf(".exe", StringComparison.OrdinalIgnoreCase);
-                            if (exeIdx > 0)
-                            {
-                                int startIdx = rawId.LastIndexOf('\\', exeIdx);
-                                if (startIdx < 0) startIdx = rawId.LastIndexOf('/', exeIdx);
-                                int begin = startIdx >= 0 ? startIdx + 1 : 0;
-                                ctrlProcName = rawId.Substring(begin, exeIdx - begin);
-                            }
-                        }
+                        var (ctrlProcName, ctrlExePath) = ExtractExeInfoFromIdentifier(rawId);
 
                         bool isMatch = false;
                         if (!string.IsNullOrEmpty(targetExePath) && !string.IsNullOrEmpty(ctrlExePath) &&
@@ -411,39 +394,13 @@ public sealed class AudioSessionController : IDisposable
 
         string name = ResolveProcessDisplayName(control, pid, identifier);
 
-        string? procName = null;
-        string? exePath = null;
-        if (pid > 0)
-        {
-            try
-            {
-                using var p = Process.GetProcessById((int)pid);
-                procName = p.ProcessName;
-                try { exePath = p.MainModule?.FileName; } catch { }
-            }
-            catch { }
-        }
-        if (string.IsNullOrWhiteSpace(procName) && !string.IsNullOrWhiteSpace(identifier))
-        {
-            int exeIdx = identifier.IndexOf(".exe", StringComparison.OrdinalIgnoreCase);
-            if (exeIdx > 0)
-            {
-                int startIdx = identifier.LastIndexOf('\\', exeIdx);
-                if (startIdx < 0) startIdx = identifier.LastIndexOf('/', exeIdx);
-                int begin = startIdx >= 0 ? startIdx + 1 : 0;
-                string extracted = identifier.Substring(begin, exeIdx - begin);
-                if (!string.IsNullOrWhiteSpace(extracted))
-                {
-                    procName = extracted;
-                }
-            }
-        }
+        var (procName, exePath) = ExtractExeInfoFromIdentifier(identifier);
 
         return new AudioSessionInfo
         {
             Id = identifier,
             ProcessId = pid,
-            ProcessName = procName,
+            ProcessName = !string.IsNullOrWhiteSpace(procName) ? procName : name,
             ExePath = exePath,
             Name = name,
             VolumePercent = Math.Clamp(volumeScalar * 100f, 0f, 100f),
@@ -513,22 +470,19 @@ public sealed class AudioSessionController : IDisposable
         if (pid == 0)
             return "System Sounds";
 
-        // 3. Query process name and description with fallback for sandboxed/child processes
+        // 3. Extract executable name from identifier string first (pure string parsing, zero system/anticheat delays)
+        var (extractedName, _) = ExtractExeInfoFromIdentifier(identifier);
+        if (!string.IsNullOrWhiteSpace(extractedName))
+        {
+            if (char.IsLower(extractedName[0]))
+                extractedName = char.ToUpper(extractedName[0]) + extractedName.Substring(1);
+            return extractedName;
+        }
+
+        // 4. Query process name from PID
         try
         {
             using var process = Process.GetProcessById((int)pid);
-
-            try
-            {
-                string? description = process.MainModule?.FileVersionInfo?.FileDescription;
-                if (!string.IsNullOrWhiteSpace(description))
-                    return description.Trim();
-            }
-            catch
-            {
-                // AccessDenied is expected for sandboxed/child processes; fall through
-            }
-
             if (!string.IsNullOrWhiteSpace(process.ProcessName))
             {
                 string pName = process.ProcessName;
@@ -539,26 +493,6 @@ public sealed class AudioSessionController : IDisposable
         }
         catch
         {
-            // Process might be sandboxed or already exited
-        }
-
-        // 4. Extract executable name from identifier string (e.g. "...\\Spotify.exe%b...")
-        if (!string.IsNullOrWhiteSpace(identifier))
-        {
-            int exeIdx = identifier.IndexOf(".exe", StringComparison.OrdinalIgnoreCase);
-            if (exeIdx > 0)
-            {
-                int startIdx = identifier.LastIndexOf('\\', exeIdx);
-                if (startIdx < 0) startIdx = identifier.LastIndexOf('/', exeIdx);
-                int begin = startIdx >= 0 ? startIdx + 1 : 0;
-                string extracted = identifier.Substring(begin, exeIdx - begin);
-                if (!string.IsNullOrWhiteSpace(extracted))
-                {
-                    if (char.IsLower(extracted[0]))
-                        extracted = char.ToUpper(extracted[0]) + extracted.Substring(1);
-                    return extracted;
-                }
-            }
         }
 
         return pid > 0 ? $"Process ({pid})" : "Audio Stream";

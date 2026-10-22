@@ -144,7 +144,7 @@ public sealed class SmtcMediaController : IDisposable
                         continue;
 
                     string appName = FormatAppName(id);
-                    var props = await s.TryGetMediaPropertiesAsync();
+                    var props = await GetMediaPropertiesSafeAsync(s, 300);
                     var playback = s.GetPlaybackInfo();
                     bool playing = playback?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
                     bool isSelected = string.Equals(id, targetId, StringComparison.OrdinalIgnoreCase);
@@ -231,7 +231,7 @@ public sealed class SmtcMediaController : IDisposable
                 return new SmtcMediaSnapshot("No media", "Idle", string.Empty, false, 0.0, 1.0, null, "System Audio", []);
             }
 
-            var sessions = await GetSessionsAsync();
+            IReadOnlyList<MediaSessionSnapshot> sessions = [];
             var session = ResolveTargetSession(manager);
             if (session is null)
             {
@@ -239,7 +239,7 @@ public sealed class SmtcMediaController : IDisposable
             }
 
             string sourceApp = FormatAppName(session.SourceAppUserModelId);
-            var props = await session.TryGetMediaPropertiesAsync();
+            var props = await GetMediaPropertiesSafeAsync(session, 500);
             string title = !string.IsNullOrWhiteSpace(props?.Title) ? props.Title : "No Media Playing";
             string artist = !string.IsNullOrWhiteSpace(props?.Artist) ? props.Artist : "Idle";
             string album = !string.IsNullOrWhiteSpace(props?.AlbumTitle) ? props.AlbumTitle : string.Empty;
@@ -337,6 +337,27 @@ public sealed class SmtcMediaController : IDisposable
         return positionSecs + anchorAgeSecs * rate;
     }
 
+    private static async Task<GlobalSystemMediaTransportControlsSessionMediaProperties?> GetMediaPropertiesSafeAsync(GlobalSystemMediaTransportControlsSession? session, int timeoutMs = 400)
+    {
+        if (session is null)
+            return null;
+
+        try
+        {
+            var task = session.TryGetMediaPropertiesAsync().AsTask();
+            var delay = Task.Delay(timeoutMs);
+            var completed = await Task.WhenAny(task, delay).ConfigureAwait(false);
+            if (completed == task)
+            {
+                return await task.ConfigureAwait(false);
+            }
+        }
+        catch
+        {
+        }
+        return null;
+    }
+
     private static async Task<string?> TryReadThumbnailDataUrlAsync(IRandomAccessStreamReference? thumbRef)
     {
         if (thumbRef is null)
@@ -344,13 +365,23 @@ public sealed class SmtcMediaController : IDisposable
 
         try
         {
-            using IRandomAccessStreamWithContentType stream = await thumbRef.OpenReadAsync();
+            var openTask = thumbRef.OpenReadAsync().AsTask();
+            var completed = await Task.WhenAny(openTask, Task.Delay(500)).ConfigureAwait(false);
+            if (completed != openTask)
+                return null;
+
+            using IRandomAccessStreamWithContentType stream = await openTask.ConfigureAwait(false);
             if (stream.Size == 0 || stream.Size > 2_000_000)
                 return null;
 
             using var reader = new DataReader(stream);
             uint size = (uint)stream.Size;
-            await reader.LoadAsync(size);
+            var loadTask = reader.LoadAsync(size).AsTask();
+            var loadCompleted = await Task.WhenAny(loadTask, Task.Delay(500)).ConfigureAwait(false);
+            if (loadCompleted != loadTask)
+                return null;
+
+            await loadTask.ConfigureAwait(false);
             byte[] bytes = new byte[size];
             reader.ReadBytes(bytes);
 
