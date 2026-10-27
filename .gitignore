@@ -4,6 +4,7 @@ obj/
 dist/
 dist-installer/
 publish/
+release/
 
 # Node.js
 node_modules/

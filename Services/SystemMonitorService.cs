@@ -397,7 +397,7 @@ public sealed class SystemMonitorService : IDisposable
                     }
                     catch
                     {
-                        cpuPercent = Math.Round(Math.Clamp((memMb / 1024.0) * 1.2, 0.1, 15.0), 1);
+                        cpuPercent = 0.0;
                     }
 
                     top.Add(new ProcessSnapshot(name, p.Id, cpuPercent, memMb));

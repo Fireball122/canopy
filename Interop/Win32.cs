@@ -638,6 +638,19 @@ public static class Win32
     /// <summary>
     /// Physically clips the HWND so the bottom corners are mathematically rounded with zero rectangular background artifact.
     /// </summary>
+    public static void ClearWindowRegion(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return;
+        try
+        {
+            SetWindowRgn(hwnd, IntPtr.Zero, true);
+        }
+        catch (Exception ex)
+        {
+            DiagnosticsLog.Log($"[Win32] ClearWindowRegion error: {ex.Message}");
+        }
+    }
+
     public static void ApplyWindowRoundedRegion(IntPtr hwnd, int width, int height, int cornerRadius)
     {
         if (hwnd == IntPtr.Zero) return;
@@ -648,8 +661,9 @@ public static class Win32
             IntPtr rgn = CreateRoundRectRgn(0, -cornerRadius, width + 1, height + 1, cornerRadius * 2, cornerRadius * 2);
             SetWindowRgn(hwnd, rgn, true);
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.Log($"[Win32] ApplyWindowRoundedRegion error: {ex.Message}");
         }
     }
 

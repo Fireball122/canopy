@@ -286,8 +286,9 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
 
     const handleThemeChanged = (e: Event) => {
-      const detail = (e as CustomEvent<{ mode: string }>).detail;
-      if (detail && typeof detail.mode === 'string') {
+      const detail = (e as CustomEvent<{ mode?: string; theme?: string }>).detail;
+      const targetMode = detail?.mode || detail?.theme;
+      if (typeof targetMode === 'string') {
         const validModes: Array<CanopySettings['themeMode']> = [
           'canopy',
           'adaptive',
@@ -295,8 +296,8 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           'light',
           'auto',
         ];
-        if (validModes.includes(detail.mode as CanopySettings['themeMode'])) {
-          const nextMode = detail.mode as CanopySettings['themeMode'];
+        if (validModes.includes(targetMode as CanopySettings['themeMode'])) {
+          const nextMode = targetMode as CanopySettings['themeMode'];
           setSettings((prev) => {
             if (prev.themeMode === nextMode) return prev;
             return { ...prev, themeMode: nextMode };

@@ -128,8 +128,7 @@ input[type="range"].caelestia-slider {
   input,
   select,
   textarea,
-  [role="button"],
-  [data-tauri-drag-region="false"] {
+  [role="button"] {
     -webkit-app-region: no-drag;
     pointer-events: auto;
   }

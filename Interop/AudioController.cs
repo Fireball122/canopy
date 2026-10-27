@@ -144,30 +144,26 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
             {
                 cap.DataAvailable -= OnLoopbackDataAvailable;
                 cap.RecordingStopped -= OnLoopbackRecordingStopped;
-                try { cap.StopRecording(); } catch { }
-                try { cap.Dispose(); } catch { }
+                try { cap.StopRecording(); } catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] StopRecording warning: {ex.Message}"); }
+                try { cap.Dispose(); } catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] Dispose warning: {ex.Message}"); }
             }
 
             if (_enumerator is null) return;
 
-            var newCaptures = new List<WasapiLoopbackCapture>();
-            var endpoints = _enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
-            foreach (var dev in endpoints)
+            if (_device is null)
             {
                 try
                 {
-                    var capture = new WasapiLoopbackCapture(dev);
-                    capture.DataAvailable += OnLoopbackDataAvailable;
-                    capture.RecordingStopped += OnLoopbackRecordingStopped;
-                    capture.StartRecording();
-                    newCaptures.Add(capture);
+                    _device = _enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
                 }
-                catch
+                catch (Exception ex)
                 {
+                    DiagnosticsLog.Log($"[AudioController] GetDefaultAudioEndpoint error: {ex.Message}");
                 }
             }
 
-            if (newCaptures.Count == 0 && _device is not null)
+            var newCaptures = new List<WasapiLoopbackCapture>();
+            if (_device is not null)
             {
                 try
                 {
@@ -177,7 +173,10 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
                     capture.StartRecording();
                     newCaptures.Add(capture);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    DiagnosticsLog.Log($"[AudioController] Loopback capture start failed: {ex.Message}");
+                }
             }
             if (newCaptures.Count > 0)
             {
@@ -252,8 +251,8 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
         {
             cap.DataAvailable -= OnLoopbackDataAvailable;
             cap.RecordingStopped -= OnLoopbackRecordingStopped;
-            try { cap.StopRecording(); } catch { }
-            try { cap.Dispose(); } catch { }
+            try { cap.StopRecording(); } catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] Pause StopRecording warning: {ex.Message}"); }
+            try { cap.Dispose(); } catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] Pause Dispose warning: {ex.Message}"); }
         }
 
         lock (_spectrumLock)
@@ -329,11 +328,17 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
 
             float mono = (left + right) * 0.5f;
 
-            _sampleBuffer[_sampleBufferPos++] = mono;
-            if (_sampleBufferPos >= FftLength)
+            lock (_sampleBuffer)
             {
-                _sampleBufferPos = 0;
-                ComputeFftSpectrum();
+                if (_sampleBufferPos < _sampleBuffer.Length)
+                {
+                    _sampleBuffer[_sampleBufferPos++] = mono;
+                }
+                if (_sampleBufferPos >= FftLength)
+                {
+                    _sampleBufferPos = 0;
+                    ComputeFftSpectrum();
+                }
             }
         }
         }
@@ -624,7 +629,7 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
 
         if (_enumerator is not null)
         {
-            try { _enumerator.UnregisterEndpointNotificationCallback(this); } catch { }
+            try { _enumerator.UnregisterEndpointNotificationCallback(this); } catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] Unregister callback error: {ex.Message}"); }
             _enumerator.Dispose();
             _enumerator = null;
         }
@@ -647,8 +652,8 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
         {
             cap.DataAvailable -= OnLoopbackDataAvailable;
             cap.RecordingStopped -= OnLoopbackRecordingStopped;
-            try { cap.StopRecording(); } catch { }
-            try { cap.Dispose(); } catch { }
+            try { cap.StopRecording(); } catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] StopRecording on dispose error: {ex.Message}"); }
+            try { cap.Dispose(); } catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] Dispose on dispose error: {ex.Message}"); }
         }
 
         lock (_syncLock)
@@ -690,7 +695,7 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
                 var defaultDevice = enumerator.GetDefaultAudioEndpoint(dataFlow, Role.Multimedia);
                 defaultId = defaultDevice?.ID ?? string.Empty;
             }
-            catch { }
+            catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] GetDefaultAudioEndpoint in devices warning: {ex.Message}"); }
 
             var devices = enumerator.EnumerateAudioEndPoints(dataFlow, DeviceState.Active);
             foreach (var dev in devices)
@@ -706,10 +711,10 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
                         Flow: dataFlow == DataFlow.Render ? "render" : "capture"
                     ));
                 }
-                catch { }
+                catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] Add device entry warning: {ex.Message}"); }
             }
         }
-        catch { }
+        catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] GetAudioDevices error: {ex.Message}"); }
         return list;
     }
 

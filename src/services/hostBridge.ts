@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+export const CANOPY_VERSION = '1.0.7';
 
 export interface ProcessEntry {
   name: string;
@@ -281,14 +281,7 @@ async function invokeBridge<T>(
         throw error;
       }
     }
-    if (window.__TAURI_INTERNALS__) {
-      try {
-        return await invoke<T>(cmd, args);
-      } catch (error) {
-        reportBridgeError(cmd, error);
-        throw error;
-      }
-    }
+    // Native host bridge is the primary communication channel
   }
 
   // Demo fallbacks are for standalone browser preview only. Native host failures must remain visible.
@@ -403,10 +396,12 @@ export async function getSystemStats(): Promise<SystemStats> {
         : raw.cpu_temp_c === null
           ? null
           : fallback.cpu_temp_c,
+    cpu_name: raw.cpu_name ?? 'CPU',
     gpu_usage:
       typeof raw.gpu_usage === 'number' && Number.isFinite(raw.gpu_usage) ? raw.gpu_usage : null,
     gpu_temp_c:
       typeof raw.gpu_temp_c === 'number' && Number.isFinite(raw.gpu_temp_c) ? raw.gpu_temp_c : null,
+    gpu_name: raw.gpu_name ?? (raw.gpu_usage !== null ? 'GPU' : null),
     core_usages:
       Array.isArray(raw.core_usages) && raw.core_usages.length > 0
         ? raw.core_usages
@@ -471,6 +466,8 @@ export async function getMediaInfo(): Promise<MediaInfo> {
     artwork_url: info.artwork_url ?? activeFallbackTrack.artwork_url,
     source_app: info.source_app || activeFallbackTrack.source_app,
     sessions: hasValidSessionList ? info.sessions : fallbackSessions,
+    is_shuffle: typeof info.is_shuffle === 'boolean' ? info.is_shuffle : false,
+    auto_repeat: typeof info.auto_repeat === 'number' ? info.auto_repeat : 0,
   };
 }
 
@@ -671,6 +668,19 @@ export async function triggerScreenSnip(): Promise<boolean> {
 
 export async function toggleDnd(): Promise<{ enabled: boolean }> {
   return invokeBridge<{ enabled: boolean }>('toggle_dnd', undefined, () => ({ enabled: false }));
+}
+
+export async function getDndStatus(): Promise<{ enabled: boolean }> {
+  return invokeBridge<{ enabled: boolean }>('get_dnd_status', undefined, () => ({
+    enabled: false,
+  }));
+}
+
+export async function getAppVersion(): Promise<string> {
+  const res = await invokeBridge<{ version?: string }>('get_version', undefined, () => ({
+    version: CANOPY_VERSION,
+  }));
+  return res.version || CANOPY_VERSION;
 }
 
 export interface BatteryStatus {
@@ -1013,7 +1023,9 @@ export interface UpdateCheckResult {
   releaseNotes?: string;
 }
 
-export async function checkForUpdates(currentVersion = '1.0.5'): Promise<UpdateCheckResult> {
+export async function checkForUpdates(
+  currentVersion: string = CANOPY_VERSION,
+): Promise<UpdateCheckResult> {
   try {
     const res = await fetch('https://api.github.com/repos/Fireball122/canopy/releases/latest', {
       headers: {

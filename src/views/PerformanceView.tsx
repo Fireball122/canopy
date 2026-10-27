@@ -16,6 +16,7 @@ import type { ProcessEntry, SystemStats } from '../services/hostBridge';
 
 export interface PerformanceViewProps {
   stats: SystemStats;
+  initialDetailsOpen?: boolean;
 }
 
 interface ConcentricGaugeProps {
@@ -201,8 +202,14 @@ const SparklineMini: React.FC<{
   );
 };
 
-export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
-  const [detailsOpen, setDetailsOpen] = useState<boolean>(false);
+export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initialDetailsOpen }) => {
+  const [detailsOpen, setDetailsOpen] = useState<boolean>(Boolean(initialDetailsOpen));
+
+  useEffect(() => {
+    if (initialDetailsOpen) {
+      setDetailsOpen(true);
+    }
+  }, [initialDetailsOpen]);
   const [gpuHistory, setGpuHistory] = useState<number[]>(() => new Array(30).fill(0));
   const [cpuHistory, setCpuHistory] = useState<number[]>(() => new Array(30).fill(0));
   const [ramHistory, setRamHistory] = useState<number[]>(() => new Array(30).fill(0));
@@ -327,10 +334,7 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
   }, [stats.top_processes, stats.cpu_usage]);
 
   return (
-    <div
-      data-tauri-drag-region="false"
-      className="w-full h-full flex flex-col gap-2 overflow-y-auto pr-0.5 pointer-events-auto select-none"
-    >
+    <div className="w-full h-full flex flex-col gap-2 overflow-y-auto pr-0.5 pointer-events-auto select-none">
       {/* Top Row: Three Large Concentric Dual-Arc Gauges Side by Side */}
       <div className="grid grid-cols-3 gap-2.5 shrink-0">
         <ConcentricDualArcGauge
@@ -467,7 +471,6 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
           <div className="flex items-center gap-1 bg-[var(--theme-track, rgba(255,255,255,0.05))] p-0.5 rounded-full border border-[var(--theme-border, rgba(255,255,255,0.08))]">
             <button
               type="button"
-              data-tauri-drag-region="false"
               onClick={() => toggleNetworkViewMode('bars')}
               className={`px-2 py-0.5 rounded-full text-[9.5px] font-mono transition-all pointer-events-auto cursor-pointer ${
                 networkViewMode === 'bars'
@@ -479,7 +482,6 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
             </button>
             <button
               type="button"
-              data-tauri-drag-region="false"
               onClick={() => toggleNetworkViewMode('graph')}
               className={`px-2 py-0.5 rounded-full text-[9.5px] font-mono transition-all pointer-events-auto cursor-pointer ${
                 networkViewMode === 'graph'
@@ -627,7 +629,6 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats }) => {
       <div className="flex items-center justify-center shrink-0 mt-auto pt-1">
         <button
           type="button"
-          data-tauri-drag-region="false"
           onClick={() => setDetailsOpen((prev) => !prev)}
           className="px-4 py-1 rounded-full border text-xs font-mono font-medium flex items-center gap-1.5 transition-all hover:scale-[1.02] active:scale-95 pointer-events-auto cursor-pointer"
           style={{

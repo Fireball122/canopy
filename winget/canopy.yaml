@@ -1,13 +1,13 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.6.0.schema.json
 PackageIdentifier: CanopyShell.Canopy
-PackageVersion: 1.0.2
+PackageVersion: 1.0.7
 DefaultLocale: en-US
 ManifestType: version
 ManifestVersion: 1.6.0
 ---
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
 PackageIdentifier: CanopyShell.Canopy
-PackageVersion: 1.0.2
+PackageVersion: 1.0.7
 InstallerLocale: en-US
 Platform:
   - Windows.Desktop
@@ -19,15 +19,15 @@ InstallModes:
   - interactive
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/Fireball122/canopy/releases/download/v1.0.2/Canopy-v1.0.2-x64.msi
-    InstallerSha256: DBC896AE3C67112A8F5893627A79E29DC144BAAF8803A54D6176D1D56CE95252
+    InstallerUrl: https://github.com/Fireball122/canopy/releases/download/v1.0.7/Canopy-v1.0.7-x64.msi
+    InstallerSha256: 48D9928A893F8A48878E25EA980F7B4511A25B62A38743FA5D8F26D30CE93CB9
     ProductCode: '{4C6D518F-72E6-407F-8BC1-B071536E489E}'
 ManifestType: installer
 ManifestVersion: 1.6.0
 ---
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
 PackageIdentifier: CanopyShell.Canopy
-PackageVersion: 1.0.2
+PackageVersion: 1.0.7
 PackageLocale: en-US
 Publisher: Canopy Shell
 PublisherUrl: https://github.com/Fireball122/canopy

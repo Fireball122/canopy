@@ -283,10 +283,7 @@ export const AppsView: React.FC<AppsViewProps> = ({
   };
 
   return (
-    <div
-      data-tauri-drag-region="false"
-      className="w-full h-full flex flex-col gap-2.5 overflow-hidden select-none pointer-events-auto"
-    >
+    <div className="w-full h-full flex flex-col gap-2.5 overflow-hidden select-none pointer-events-auto">
       {/* Top Bar: Search Input + Category Filter Pills */}
       <div
         className="bento-card p-2.5 flex flex-col gap-2 shrink-0"
@@ -313,7 +310,6 @@ export const AppsView: React.FC<AppsViewProps> = ({
             />
             <input
               type="text"
-              data-tauri-drag-region="false"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search installed Windows apps & tools..."
@@ -323,7 +319,6 @@ export const AppsView: React.FC<AppsViewProps> = ({
             {searchQuery && (
               <button
                 type="button"
-                data-tauri-drag-region="false"
                 onClick={() => setSearchQuery('')}
                 className="p-0.5 rounded-md transition-all hover:opacity-80 pointer-events-auto cursor-pointer"
                 style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))' }}
@@ -363,7 +358,6 @@ export const AppsView: React.FC<AppsViewProps> = ({
           {/* Refresh Apps List Button */}
           <button
             type="button"
-            data-tauri-drag-region="false"
             onClick={() => void loadApps(true)}
             className="p-1.5 rounded-xl border transition-all hover:scale-[1.03] active:scale-95 pointer-events-auto cursor-pointer"
             style={{
@@ -379,7 +373,6 @@ export const AppsView: React.FC<AppsViewProps> = ({
           {/* Browse for Executable Button */}
           <button
             type="button"
-            data-tauri-drag-region="false"
             onClick={handleBrowseAndLaunch}
             className="p-1.5 rounded-xl border transition-all hover:scale-[1.03] active:scale-95 pointer-events-auto cursor-pointer"
             style={{
@@ -401,7 +394,6 @@ export const AppsView: React.FC<AppsViewProps> = ({
               <button
                 key={category}
                 type="button"
-                data-tauri-drag-region="false"
                 onClick={() => setActiveCategory(category)}
                 className="px-2.5 py-1 rounded-lg border text-[11px] font-mono font-medium transition-all shrink-0 active:scale-95 pointer-events-auto cursor-pointer"
                 style={{
@@ -440,7 +432,6 @@ export const AppsView: React.FC<AppsViewProps> = ({
           </div>
           <button
             type="button"
-            data-tauri-drag-region="false"
             onClick={onCancelPicker}
             className="px-2.5 py-1 rounded-lg text-xs font-semibold border hover:bg-white/10 active:scale-95 pointer-events-auto cursor-pointer"
             style={{
@@ -455,7 +446,6 @@ export const AppsView: React.FC<AppsViewProps> = ({
 
       {/* Scrollable 4-Column App Cards Grid */}
       <div
-        data-tauri-drag-region="false"
         className="flex-1 overflow-y-auto pr-1 pointer-events-auto"
         style={{
           maskImage: 'linear-gradient(to bottom, black calc(100% - 24px), transparent 100%)',
@@ -489,7 +479,6 @@ export const AppsView: React.FC<AppsViewProps> = ({
             {(searchQuery || activeCategory !== 'All') && (
               <button
                 type="button"
-                data-tauri-drag-region="false"
                 onClick={() => {
                   setSearchQuery('');
                   setActiveCategory('All');
@@ -515,7 +504,6 @@ export const AppsView: React.FC<AppsViewProps> = ({
                 <button
                   key={app.id}
                   type="button"
-                  data-tauri-drag-region="false"
                   onClick={() => {
                     if (isPickerMode && onPickApp) {
                       onPickApp(app);
@@ -611,7 +599,6 @@ export const AppsView: React.FC<AppsViewProps> = ({
                           {/* Heart Favorite Button (Puts it at the top) */}
                           <button
                             type="button"
-                            data-tauri-drag-region="false"
                             onClick={(e) => {
                               e.stopPropagation();
                               toggleFavorite(app.id);

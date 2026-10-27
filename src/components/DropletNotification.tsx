@@ -104,7 +104,6 @@ export const DropletNotification: React.FC<DropletNotificationProps> = ({
 
   return (
     <div
-      data-tauri-drag-region="false"
       className="fixed top-0 left-1/2 -translate-x-1/2 z-50 pointer-events-auto select-none"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => {
@@ -234,7 +233,6 @@ export const DropletNotification: React.FC<DropletNotificationProps> = ({
             {/* Dismiss button pinned strictly on the right */}
             <button
               type="button"
-              data-tauri-drag-region="false"
               onClick={startDismissAnimation}
               className="w-6 h-6 rounded-full flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-colors pointer-events-auto cursor-pointer shrink-0"
               title="Dismiss notification"

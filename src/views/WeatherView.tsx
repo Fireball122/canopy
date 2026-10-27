@@ -114,7 +114,6 @@ export const WeatherView: React.FC<WeatherViewProps> = ({
         </p>
         <button
           type="button"
-          data-tauri-drag-region="false"
           onClick={onRefreshWeather}
           className="mt-4 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all pointer-events-auto cursor-pointer"
           style={{ background: 'var(--theme-accent)', color: '#11111b' }}
@@ -164,7 +163,6 @@ export const WeatherView: React.FC<WeatherViewProps> = ({
             <div className="flex items-center gap-1.5 shrink-0">
               <button
                 type="button"
-                data-tauri-drag-region="false"
                 onClick={onRefreshWeather}
                 className="p-1.5 rounded-xl transition-all pointer-events-auto cursor-pointer"
                 style={{
@@ -206,15 +204,27 @@ export const WeatherView: React.FC<WeatherViewProps> = ({
                 {tempUnit}
               </strong>
             </span>
-            <div
-              className="flex-1 h-1.5 rounded-full overflow-hidden"
-              style={{ background: 'var(--theme-border)' }}
-            >
-              <div
-                className="h-full rounded-full w-3/4 mx-auto"
-                style={{ backgroundColor: 'var(--theme-accent)' }}
-              />
-            </div>
+            {(() => {
+              const span = Math.max(1, weather.high - weather.low);
+              const progress = Math.max(
+                6,
+                Math.min(100, ((weather.temp - weather.low) / span) * 100),
+              );
+              return (
+                <div
+                  className="flex-1 h-1.5 rounded-full overflow-hidden relative"
+                  style={{ background: 'var(--theme-border)' }}
+                >
+                  <div
+                    className="h-full rounded-full transition-all duration-300"
+                    style={{
+                      width: `${progress}%`,
+                      backgroundColor: 'var(--theme-accent)',
+                    }}
+                  />
+                </div>
+              );
+            })()}
             <span
               className="text-[11px] font-mono tabular-nums"
               style={{ color: 'var(--theme-text-secondary)' }}
@@ -382,57 +392,81 @@ export const WeatherView: React.FC<WeatherViewProps> = ({
           >
             Extended Outlook
           </span>
-          <div className="space-y-1.5 my-auto">
-            {weather.daily.slice(0, 5).map((day, idx) => (
-              <div
-                key={idx}
-                className="flex items-center justify-between px-3 py-1.5 rounded-xl"
-                style={{
-                  background: 'var(--theme-track)',
-                  border: '1px solid var(--theme-border)',
-                }}
-              >
-                <span
-                  className="w-16 text-xs font-semibold"
-                  style={{ color: 'var(--theme-text-primary)' }}
-                >
-                  {day.day}
-                </span>
-                <div className="flex items-center gap-2 w-32">
-                  {renderWeatherIcon(day.code, day.condition, 'w-4 h-4')}
-                  <span
-                    className="text-[11px] truncate"
-                    style={{ color: 'var(--theme-text-secondary)' }}
-                  >
-                    {day.condition}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 w-36">
-                  <span
-                    className="text-[11px] font-mono tabular-nums w-8 text-right"
-                    style={{ color: 'var(--theme-text-secondary)' }}
-                  >
-                    {day.tempMin}°
-                  </span>
-                  <div
-                    className="flex-1 h-1.5 rounded-full overflow-hidden"
-                    style={{ background: 'var(--theme-border)' }}
-                  >
+          {(() => {
+            const fiveDays = weather.daily.slice(0, 5);
+            const overallMin = Math.min(...fiveDays.map((d) => d.tempMin));
+            const overallMax = Math.max(...fiveDays.map((d) => d.tempMax));
+            const overallSpan = Math.max(1, overallMax - overallMin);
+
+            return (
+              <div className="space-y-1.5 my-auto">
+                {fiveDays.map((day, idx) => {
+                  const leftPercent = Math.max(
+                    0,
+                    Math.min(100, ((day.tempMin - overallMin) / overallSpan) * 100),
+                  );
+                  const widthPercent = Math.max(
+                    10,
+                    Math.min(100 - leftPercent, ((day.tempMax - day.tempMin) / overallSpan) * 100),
+                  );
+
+                  return (
                     <div
-                      className="h-full rounded-full w-4/5 mx-auto"
-                      style={{ backgroundColor: 'var(--theme-accent)' }}
-                    />
-                  </div>
-                  <span
-                    className="text-[11px] font-mono tabular-nums font-semibold w-8"
-                    style={{ color: 'var(--theme-text-primary)' }}
-                  >
-                    {day.tempMax}°
-                  </span>
-                </div>
+                      key={idx}
+                      className="flex items-center justify-between px-3 py-1.5 rounded-xl"
+                      style={{
+                        background: 'var(--theme-track)',
+                        border: '1px solid var(--theme-border)',
+                      }}
+                    >
+                      <span
+                        className="w-16 text-xs font-semibold"
+                        style={{ color: 'var(--theme-text-primary)' }}
+                      >
+                        {day.day}
+                      </span>
+                      <div className="flex items-center gap-2 w-32">
+                        {renderWeatherIcon(day.code, day.condition, 'w-4 h-4')}
+                        <span
+                          className="text-[11px] truncate"
+                          style={{ color: 'var(--theme-text-secondary)' }}
+                        >
+                          {day.condition}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 w-36">
+                        <span
+                          className="text-[11px] font-mono tabular-nums w-8 text-right"
+                          style={{ color: 'var(--theme-text-secondary)' }}
+                        >
+                          {day.tempMin}°
+                        </span>
+                        <div
+                          className="flex-1 h-1.5 rounded-full overflow-hidden relative"
+                          style={{ background: 'var(--theme-border)' }}
+                        >
+                          <div
+                            className="h-full rounded-full transition-all duration-300"
+                            style={{
+                              marginLeft: `${leftPercent}%`,
+                              width: `${widthPercent}%`,
+                              backgroundColor: 'var(--theme-accent)',
+                            }}
+                          />
+                        </div>
+                        <span
+                          className="text-[11px] font-mono tabular-nums font-semibold w-8"
+                          style={{ color: 'var(--theme-text-primary)' }}
+                        >
+                          {day.tempMax}°
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            ))}
-          </div>
+            );
+          })()}
         </div>
       </div>
     </div>

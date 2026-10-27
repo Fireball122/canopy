@@ -1,6 +1,6 @@
 # build-setup-exe.ps1 - Compiles the branded graphical setup wizard (.exe) using Inno Setup
 param(
-    [string]$Version = "1.0.6",
+    [string]$Version = "1.0.7",
     [string]$Configuration = "Release"
 )
 

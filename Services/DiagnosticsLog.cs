@@ -64,6 +64,12 @@ public sealed class DiagnosticsLog
         get => _enabled;
         set => _enabled = value;
     }
+    private static readonly DiagnosticsLog s_default = new();
+    public static DiagnosticsLog Default => s_default;
+
+    public static void Log(string message) => s_default.Write(message);
+    public static void LogException(string context, Exception exception) => s_default.WriteException(context, exception);
+
 
     public void Write(string message)
     {

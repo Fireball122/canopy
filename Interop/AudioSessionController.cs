@@ -350,8 +350,9 @@ public sealed class AudioSessionController : IDisposable
 
                 return applied;
             }
-            catch
+            catch (Exception ex)
             {
+                DiagnosticsLog.Log($"[AudioSessionController] ApplyToSession error: {ex.Message}");
                 return false;
             }
             finally
@@ -434,8 +435,9 @@ public sealed class AudioSessionController : IDisposable
                 return dn.Trim();
             }
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.Log($"[AudioSessionController] GetSessionIdentifier warning: {ex.Message}");
         }
         return string.Empty;
     }
@@ -451,8 +453,9 @@ public sealed class AudioSessionController : IDisposable
                     return dn.Trim();
             }
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.Log($"[AudioSessionController] GetDisplayName warning: {ex.Message}");
         }
 
         // 2. System sounds session
@@ -463,8 +466,9 @@ public sealed class AudioSessionController : IDisposable
                 return "System Sounds";
             }
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.Log($"[AudioSessionController] IsSystemSoundsSession warning: {ex.Message}");
         }
 
         if (pid == 0)
@@ -491,8 +495,9 @@ public sealed class AudioSessionController : IDisposable
                 return pName;
             }
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.Log($"[AudioSessionController] GetProcessById warning: {ex.Message}");
         }
 
         return pid > 0 ? $"Process ({pid})" : "Audio Stream";
@@ -530,8 +535,9 @@ public sealed class AudioSessionController : IDisposable
             }
             return dataUrl;
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.Log($"[AudioSessionController] ExtractProcessIconDataUrl warning: {ex.Message}");
             return null;
         }
     }
@@ -585,8 +591,9 @@ public sealed class AudioSessionController : IDisposable
         {
             Marshal.ReleaseComObject(comObject);
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.Log($"[AudioSessionController] ReleaseComObject warning: {ex.Message}");
         }
     }
 

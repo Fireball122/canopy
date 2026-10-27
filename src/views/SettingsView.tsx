@@ -30,7 +30,9 @@ import { TriggerSection } from '../components/settings/TriggerSection';
 import { type CanopySettings, useSettings } from '../context/SettingsContext';
 import {
   applyUpdate,
+  CANOPY_VERSION,
   checkForUpdates,
+  getAppVersion,
   openExternalUrl,
   openLogFolder,
   pickWallpaperFolder,
@@ -40,6 +42,7 @@ import {
   type UpdateCheckResult,
   type WallpaperEntry,
 } from '../services/hostBridge';
+
 export interface SettingsViewProps {
   onDirectoryChanged?: (newDir: string, entries: WallpaperEntry[]) => void;
   onThemeChanged?: () => void;
@@ -60,10 +63,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
+  const [currentVersion, setCurrentVersion] = useState<string>(CANOPY_VERSION);
   useEffect(() => {
     let active = true;
     setCheckingUpdate(true);
-    checkForUpdates('1.0.5')
+    getAppVersion()
+      .then((ver) => {
+        if (active) setCurrentVersion(ver);
+        return checkForUpdates(ver);
+      })
       .then((res) => {
         if (active) {
           setUpdateInfo(res);
@@ -82,7 +90,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setCheckingUpdate(true);
     setUpdateStatusText(null);
     try {
-      const res = await checkForUpdates('1.0.5');
+      const ver = await getAppVersion();
+      setCurrentVersion(ver);
+      const res = await checkForUpdates(ver);
       setUpdateInfo(res);
       if (!res.updateAvailable) {
         setUpdateStatusText('Canopy is currently up to date!');
@@ -252,10 +262,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   return (
-    <div
-      data-tauri-drag-region="false"
-      className="w-full h-full flex flex-col gap-3 overflow-hidden select-none pointer-events-auto"
-    >
+    <div className="w-full h-full flex flex-col gap-3 overflow-hidden select-none pointer-events-auto">
       {/* Top Header Bar */}
       <div
         className="bento-card px-3.5 py-2 flex items-center justify-between shrink-0"
@@ -313,10 +320,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       </div>
 
       {/* Settings Dual-Column Flow */}
-      <div
-        data-tauri-drag-region="false"
-        className="flex-1 overflow-y-auto pr-1 grid grid-cols-2 gap-3.5 items-start pointer-events-auto pb-4"
-      >
+      <div className="flex-1 overflow-y-auto pr-1 grid grid-cols-2 gap-3.5 items-start pointer-events-auto pb-4">
         {hasMatches ? (
           <>
             {/* Left Column Stack */}
@@ -762,7 +766,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <SettingSection
                   title="Updates & Repository"
                   icon={<GitBranch className="w-4 h-4" />}
-                  badge="v1.0.5"
+                  badge={`v${currentVersion}`}
                 >
                   <SettingRow
                     title="GitHub Repository"
@@ -770,7 +774,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   >
                     <button
                       type="button"
-                      data-tauri-drag-region="false"
                       onClick={() => void openExternalUrl('https://github.com/Fireball122/canopy')}
                       className="px-3 py-1.5 rounded-xl text-xs font-mono border flex items-center gap-1.5 transition-all hover:bg-[var(--theme-track)] hover:scale-[1.02] active:scale-95 pointer-events-auto cursor-pointer"
                       style={{
@@ -788,14 +791,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     description={
                       updateInfo?.updateAvailable
                         ? `A new release (v${updateInfo.latestVersion}) is available on GitHub!`
-                        : 'Canopy is up to date (v1.0.5)'
+                        : `Canopy is up to date (v${currentVersion})`
                     }
                   >
                     <div className="flex items-center gap-2">
                       {updateInfo?.updateAvailable ? (
                         <button
                           type="button"
-                          data-tauri-drag-region="false"
                           disabled={applyingUpdate}
                           onClick={handleApplyUpdate}
                           className="px-3 py-1.5 rounded-xl text-xs font-semibold border flex items-center gap-1.5 transition-all shadow-md active:scale-95 pointer-events-auto cursor-pointer animate-pulse"
@@ -815,7 +817,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       ) : (
                         <button
                           type="button"
-                          data-tauri-drag-region="false"
                           disabled={checkingUpdate}
                           onClick={handleManualCheckUpdate}
                           className="px-3 py-1.5 rounded-xl text-xs font-mono border flex items-center gap-1.5 transition-all hover:bg-[var(--theme-track)] active:scale-95 pointer-events-auto cursor-pointer"

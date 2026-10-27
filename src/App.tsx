@@ -3,49 +3,27 @@ import {
   AppWindow,
   Battery,
   BatteryCharging,
-  BellOff,
-  Calculator,
-  Calendar as CalendarIcon,
-  ChevronRight,
-  Clock,
   CloudSun,
-  Code2,
-  Coffee,
-  Compass,
   Cpu,
-  Disc,
-  FileText,
   FolderOpen,
   Image as ImageIcon,
   LayoutGrid,
   Lock,
-  MapPin,
   Mic2,
-  Monitor,
   Moon,
   Music,
-  Pause,
   Play,
-  Plus,
   Power as PowerIcon,
   RefreshCw,
-  Scissors,
   Search,
   Settings as SettingsIcon,
-  SkipBack,
-  SkipForward,
   Sliders,
-  Sun,
   Terminal as TerminalIcon,
-  Volume2,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CalendarCard } from './components/CalendarCard';
-import { CanopyMascot } from './components/CanopyMascot';
+import { CommandPalette, type CommandPaletteItem } from './components/CommandPalette';
 import { DropletNotification } from './components/DropletNotification';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { RadialGauge } from './components/RadialGauge';
-import { VerticalSliders } from './components/VerticalSliders';
 import { SettingsProvider, type TabId, useSettings } from './context/SettingsContext';
 import { useAlbumArt } from './hooks/useAlbumArt';
 import { usePanelOpen } from './hooks/usePanelOpen';
@@ -58,6 +36,7 @@ import {
   getBatteryStatus,
   getBrightness,
   getCaffeineStatus,
+  getDndStatus,
   getInstalledApps,
   getMasterVolume,
   getMediaInfo,
@@ -82,12 +61,8 @@ import {
   setDesktopWallpaper,
   setDropdownOpen,
   setMasterVolume,
-  setReminders,
   setTopHoverTrigger,
   setWindowSize,
-  toggleCaffeine,
-  toggleDnd,
-  triggerScreenSnip,
   type WallpaperEntry,
   setMicMute as writeMicMute,
   setMicVolume as writeMicVolume,
@@ -99,36 +74,15 @@ import {
   initializeSystemThemeWatcher,
 } from './services/palette';
 import { fetchWeather, type WeatherData } from './services/weather';
-import { WallpaperView } from './views/WallpaperView';
-
-const QUICK_APP_CATALOGUE: Record<string, { label: string; icon: React.ReactNode; path: string }> =
-  {
-    terminal: { label: 'Terminal', icon: <TerminalIcon className="w-3 h-3" />, path: 'wt.exe' },
-    explorer: { label: 'Files', icon: <FolderOpen className="w-3 h-3" />, path: 'explorer.exe' },
-    taskmgr: { label: 'TaskMgr', icon: <Cpu className="w-3 h-3" />, path: 'taskmgr.exe' },
-    browser: { label: 'Browser', icon: <Compass className="w-3 h-3" />, path: 'msedge.exe' },
-    msedge: { label: 'Browser', icon: <Compass className="w-3 h-3" />, path: 'msedge.exe' },
-    code: { label: 'VSCode', icon: <Code2 className="w-3 h-3" />, path: 'code' },
-    notepad: { label: 'Notepad', icon: <FileText className="w-3 h-3" />, path: 'notepad.exe' },
-    calc: { label: 'Calc', icon: <Calculator className="w-3 h-3" />, path: 'calc.exe' },
-    spotify: { label: 'Spotify', icon: <Music className="w-3 h-3" />, path: 'spotify.exe' },
-  };
-
 import { AppsView } from './views/AppsView';
+import { DashboardView } from './views/DashboardView';
 import { MediaView } from './views/MediaView';
 import { PerformanceView } from './views/PerformanceView';
 import { PowerView } from './views/PowerView';
 import { SettingsView } from './views/SettingsView';
 import { TerminalView } from './views/TerminalView';
-import { renderWeatherIcon, WeatherView } from './views/WeatherView';
-
-interface CommandPaletteItem {
-  id: string;
-  label: string;
-  hint: string;
-  icon: React.ReactNode;
-  run: () => void;
-}
+import { WallpaperView } from './views/WallpaperView';
+import { WeatherView } from './views/WeatherView';
 
 /**
  * Structural equality for polled bridge payloads. State setters use it to return the previous
@@ -156,20 +110,6 @@ function samePayload(a: unknown, b: unknown): boolean {
     return false;
   }
   return aKeys.every((key) => samePayload(aRecord[key], bRecord[key]));
-}
-
-function filterPaletteCommands(
-  commands: CommandPaletteItem[],
-  query: string,
-): CommandPaletteItem[] {
-  const needle = query.trim().toLowerCase();
-  if (needle.length === 0) {
-    return commands;
-  }
-  return commands.filter(
-    (command) =>
-      command.label.toLowerCase().includes(needle) || command.hint.toLowerCase().includes(needle),
-  );
 }
 
 const DEFAULT_WEATHER: WeatherData = {
@@ -337,16 +277,22 @@ const CanopyShellContent: React.FC = () => {
   const resolvedArtwork = useAlbumArt(media.title, media.artist, media.artwork_url);
   const [spectrumBands, setSpectrumBands] = useState<number[]>(() => new Array(40).fill(0));
 
+  const spectrumInFlightRef = useRef<boolean>(false);
   useEffect(() => {
-    if (!panelOpen) return;
+    if (!panelOpen || activeTab !== 'dashboard') return;
     let active = true;
     const poll = async () => {
+      if (spectrumInFlightRef.current) return;
+      spectrumInFlightRef.current = true;
       try {
         const bands = await getAudioSpectrum();
         if (active && Array.isArray(bands) && bands.length > 0) {
           setSpectrumBands(bands);
         }
-      } catch {}
+      } catch {
+      } finally {
+        spectrumInFlightRef.current = false;
+      }
     };
     void poll();
     const timer = window.setInterval(poll, 40);
@@ -354,23 +300,23 @@ const CanopyShellContent: React.FC = () => {
       active = false;
       window.clearInterval(timer);
     };
-  }, [panelOpen]);
+  }, [panelOpen, activeTab]);
 
   const [paletteOpen, setPaletteOpen] = useState<boolean>(false);
   const [paletteQuery, setPaletteQuery] = useState<string>('');
-  const [paletteIndex, setPaletteIndex] = useState<number>(0);
   const [caffeineActive, setCaffeineActive] = useState<boolean>(false);
-  const [dndActive, setDndActive] = useState<boolean>(settings.quietHoursEnabled);
+  const [dndActive, setDndActive] = useState<boolean>(false);
+  const [mediaSubView, setMediaSubView] = useState<'main' | 'lyrics' | 'mixer'>('main');
+  const [performanceDetails, setPerformanceDetails] = useState<boolean>(false);
 
   useEffect(() => {
     void getCaffeineStatus()
       .then((s) => setCaffeineActive(s.enabled))
       .catch(() => undefined);
+    void getDndStatus()
+      .then((s) => setDndActive(s.enabled))
+      .catch(() => undefined);
   }, []);
-
-  useEffect(() => {
-    setDndActive(settings.quietHoursEnabled);
-  }, [settings.quietHoursEnabled]);
 
   useEffect(() => {
     const handleNavigateTab = (e: Event) => {
@@ -917,6 +863,7 @@ const CanopyShellContent: React.FC = () => {
         hint: 'Media',
         icon: <Mic2 className="w-3.5 h-3.5" strokeWidth={1.9} />,
         run: () => {
+          setMediaSubView('lyrics');
           setActiveTab('media');
           void notifyTabSwitched();
         },
@@ -927,6 +874,7 @@ const CanopyShellContent: React.FC = () => {
         hint: 'Media',
         icon: <Sliders className="w-3.5 h-3.5" strokeWidth={1.9} />,
         run: () => {
+          setMediaSubView('mixer');
           setActiveTab('media');
           void notifyTabSwitched();
         },
@@ -937,6 +885,7 @@ const CanopyShellContent: React.FC = () => {
         hint: 'Performance',
         icon: <Cpu className="w-3.5 h-3.5" strokeWidth={1.9} />,
         run: () => {
+          setPerformanceDetails(true);
           setActiveTab('performance');
           void notifyTabSwitched();
         },
@@ -1020,110 +969,6 @@ const CanopyShellContent: React.FC = () => {
       // Reflected in local state
     }
   }, []);
-  const paletteMatches = useMemo(() => {
-    const dynamicCommands: CommandPaletteItem[] = [];
-    const trimmed = paletteQuery.trim();
-
-    // 1. Math calculation (= 120 * 1.08)
-    if (trimmed.startsWith('=')) {
-      const expr = trimmed.slice(1).trim();
-      if (expr.length > 0) {
-        try {
-          // Only permit safe math tokens
-          if (/^[0-9+\-*/().\s%^]+$/.test(expr)) {
-            // eslint-disable-next-line no-eval
-            const result = Function(`'use strict'; return (${expr})`)();
-            if (typeof result === 'number' && Number.isFinite(result)) {
-              dynamicCommands.push({
-                id: 'calc:result',
-                label: `${expr} = ${result}`,
-                hint: 'Copy Calculation',
-                icon: <Calculator className="w-3.5 h-3.5 text-amber-400" />,
-                run: () => {
-                  void navigator.clipboard.writeText(String(result));
-                },
-              });
-            }
-          }
-        } catch {
-          // Invalid expression while typing
-        }
-      }
-    }
-
-    // 2. Volume command (vol 75, volume 50)
-    const volMatch = trimmed.match(/^(?:vol|volume)\s+(\d{1,3})$/i);
-    if (volMatch) {
-      const targetVol = Math.max(0, Math.min(100, parseInt(volMatch[1], 10)));
-      dynamicCommands.push({
-        id: 'action:set-vol',
-        label: `Set Volume to ${targetVol}%`,
-        hint: 'Audio',
-        icon: <Volume2 className="w-3.5 h-3.5 text-sky-400" />,
-        run: () => {
-          void handleVolumeChange(targetVol);
-        },
-      });
-    }
-
-    // 3. Brightness command (bri 80, brightness 60)
-    const briMatch = trimmed.match(/^(?:bri|brightness)\s+(\d{1,3})$/i);
-    if (briMatch) {
-      const targetBri = Math.max(0, Math.min(100, parseInt(briMatch[1], 10)));
-      dynamicCommands.push({
-        id: 'action:set-bri',
-        label: `Set Brightness to ${targetBri}%`,
-        hint: 'Display',
-        icon: <Sun className="w-3.5 h-3.5 text-yellow-400" />,
-        run: () => {
-          void handleBrightnessChange(targetBri);
-        },
-      });
-    }
-
-    // 4. Quick reminder (remind Take a stretch, reminder Check email)
-    const remindMatch = trimmed.match(/^(?:remind|reminder)\s+(.+)$/i);
-    if (remindMatch && remindMatch[1].trim().length > 0) {
-      const reminderText = remindMatch[1].trim();
-      dynamicCommands.push({
-        id: 'action:add-reminder',
-        label: `Add Reminder: "${reminderText}"`,
-        hint: 'Calendar',
-        icon: <CalendarIcon className="w-3.5 h-3.5 text-emerald-400" />,
-        run: () => {
-          const now = new Date();
-          const nextHour = new Date(now.getTime() + 60 * 60 * 1000);
-          const hh = String(nextHour.getHours()).padStart(2, '0');
-          const mm = String(nextHour.getMinutes()).padStart(2, '0');
-          const yyyy = nextHour.getFullYear();
-          const mon = String(nextHour.getMonth() + 1).padStart(2, '0');
-          const dd = String(nextHour.getDate()).padStart(2, '0');
-          const newReminder = {
-            id: `rem_${Date.now()}`,
-            text: reminderText,
-            date: `${yyyy}-${mon}-${dd}`,
-            time: `${hh}:${mm}`,
-          };
-          try {
-            const raw = window.localStorage.getItem('shell_calendar_events');
-            const existing = raw ? JSON.parse(raw) : [];
-            const updated = Array.isArray(existing) ? [...existing, newReminder] : [newReminder];
-            window.localStorage.setItem('shell_calendar_events', JSON.stringify(updated));
-            window.dispatchEvent(new CustomEvent('calendar-events-updated', { detail: updated }));
-            void setReminders(updated);
-          } catch {
-            // Ignore
-          }
-        },
-      });
-    }
-
-    if (dynamicCommands.length > 0) {
-      return dynamicCommands;
-    }
-
-    return filterPaletteCommands(paletteCommands, paletteQuery);
-  }, [paletteCommands, paletteQuery, handleVolumeChange, handleBrightnessChange]);
 
   // Typing a printable key while the panel is expanded summons the palette; collapsing the panel
   // dismisses it. Escape / Ctrl-` handling stays in the host-event listener above.
@@ -1145,7 +990,6 @@ const CanopyShellContent: React.FC = () => {
       }
       e.preventDefault();
       setPaletteQuery(e.key);
-      setPaletteIndex(0);
       setPaletteOpen(true);
     };
     window.addEventListener('keydown', onKeyDown);
@@ -1284,45 +1128,9 @@ const CanopyShellContent: React.FC = () => {
     window.setTimeout(() => setWallpaperStatus(''), 2500);
   };
 
-  // Clock formatting driven exclusively by Settings
-  const use24Hour = settings.clockFormat === '24h';
-  const rawHours = now.getHours();
-  const displayHours = use24Hour ? rawHours : rawHours % 12 || 12;
-  const formattedHours = String(displayHours).padStart(2, '0');
-  const formattedMinutes = String(now.getMinutes()).padStart(2, '0');
-  const formattedSeconds = String(now.getSeconds()).padStart(2, '0');
-  const amPm = rawHours >= 12 ? 'PM' : 'AM';
-  const weekdayShort = now.toLocaleDateString('en-US', { weekday: 'short' });
-  const dayNumber = now.getDate();
-  const formattedDayDate = `${weekdayShort}, ${dayNumber}`;
-
-  const tempUnit = settings.temperatureUnit === 'fahrenheit' ? '°F' : '°C';
-
-  // Media display helpers (strictly music-reactive)
-  const hasLiveTrack = Boolean(
-    media.title &&
-      media.title.trim() !== '' &&
-      media.title.toLowerCase() !== 'no media' &&
-      media.title.toLowerCase() !== 'no active media',
-  );
-  const trackTitle = hasLiveTrack ? media.title : 'Bad Apple!!';
-  const trackArtist = hasLiveTrack ? media.artist || 'Alstroemeria Records' : 'Nomico • Touhou';
-
   const effectiveDuration = media.duration_secs > 2 ? media.duration_secs : 219;
   const effectivePosition = Math.min(effectiveDuration, Math.max(0, scrubPosition));
-  const progressFraction = Math.max(0, Math.min(1, effectivePosition / effectiveDuration));
-
-  const vinylSize = 76;
-  const vinylStroke = 3.5;
-  const vinylRadius = (vinylSize - vinylStroke * 2) / 2;
-  const vinylCircumference = 2 * Math.PI * vinylRadius;
-  const vinylDashoffset = vinylCircumference - progressFraction * vinylCircumference;
-
-  const compactUptime = stats.uptime_formatted
-    .replace(/^up\s+/i, '')
-    .replace(/hours?/i, 'h')
-    .replace(/minutes?/i, 'm')
-    .replace(/,\s*/g, ' ');
+  const tempUnit = settings.temperatureUnit === 'fahrenheit' ? '°F' : '°C';
 
   return (
     <div
@@ -1333,7 +1141,6 @@ const CanopyShellContent: React.FC = () => {
       {/* Top-Screen 2px Transparent Trigger Strip (only active when closed so it never intercepts or resets open tabs) */}
       {!panelOpen && settings.topHoverTrigger && !isWebViewHost() && (
         <div
-          data-tauri-drag-region="false"
           className="fixed top-0 left-0 right-0 h-[2px] z-50 bg-transparent pointer-events-auto cursor-pointer"
           onMouseEnter={() => {
             void setDropdownOpen(true);
@@ -1347,13 +1154,9 @@ const CanopyShellContent: React.FC = () => {
 
       {/* Main 850x430 Canopy Glassmorphism Dropdown Container */}
       {/* Main 850x430 Canopy Glassmorphism Dropdown Container — Always 100% visible inside window */}
-      <div
-        data-tauri-drag-region="false"
-        className="canopy-shell canopy-dropdown canopy-dropdown-open w-full h-full mt-0 rounded-t-none rounded-b-[24px] flex flex-col justify-between overflow-hidden"
-      >
+      <div className="canopy-shell canopy-dropdown canopy-dropdown-open w-full h-full mt-0 rounded-t-none rounded-b-[24px] flex flex-col justify-between overflow-hidden">
         {/* Top Centered Navigation Bar */}
         <header
-          data-tauri-drag-region="false"
           className="w-full shrink-0 flex items-center justify-between px-3 py-1 select-none relative"
           style={{ borderBottom: '1px solid var(--theme-border)' }}
         >
@@ -1361,10 +1164,8 @@ const CanopyShellContent: React.FC = () => {
           <div className="flex-1 flex items-center justify-center pointer-events-auto">
             <button
               type="button"
-              data-tauri-drag-region="false"
               onClick={() => {
                 setPaletteQuery('');
-                setPaletteIndex(0);
                 setPaletteOpen(true);
               }}
               className="p-1 rounded-full text-xs transition-all duration-150 cursor-pointer flex items-center justify-center opacity-75 hover:opacity-100 shadow-sm"
@@ -1381,7 +1182,6 @@ const CanopyShellContent: React.FC = () => {
 
           {/* Center: Tabs sized to fit comfortably without scrolling */}
           <nav
-            data-tauri-drag-region="false"
             className="flex items-center gap-0.5 p-0.5 rounded-full pointer-events-auto flex-nowrap justify-center shrink-0"
             style={{
               background: 'var(--theme-card)',
@@ -1394,7 +1194,6 @@ const CanopyShellContent: React.FC = () => {
                 <button
                   key={tab.id}
                   type="button"
-                  data-tauri-drag-region="false"
                   onClick={() => {
                     setActiveTab(tab.id);
                     void notifyTabSwitched();
@@ -1463,634 +1262,41 @@ const CanopyShellContent: React.FC = () => {
           {/* TAB 1: DASHBOARD (4-Zone Bento Grid — Zero Inline Toggles, Zero Slider Overlap)    */}
           {/* ================================================================================= */}
           {activeTab === 'dashboard' && (
-            <div className="w-full h-full flex items-stretch gap-2">
-              {/* ZONE 1: LEFT COLUMN (165px) — Weather Card (Top) + Clock Card (Bottom) */}
-              <div className="w-[165px] shrink-0 flex flex-col gap-2 h-full">
-                {/* Weather Card (Top — No inline °C/°F toggle) */}
-                <div
-                  role="button"
-                  tabIndex={0}
-                  data-tauri-drag-region="false"
-                  onClick={() => setActiveTab('weather')}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      setActiveTab('weather');
-                    }
-                  }}
-                  className="bento-card bento-card-interactive flex-1 p-3 flex flex-col justify-between text-left group relative overflow-hidden pointer-events-auto cursor-pointer"
-                  title="Click to open Weather station"
-                >
-                  <div className="flex items-start justify-between w-full">
-                    <div className="min-w-0">
-                      <span
-                        className="text-[9px] font-mono uppercase tracking-wider flex items-center gap-1"
-                        style={{ color: 'var(--theme-text-secondary)' }}
-                      >
-                        <MapPin
-                          className="w-2.5 h-2.5 shrink-0"
-                          style={{ color: 'var(--theme-accent)' }}
-                        />
-                        <span className="truncate">
-                          {weather.isLive ? weather.locationName.split(',')[0] : 'Weather offline'}
-                        </span>
-                      </span>
-                      <div className="mt-1.5 flex items-baseline gap-1">
-                        <span
-                          className="text-2xl font-bold tracking-tight tabular-nums leading-none"
-                          style={{ color: 'var(--theme-text-primary)' }}
-                        >
-                          {weather.isLive ? `${weather.temp}${tempUnit}` : 'Offline'}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div
-                      className="p-1.5 rounded-xl group-hover:scale-105 transition-transform shrink-0"
-                      style={{
-                        background: 'var(--theme-track)',
-                        border: '1px solid var(--theme-border)',
-                      }}
-                    >
-                      {weather.isLive ? (
-                        renderWeatherIcon(weather.code, weather.condition, 'w-5 h-5')
-                      ) : (
-                        <CloudSun
-                          className="w-5 h-5"
-                          style={{ color: 'var(--theme-text-secondary)' }}
-                        />
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="mt-1">
-                    <div
-                      className="text-xs font-semibold tracking-tight truncate"
-                      style={{ color: 'var(--theme-accent)' }}
-                    >
-                      {weather.isLive ? weather.condition : 'Click to configure'}
-                    </div>
-                    {weather.isLive ? (
-                      <div className="mt-1.5 flex items-center gap-1">
-                        <span
-                          className="px-1.5 py-0.5 rounded-md text-[9px] font-mono tabular-nums"
-                          style={{
-                            background: 'var(--theme-track)',
-                            color: 'var(--theme-text-secondary)',
-                          }}
-                        >
-                          H:<strong className="text-[#fab387] ml-0.5">{weather.high}°</strong>
-                        </span>
-                        <span
-                          className="px-1.5 py-0.5 rounded-md text-[9px] font-mono tabular-nums"
-                          style={{
-                            background: 'var(--theme-track)',
-                            color: 'var(--theme-text-secondary)',
-                          }}
-                        >
-                          L:<strong className="text-[#89b4fa] ml-0.5">{weather.low}°</strong>
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="mt-1.5 flex items-center gap-1">
-                        <span
-                          className="px-1.5 py-0.5 rounded-md text-[9px] font-mono tabular-nums"
-                          style={{
-                            background: 'var(--theme-track)',
-                            color: 'var(--theme-text-secondary)',
-                          }}
-                        >
-                          Tap to connect
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Clock Card (Bottom — No inline 24H toggle) */}
-                <div className="bento-card h-[164px] shrink-0 p-3 flex flex-col justify-between relative overflow-hidden">
-                  <div className="flex items-center justify-between">
-                    <span
-                      className="text-[9px] font-mono uppercase tracking-widest flex items-center gap-1"
-                      style={{ color: 'var(--theme-text-secondary)' }}
-                    >
-                      <Clock className="w-2.5 h-2.5" style={{ color: 'var(--theme-accent)' }} />
-                      <span>Time</span>
-                    </span>
-                    <div className="flex items-center gap-1">
-                      {settings.showBatteryChip && battery?.has_battery && (
-                        <span
-                          className="px-1.5 py-0.5 rounded-md text-[9px] font-mono flex items-center gap-1"
-                          style={{
-                            background: 'var(--theme-track)',
-                            color: battery.charging
-                              ? 'var(--theme-accent)'
-                              : 'var(--theme-text-secondary)',
-                          }}
-                          title={
-                            battery.charging
-                              ? `Charging — ${Math.round(battery.percent)}%`
-                              : `On battery — ${Math.round(battery.percent)}%`
-                          }
-                        >
-                          {battery.charging ? (
-                            <BatteryCharging className="w-2.5 h-2.5 shrink-0" />
-                          ) : (
-                            <Battery className="w-2.5 h-2.5 shrink-0" />
-                          )}
-                          <span>{Math.round(battery.percent)}%</span>
-                        </span>
-                      )}
-                      {!use24Hour && (
-                        <span
-                          className="px-1.5 py-0.5 rounded-md text-[9px] font-mono"
-                          style={{
-                            background: 'var(--theme-track)',
-                            color: 'var(--theme-accent)',
-                          }}
-                        >
-                          {amPm}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Digital Clock Stack */}
-                  <div className="my-auto flex flex-col items-center justify-center">
-                    <div className="flex items-baseline gap-1 font-mono font-bold tracking-tight tabular-nums">
-                      <span
-                        className="text-3xl leading-none"
-                        style={{ color: 'var(--theme-text-primary)' }}
-                      >
-                        {formattedHours}
-                      </span>
-                      <span
-                        className="text-2xl leading-none animate-pulse"
-                        style={{ color: 'var(--theme-accent)' }}
-                      >
-                        :
-                      </span>
-                      <span
-                        className="text-3xl leading-none"
-                        style={{ color: 'var(--theme-text-primary)' }}
-                      >
-                        {formattedMinutes}
-                      </span>
-                      {settings.showSeconds && (
-                        <span
-                          className="text-xs font-semibold ml-0.5"
-                          style={{ color: 'var(--theme-accent)' }}
-                        >
-                          :{formattedSeconds}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Day & Date Badge Underneath */}
-                  <div
-                    className="flex items-center justify-between pt-1.5"
-                    style={{ borderTop: '1px solid var(--theme-border)' }}
-                  >
-                    <span
-                      className="px-2 py-0.5 rounded-md text-[10px] font-semibold tracking-tight"
-                      style={{
-                        background: 'var(--theme-track)',
-                        color: 'var(--theme-accent)',
-                      }}
-                    >
-                      {formattedDayDate}
-                    </span>
-                    <span
-                      className="text-[9px] font-mono tabular-nums flex items-center gap-1"
-                      style={{ color: 'var(--theme-text-secondary)' }}
-                      title={`Uptime: ${stats.uptime_formatted}`}
-                    >
-                      <Clock className="w-2.5 h-2.5 opacity-70" />
-                      <span>up {compactUptime}</span>
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* ZONE 2: CENTER COLUMN (340px) — System Status Bar (Top) + Interactive Calendar (Bottom) */}
-              <div className="w-[340px] shrink-0 flex flex-col gap-2 h-full">
-                {/* System Status Bar (Top) */}
-                <div className="bento-card h-[44px] shrink-0 px-2.5 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <div
-                      className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
-                      style={{
-                        background: 'var(--theme-track)',
-                        border: '1px solid var(--theme-accent)',
-                      }}
-                      title={`Host: ${stats.hostname || 'Windows'}`}
-                    >
-                      <Monitor className="w-3.5 h-3.5" style={{ color: 'var(--theme-accent)' }} />
-                    </div>
-                    <span
-                      className="text-xs font-semibold tracking-tight truncate"
-                      style={{ color: 'var(--theme-text-primary)' }}
-                      title={stats.hostname}
-                    >
-                      {stats.hostname || 'Windows 11'}
-                    </span>
-                  </div>
-
-                  {/* Dashboard Quick Utility Actions (Awake, DND, Snip) */}
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      type="button"
-                      data-tauri-drag-region="false"
-                      onClick={async () => {
-                        const res = await toggleCaffeine();
-                        setCaffeineActive(res.enabled);
-                      }}
-                      className="canopy-pill px-2 py-1 flex items-center gap-1 text-[10px] font-medium transition-all hover:scale-105 active:scale-95 cursor-pointer pointer-events-auto"
-                      style={{
-                        background: caffeineActive ? 'var(--theme-accent)' : 'var(--theme-track)',
-                        color: caffeineActive
-                          ? 'var(--theme-on-accent, #111913)'
-                          : 'var(--theme-text-secondary)',
-                        border: '1px solid var(--theme-border)',
-                      }}
-                      title={
-                        caffeineActive
-                          ? 'Caffeine active: system will not sleep'
-                          : 'Caffeine: click to keep system awake'
-                      }
-                    >
-                      <Coffee className="w-3 h-3" />
-                      <span>Awake</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      data-tauri-drag-region="false"
-                      onClick={async () => {
-                        const next = !dndActive;
-                        setDndActive(next);
-                        updateSettings({ quietHoursEnabled: next });
-                        void toggleDnd().catch(() => {});
-                      }}
-                      className="canopy-pill px-2 py-1 flex items-center gap-1 text-[10px] font-medium transition-all hover:scale-105 active:scale-95 cursor-pointer pointer-events-auto"
-                      style={{
-                        background: dndActive ? 'var(--theme-accent)' : 'var(--theme-track)',
-                        color: dndActive
-                          ? 'var(--theme-on-accent, #111913)'
-                          : 'var(--theme-text-secondary)',
-                        border: '1px solid var(--theme-border)',
-                      }}
-                      title={
-                        dndActive
-                          ? 'Do Not Disturb active: hover & notifications silenced'
-                          : 'Do Not Disturb: click to silence hover and alerts'
-                      }
-                    >
-                      <BellOff className="w-3 h-3" />
-                      <span>DND</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      data-tauri-drag-region="false"
-                      onClick={() => void triggerScreenSnip()}
-                      className="canopy-pill px-2 py-1 flex items-center gap-1 text-[10px] font-medium transition-all hover:scale-105 active:scale-95 cursor-pointer pointer-events-auto"
-                      style={{
-                        background: 'var(--theme-track)',
-                        color: 'var(--theme-text-secondary)',
-                        border: '1px solid var(--theme-border)',
-                      }}
-                      title="Screen Snip: capture region and collapse Canopy"
-                    >
-                      <Scissors className="w-3 h-3" />
-                      <span>Snip</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Pinned Quick-Launch App Dock */}
-                <div
-                  className="bento-card h-[34px] shrink-0 px-2.5 flex items-center justify-between gap-1"
-                  style={{
-                    background: 'var(--theme-card)',
-                    border: '1px solid var(--theme-border)',
-                  }}
-                >
-                  <span
-                    className="text-[9px] font-mono uppercase tracking-wider"
-                    style={{ color: 'var(--theme-text-secondary)' }}
-                  >
-                    Quick Launch
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    {Array.from({ length: 6 }).map((_, slotIdx) => {
-                      const appId = (settings.pinnedApps || [
-                        'terminal',
-                        'explorer',
-                        'taskmgr',
-                        'msedge',
-                        'code',
-                      ])[slotIdx];
-                      if (!appId || appId.trim().length === 0) {
-                        return (
-                          <button
-                            key={`empty-${slotIdx}`}
-                            type="button"
-                            data-tauri-drag-region="false"
-                            onClick={() => setActiveTab('settings')}
-                            className="w-6 h-6 rounded-md border border-dashed border-white/20 flex items-center justify-center text-white/30 hover:text-white/70 hover:border-white/40 transition-all pointer-events-auto cursor-pointer"
-                            title={`Slot ${slotIdx + 1} Empty — Click to configure in Settings`}
-                          >
-                            <Plus className="w-2.5 h-2.5" />
-                          </button>
-                        );
-                      }
-                      const custom = settings.customApps?.[appId];
-                      const app = QUICK_APP_CATALOGUE[appId] || {
-                        label: custom?.label || appId,
-                        icon: custom?.icon_data_url ? (
-                          <img
-                            src={custom.icon_data_url}
-                            alt={custom.label}
-                            className="w-3.5 h-3.5 object-contain"
-                          />
-                        ) : (
-                          <AppWindow className="w-3.5 h-3.5" />
-                        ),
-                        path: custom?.path || appId,
-                      };
-                      return (
-                        <button
-                          key={`${appId}-${slotIdx}`}
-                          type="button"
-                          data-tauri-drag-region="false"
-                          onClick={() => void launchApp(app.path)}
-                          className="w-6 h-6 rounded-md flex items-center justify-center transition-all duration-150 hover:scale-110 active:scale-95 pointer-events-auto cursor-pointer"
-                          style={{
-                            background: 'var(--theme-track)',
-                            border: '1px solid var(--theme-border)',
-                            color: 'var(--theme-text-primary)',
-                          }}
-                          title={`Launch ${app.label}`}
-                        >
-                          {app.icon}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Interactive Calendar with Reminders (Bottom) */}
-                <CalendarCard
-                  className="flex-1 min-h-0"
-                  onToastNotification={handleToastNotification}
-                />
-              </div>
-
-              {/* ZONE 3: VERTICAL SLIDER DECK (Self-contained Bento Card, respects enableBrightnessSlider) */}
-              <div
-                className={`${
-                  settings.enableBrightnessSlider ? 'w-[114px]' : 'w-[92px]'
-                } shrink-0 h-full transition-[width] duration-200`}
-              >
-                <VerticalSliders
-                  volume={volume}
-                  onVolumeChange={handleVolumeChange}
-                  brightness={brightness}
-                  onBrightnessChange={handleBrightnessChange}
-                  showBrightness={settings.enableBrightnessSlider}
-                  showMic={settings.showMicSlider}
-                  micLevel={settings.showMicSlider ? micVolume : undefined}
-                  onMicLevelChange={settings.showMicSlider ? handleMicLevelChange : undefined}
-                  micMuted={settings.showMicSlider ? micMuted : undefined}
-                  onMicMuteToggle={settings.showMicSlider ? handleMicMuteToggle : undefined}
-                />
-              </div>
-
-              {/* ZONE 4: RIGHT COLUMN — Vinyl Ring Media Player + Small Music-Reactive Mascot */}
-              <div className="flex-1 min-w-[185px] h-full bento-card p-2.5 flex flex-col justify-between relative overflow-hidden">
-                <div className="flex items-center justify-between shrink-0">
-                  <span
-                    className="text-[9px] font-mono uppercase tracking-widest flex items-center gap-1"
-                    style={{ color: 'var(--theme-accent)' }}
-                  >
-                    <Disc className={`w-3 h-3 ${isMusicPlaying ? 'animate-spin' : ''}`} />
-                    <span>{isMusicPlaying ? 'Playing' : 'Paused'}</span>
-                  </span>
-                  {media.sessions && media.sessions.length > 1 ? (
-                    <button
-                      type="button"
-                      data-tauri-drag-region="false"
-                      onClick={() => {
-                        const sessions = media.sessions;
-                        if (!sessions || sessions.length <= 1) return;
-                        const currentIdx = sessions.findIndex((s) => s.is_current);
-                        const nextIdx = currentIdx >= 0 ? (currentIdx + 1) % sessions.length : 0;
-                        void handleSelectSession(sessions[nextIdx].id);
-                      }}
-                      title="Click to cycle media source (Spotify, Chrome, etc.)"
-                      className="text-[9px] font-mono truncate max-w-[100px] px-1.5 py-0.5 rounded border flex items-center gap-1 transition-colors cursor-pointer hover:border-[var(--theme-accent)]"
-                      style={{
-                        color: 'var(--theme-text-primary)',
-                        background: 'var(--theme-card, rgba(255, 255, 255, 0.05))',
-                        borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
-                      }}
-                    >
-                      <span className="truncate">{media.source_app || 'Audio'}</span>
-                      <ChevronRight className="w-2.5 h-2.5 shrink-0 opacity-70" />
-                    </button>
-                  ) : (
-                    <span
-                      className="text-[9px] font-mono truncate max-w-[90px]"
-                      style={{ color: 'var(--theme-text-secondary)' }}
-                    >
-                      {media.source_app || 'System Audio'}
-                    </span>
-                  )}
-                </div>
-
-                {/* Circular Vinyl Artwork with Circular Progress Ring */}
-                <div className="relative flex items-center justify-center my-0.5">
-                  <div
-                    className="relative flex items-center justify-center"
-                    style={{ width: vinylSize, height: vinylSize }}
-                  >
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none scale-125">
-                      <RadialGauge
-                        bands={spectrumBands}
-                        active={isMusicPlaying || spectrumBands.some((b) => b > 0.02)}
-                        size={110}
-                        accentColor="var(--theme-accent)"
-                        secondaryColor="#89dceb"
-                      />
-                    </div>
-                    <svg
-                      className="w-full h-full -rotate-90"
-                      viewBox={`0 0 ${vinylSize} ${vinylSize}`}
-                    >
-                      <circle
-                        cx={vinylSize / 2}
-                        cy={vinylSize / 2}
-                        r={vinylRadius}
-                        strokeWidth={vinylStroke}
-                        stroke="var(--theme-track)"
-                        fill="transparent"
-                      />
-                      <circle
-                        cx={vinylSize / 2}
-                        cy={vinylSize / 2}
-                        r={vinylRadius}
-                        strokeWidth={vinylStroke}
-                        stroke="var(--theme-accent)"
-                        strokeDasharray={vinylCircumference}
-                        strokeDashoffset={vinylDashoffset}
-                        strokeLinecap="round"
-                        fill="transparent"
-                        className="transition-all duration-500 ease-out"
-                      />
-                    </svg>
-
-                    <div
-                      role="button"
-                      tabIndex={0}
-                      data-tauri-drag-region="false"
-                      onClick={() => handleMediaControl('play_pause')}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          handleMediaControl('play_pause');
-                        }
-                      }}
-                      onWheel={(e) => {
-                        e.stopPropagation();
-                        const delta = e.deltaY < 0 ? 5 : -5;
-                        const duration = media.duration_secs || 300;
-                        const newPos = Math.max(0, Math.min(duration, media.position_secs + delta));
-                        void handleSeek(newPos);
-                      }}
-                      className={`absolute w-[56px] h-[56px] rounded-full overflow-hidden border border-white/15 shadow-lg flex items-center justify-center pointer-events-auto cursor-pointer ${
-                        isMusicPlaying ? 'animate-vinyl-spin' : ''
-                      }`}
-                      style={{
-                        background:
-                          'radial-gradient(circle at center, #2a2438 0%, #181825 55%, #0d0d14 100%)',
-                      }}
-                      title="Click vinyl to Play / Pause • Scroll wheel to seek ±5s"
-                    >
-                      {resolvedArtwork ? (
-                        <img
-                          src={resolvedArtwork}
-                          alt={trackTitle}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <>
-                          <div className="absolute inset-2 rounded-full border border-white/[0.07] pointer-events-none" />
-                          <div
-                            className="w-4 h-4 rounded-full flex items-center justify-center"
-                            style={{ backgroundColor: 'var(--theme-accent)' }}
-                          >
-                            <div className="w-1.5 h-1.5 rounded-full bg-[#11111b]" />
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Track Title & Artist */}
-                <div className="text-center px-1 min-w-0">
-                  <div
-                    className="text-xs font-bold truncate leading-tight"
-                    style={{ color: 'var(--theme-text-primary)' }}
-                    title={trackTitle}
-                  >
-                    {trackTitle}
-                  </div>
-                  <div
-                    className="text-[10px] truncate mt-0.5"
-                    style={{ color: 'var(--theme-text-secondary)' }}
-                    title={trackArtist}
-                  >
-                    {trackArtist}
-                  </div>
-                </div>
-                {/* Dashboard Audio Visualizer Bar */}
-                <div className="w-full h-3.5 flex items-end justify-center gap-0.5 px-2 my-0.5 overflow-hidden">
-                  {Array.from({ length: 18 }, (_, i) => {
-                    const rawAmp = spectrumBands[i * 2] || 0;
-                    const amp = rawAmp > 0.005 ? Math.min(1, rawAmp * 2.5) : 0;
-                    const heightPercent = Math.max(10, Math.min(100, Math.round(amp * 100)));
-                    return (
-                      <div
-                        key={i}
-                        className="flex-1 rounded-t-sm transition-all duration-75"
-                        style={{
-                          height: `${heightPercent}%`,
-                          background:
-                            'linear-gradient(180deg, var(--theme-accent), var(--theme-border))',
-                          opacity: amp > 0.04 ? 0.95 : 0.25,
-                        }}
-                      />
-                    );
-                  })}
-                </div>
-
-                {/* Playback Transport Controls */}
-                <div className="flex items-center justify-center gap-2 my-0.5">
-                  <button
-                    type="button"
-                    data-tauri-drag-region="false"
-                    onClick={handlePrev}
-                    className="p-1.5 rounded-full transition-all active:scale-90 pointer-events-auto cursor-pointer"
-                    style={{ background: 'var(--theme-track)', color: 'var(--theme-text-primary)' }}
-                    title="Previous Track"
-                  >
-                    <SkipBack className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    data-tauri-drag-region="false"
-                    onClick={handlePlayPause}
-                    className="p-2 rounded-full transition-all active:scale-95 pointer-events-auto cursor-pointer shadow-md"
-                    style={{
-                      background: 'var(--theme-accent)',
-                      color: '#11111b',
-                    }}
-                    title={isMusicPlaying ? 'Pause' : 'Play'}
-                  >
-                    {isMusicPlaying ? (
-                      <Pause className="w-3.5 h-3.5" />
-                    ) : (
-                      <Play className="w-3.5 h-3.5 ml-0.5" />
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    data-tauri-drag-region="false"
-                    onClick={handleNext}
-                    className="p-1.5 rounded-full transition-all active:scale-90 pointer-events-auto cursor-pointer"
-                    style={{ background: 'var(--theme-track)', color: 'var(--theme-text-primary)' }}
-                    title="Next Track"
-                  >
-                    <SkipForward className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                {/* Mascot */}
-                {settings.mascotMode !== 'none' && (
-                  <div className="pt-0.5 pb-0.5 flex items-center justify-center h-[90px] shrink-0">
-                    <CanopyMascot
-                      isPlaying={isMusicPlaying}
-                      showSleepZzz={false}
-                      showAmbientGlow={false}
-                      className="h-full max-h-[88px] w-auto drop-shadow-sm select-none"
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
+            <DashboardView
+              stats={stats}
+              weather={weather}
+              currentTime={now}
+              battery={battery}
+              caffeineActive={caffeineActive}
+              setCaffeineActive={setCaffeineActive}
+              dndActive={dndActive}
+              setDndActive={setDndActive}
+              volume={volume}
+              onVolumeChange={handleVolumeChange}
+              brightness={brightness}
+              onBrightnessChange={handleBrightnessChange}
+              micVolume={micVolume}
+              onMicLevelChange={handleMicLevelChange}
+              micMuted={micMuted}
+              onMicMuteToggle={handleMicMuteToggle}
+              media={media}
+              resolvedArtwork={resolvedArtwork}
+              isMusicPlaying={isMusicPlaying}
+              spectrumBands={spectrumBands}
+              effectivePosition={effectivePosition}
+              effectiveDuration={effectiveDuration}
+              onPlayPause={handlePlayPause}
+              onPrev={handlePrev}
+              onNext={handleNext}
+              onSeek={handleSeek}
+              onSelectSession={handleSelectSession}
+              onMediaControl={handleMediaControl}
+              onNavigateTab={(tab) => {
+                setActiveTab(tab as TabId);
+                void notifyTabSwitched();
+              }}
+              onToastNotification={handleToastNotification}
+            />
           )}
 
           {/* ================================================================================= */}
@@ -2110,6 +1316,7 @@ const CanopyShellContent: React.FC = () => {
                 onNext={handleNext}
                 onSeek={handleSeek}
                 onSelectSession={handleSelectSession}
+                initialSubView={mediaSubView}
               />
             </ErrorBoundary>
           )}
@@ -2117,7 +1324,9 @@ const CanopyShellContent: React.FC = () => {
           {/* ================================================================================= */}
           {/* TAB 3: PERFORMANCE (3 Concentric Gauges + Network Traffic + Expandable Drawer)    */}
           {/* ================================================================================= */}
-          {activeTab === 'performance' && <PerformanceView stats={stats} />}
+          {activeTab === 'performance' && (
+            <PerformanceView stats={stats} initialDetailsOpen={performanceDetails} />
+          )}
 
           {/* ================================================================================= */}
           {/* TAB 4 (OPTIONAL): APPS (Searchable Installed Windows Applications & Shortcuts)    */}
@@ -2265,127 +1474,14 @@ const CanopyShellContent: React.FC = () => {
         </main>
       </div>
 
-      {/* Search / Command Palette Overlay (printable key opens, Esc closes, Enter runs) */}
-      {paletteOpen && (
-        <div
-          data-tauri-drag-region="false"
-          className="absolute inset-0 z-[70] flex items-start justify-center pt-12 px-4 bg-[#0b0b12]/55 backdrop-blur-[3px] pointer-events-auto"
-          onMouseDown={() => setPaletteOpen(false)}
-        >
-          <div
-            data-tauri-drag-region="false"
-            className="w-[520px] rounded-2xl overflow-hidden pointer-events-auto"
-            style={{
-              background: 'var(--theme-bg)',
-              border: '1px solid var(--theme-border)',
-              boxShadow: '0 24px 60px rgba(0, 0, 0, 0.6)',
-            }}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <div
-              className="flex items-center gap-2 px-3 py-2"
-              style={{ borderBottom: '1px solid var(--theme-border)' }}
-            >
-              <Search className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--theme-accent)' }} />
-              <input
-                autoFocus
-                type="text"
-                data-tauri-drag-region="false"
-                value={paletteQuery}
-                placeholder="Type a command…"
-                onChange={(e) => {
-                  setPaletteQuery(e.target.value);
-                  setPaletteIndex(0);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setPaletteOpen(false);
-                  } else if (e.key === 'ArrowDown') {
-                    e.preventDefault();
-                    setPaletteIndex((prev) =>
-                      paletteMatches.length === 0 ? 0 : (prev + 1) % paletteMatches.length,
-                    );
-                  } else if (e.key === 'ArrowUp') {
-                    e.preventDefault();
-                    setPaletteIndex((prev) =>
-                      paletteMatches.length === 0
-                        ? 0
-                        : (prev - 1 + paletteMatches.length) % paletteMatches.length,
-                    );
-                  } else if (e.key === 'Enter') {
-                    e.preventDefault();
-                    const command = paletteMatches[paletteIndex];
-                    if (command) {
-                      setPaletteOpen(false);
-                      command.run();
-                    }
-                  }
-                }}
-                className="flex-1 bg-transparent text-xs focus:outline-none pointer-events-auto"
-                style={{ color: 'var(--theme-text-primary)' }}
-              />
-              <span
-                className="px-1.5 py-0.5 rounded-md text-[9px] font-mono shrink-0"
-                style={{ background: 'var(--theme-track)', color: 'var(--theme-text-secondary)' }}
-              >
-                Esc
-              </span>
-            </div>
-
-            <div className="max-h-[230px] overflow-y-auto py-1">
-              {paletteMatches.length === 0 ? (
-                <div
-                  className="px-3 py-3 text-[11px]"
-                  style={{ color: 'var(--theme-text-secondary)' }}
-                >
-                  No matching commands
-                </div>
-              ) : (
-                paletteMatches.map((command, index) => {
-                  const highlighted = index === paletteIndex;
-                  return (
-                    <button
-                      key={command.id}
-                      type="button"
-                      data-tauri-drag-region="false"
-                      onMouseEnter={() => setPaletteIndex(index)}
-                      onClick={() => {
-                        setPaletteOpen(false);
-                        command.run();
-                      }}
-                      className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[11px] transition-colors duration-150 pointer-events-auto cursor-pointer"
-                      style={{
-                        background: highlighted ? 'var(--theme-track)' : 'transparent',
-                        color: 'var(--theme-text-primary)',
-                      }}
-                    >
-                      <span
-                        className="shrink-0"
-                        style={{
-                          color: highlighted
-                            ? 'var(--theme-accent)'
-                            : 'var(--theme-text-secondary)',
-                        }}
-                      >
-                        {command.icon}
-                      </span>
-                      <span className="flex-1 truncate">{command.label}</span>
-                      <span
-                        className="text-[9px] font-mono shrink-0"
-                        style={{ color: 'var(--theme-text-secondary)' }}
-                      >
-                        {command.hint}
-                      </span>
-                    </button>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        commands={paletteCommands}
+        onVolumeChange={handleVolumeChange}
+        onBrightnessChange={handleBrightnessChange}
+        initialQuery={paletteQuery}
+      />
     </div>
   );
 };

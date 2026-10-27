@@ -206,7 +206,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ stats }) => {
             <button
               key={preset.label}
               type="button"
-              data-tauri-drag-region="false"
               onClick={() => executeCommand(preset.cmd)}
               className="px-2 py-0.5 rounded-md text-[10px] transition-all pointer-events-auto cursor-pointer"
               style={{
@@ -222,10 +221,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ stats }) => {
         </div>
       </div>
 
-      <div
-        data-tauri-drag-region="false"
-        className="flex-1 overflow-y-auto py-2.5 pr-1 space-y-3 text-[11px] leading-relaxed select-text pointer-events-auto"
-      >
+      <div className="flex-1 overflow-y-auto py-2.5 pr-1 space-y-3 text-[11px] leading-relaxed select-text pointer-events-auto">
         {terminalHistory.map((item) => (
           <div key={item.id} className="space-y-1.5">
             <div className="flex items-center gap-2 text-xs">

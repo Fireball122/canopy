@@ -191,7 +191,6 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
 
   return (
     <div
-      data-tauri-drag-region="false"
       style={{ pointerEvents: 'auto' }}
       className="bento-card h-full w-full p-2 flex items-stretch justify-center gap-1.5 overflow-hidden select-none"
     >
@@ -205,7 +204,6 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
             key={slider.id}
             role="group"
             aria-label={slider.label}
-            data-tauri-drag-region="false"
             style={{
               pointerEvents: 'auto',
               cursor: 'pointer',
@@ -233,7 +231,6 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
               max={100}
               value={slider.id === 'mic' ? clampedMic : slider.value}
               aria-label={slider.label}
-              data-tauri-drag-region="false"
               style={{ pointerEvents: 'none', cursor: 'pointer' }}
               onChange={(e) => applySliderValue(slider.id, Number(e.target.value))}
               className="sr-only"
@@ -241,7 +238,6 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
 
             {/* Vertical fill bar anchored at bottom (reacts 100% to wallpaper theme colors) */}
             <div
-              data-tauri-drag-region="false"
               style={{
                 height: `${Math.max(6, slider.value)}%`,
                 pointerEvents: 'none',
@@ -257,7 +253,6 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
 
             {/* Top percentage readout */}
             <div
-              data-tauri-drag-region="false"
               style={{ pointerEvents: 'none' }}
               className={`relative z-10 px-1 py-0.5 rounded-full text-[9px] font-mono font-semibold tabular-nums tracking-tight transition-all duration-150 ${
                 showTooltip ? 'bg-black/75 text-white shadow-sm scale-105' : 'opacity-85'
@@ -268,7 +263,6 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
 
             {/* Subtle vertical track tick marks */}
             <div
-              data-tauri-drag-region="false"
               style={{ pointerEvents: 'none' }}
               className="relative z-10 flex flex-col items-center gap-2 opacity-25 my-auto"
             >
@@ -283,7 +277,6 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
             <button
               type="button"
               data-slider-icon-btn="true"
-              data-tauri-drag-region="false"
               aria-label={`Toggle ${slider.label}`}
               onClick={
                 slider.id === 'volume'

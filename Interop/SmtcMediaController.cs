@@ -574,16 +574,17 @@ public sealed class SmtcMediaController : IDisposable
                 var current = session.GetPlaybackInfo()?.AutoRepeatMode ?? Windows.Media.MediaPlaybackAutoRepeatMode.None;
                 var next = current switch
                 {
-                    Windows.Media.MediaPlaybackAutoRepeatMode.None => Windows.Media.MediaPlaybackAutoRepeatMode.List,
-                    Windows.Media.MediaPlaybackAutoRepeatMode.List => Windows.Media.MediaPlaybackAutoRepeatMode.Track,
+                    Windows.Media.MediaPlaybackAutoRepeatMode.None => Windows.Media.MediaPlaybackAutoRepeatMode.Track,
+                    Windows.Media.MediaPlaybackAutoRepeatMode.Track => Windows.Media.MediaPlaybackAutoRepeatMode.List,
                     _ => Windows.Media.MediaPlaybackAutoRepeatMode.None
                 };
                 bool ok = await session.TryChangeAutoRepeatModeAsync(next);
                 if (ok) return (int)next;
             }
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.Log($"[SmtcMediaController] CycleRepeatMode error: {ex.Message}");
         }
         return 0;
     }

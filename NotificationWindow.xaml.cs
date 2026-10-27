@@ -68,7 +68,7 @@ public partial class NotificationWindow : Window
             {
                 accentColor = (Color)ColorConverter.ConvertFromString(accentColorHex.Trim());
             }
-            catch { }
+            catch (Exception ex) { DiagnosticsLog.Log($"[NotificationWindow] AccentColor convert error: {ex.Message}"); }
         }
 
         var accentBrush = new SolidColorBrush(accentColor);
@@ -100,7 +100,7 @@ public partial class NotificationWindow : Window
                 bgBrush.Freeze();
                 NotificationPill.Background = bgBrush;
             }
-            catch { }
+            catch (Exception ex) { DiagnosticsLog.Log($"[NotificationWindow] BgColor convert error: {ex.Message}"); }
         }
     }
 
@@ -131,7 +131,7 @@ public partial class NotificationWindow : Window
                     string p = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Canopy", "error.log");
                     System.IO.File.AppendAllText(p, $"[{DateTime.Now:O}] [ShowNotification Error] {ex}\r\n");
                 }
-                catch { }
+                catch (Exception logEx) { DiagnosticsLog.Log($"[NotificationWindow] Fallback log error: {logEx.Message}"); }
             }
         });
     }
@@ -333,7 +333,7 @@ public partial class NotificationWindow : Window
             {
                 Close();
             }
-            catch { }
+            catch (Exception ex) { DiagnosticsLog.Log($"[NotificationWindow] Close error: {ex.Message}"); }
         };
 
         PillTranslate.BeginAnimation(TranslateTransform.YProperty, retractAnim);

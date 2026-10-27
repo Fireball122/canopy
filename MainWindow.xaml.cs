@@ -70,6 +70,7 @@ public partial class MainWindow : Window
     private bool _pauseInFullscreen = true;
     private bool _pauseInPresentation = true;
     private bool _quietHoursEnabled;
+    private bool _dndEnabled;
     private string _quietHoursStart = "22:00";
     private string _quietHoursEnd = "07:00";
     private string _panelMonitorMode = "cursor";
@@ -89,6 +90,8 @@ public partial class MainWindow : Window
     private readonly HashSet<string> _firedReminders = new(StringComparer.OrdinalIgnoreCase);
     private bool _notificationVisible;
     private bool _caffeineEnabled;
+    private static readonly char[] ChecksumLineSeparators = ['\r', '\n'];
+    private static readonly char[] ChecksumSpaceSeparators = [' ', '\t'];
 
     /// <summary>Deferred reminders are dropped once they are this stale, so a long game session never
     /// dumps a burst of overdue alerts the moment gameplay ends.</summary>
@@ -294,7 +297,8 @@ public partial class MainWindow : Window
         double targetZoom = physicalWidth > 0 ? (double)physicalWidth / (scaleX * BaseDesignWidth) : 1.0;
         int cornerRadius = (int)Math.Round(24.0 * scaleY * targetZoom);
 
-        Win32.ApplyWindowRoundedRegion(_hwnd, physicalWidth, physicalHeight, cornerRadius);
+        // Clear GDI 1-bit clipping region in favor of DWM alpha composition with CSS border-radius
+        Win32.ClearWindowRegion(_hwnd);
         ApplyAdaptiveZoom(panelMonitor);
     }
 
@@ -1015,9 +1019,21 @@ public partial class MainWindow : Window
 
             case "toggle_dnd":
             {
-                _quietHoursEnabled = !_quietHoursEnabled;
+                _dndEnabled = !_dndEnabled;
                 RefreshFullscreenSuppression();
-                return new { enabled = _quietHoursEnabled };
+                return new { enabled = _dndEnabled };
+            }
+
+            case "get_dnd_status":
+            {
+                return new { enabled = _dndEnabled };
+            }
+
+            case "get_version":
+            {
+                var ver = typeof(MainWindow).Assembly.GetName().Version;
+                string verStr = ver != null ? $"{ver.Major}.{ver.Minor}.{ver.Build}" : "1.0.7";
+                return new { version = verStr };
             }
 
             case "get_wallpapers":
@@ -1143,6 +1159,54 @@ public partial class MainWindow : Window
                                 await response.Content.CopyToAsync(fs);
                             }
 
+                            // Verify SHA-256 against release checksums if available
+                            try
+                            {
+                                string fileName = Path.GetFileName(new Uri(downloadUrl).AbsolutePath);
+                                int lastSlash = downloadUrl.LastIndexOf('/');
+                                string checksumUrl = (lastSlash >= 0 ? downloadUrl[..(lastSlash + 1)] : downloadUrl) + "checksums-sha256.txt";
+                                using var chkResp = await client.GetAsync(checksumUrl);
+                                if (chkResp.IsSuccessStatusCode)
+                                {
+                                    string chkText = await chkResp.Content.ReadAsStringAsync();
+                                    string? expectedHash = null;
+                                    foreach (string rawLine in chkText.Split(ChecksumLineSeparators, StringSplitOptions.RemoveEmptyEntries))
+                                    {
+                                        string line = rawLine.Trim();
+                                        var parts = line.Split(ChecksumSpaceSeparators, StringSplitOptions.RemoveEmptyEntries);
+                                        if (parts.Length >= 2)
+                                        {
+                                            string h = parts[0].Trim().ToLowerInvariant();
+                                            string f = parts[1].TrimStart('*').Trim();
+                                            if (string.Equals(f, fileName, StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                expectedHash = h;
+                                                break;
+                                            }
+                                        }
+                                    }
+
+                                    if (!string.IsNullOrEmpty(expectedHash))
+                                    {
+                                        using var sha = System.Security.Cryptography.SHA256.Create();
+                                        await using var rfs = File.OpenRead(installerPath);
+                                        byte[] actualBytes = await sha.ComputeHashAsync(rfs);
+                                        string actualHash = BitConverter.ToString(actualBytes).Replace("-", "").ToLowerInvariant();
+                                        if (!string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            _log.Write($"[apply_update] SECURITY ALERT: SHA-256 mismatch for {fileName}. Expected {expectedHash}, got {actualHash}. Aborting execution.");
+                                            try { File.Delete(installerPath); } catch { }
+                                            return;
+                                        }
+                                        _log.Write($"[apply_update] SHA-256 verified for {fileName}: {actualHash}");
+                                    }
+                                }
+                            }
+                            catch (Exception chkEx)
+                            {
+                                _log.Write($"[apply_update] Checksum fetch warning: {chkEx.Message}");
+                            }
+
                             var psi = new ProcessStartInfo
                             {
                                 FileName = installerPath,
@@ -1150,7 +1214,6 @@ public partial class MainWindow : Window
                                 UseShellExecute = true
                             };
                             Process.Start(psi);
-
                             await Dispatcher.InvokeAsync(() =>
                             {
                                 Application.Current.Shutdown();
@@ -2310,6 +2373,11 @@ public partial class MainWindow : Window
     /// </summary>
     private bool ShouldSuppressTrigger(Win32.RECT currentMonitor)
     {
+        if (_dndEnabled)
+        {
+            return true;
+        }
+
         if (_quietHoursEnabled && IsWithinQuietHours())
         {
             return true;
@@ -2734,7 +2802,7 @@ public partial class MainWindow : Window
 
     public void SetTheme(string themeMode)
     {
-        EmitFrontendEvent("canopy:theme-changed", new { theme = themeMode });
+        EmitFrontendEvent("canopy:theme-changed", new { theme = themeMode, mode = themeMode });
     }
 
     public async Task MediaPlayPauseAsync()

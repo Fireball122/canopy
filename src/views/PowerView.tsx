@@ -112,10 +112,7 @@ export const PowerView: React.FC<PowerViewProps> = ({ stats, onActionTriggered }
   const pendingItem = actionItems.find((a) => a.id === pendingAction);
 
   return (
-    <div
-      data-tauri-drag-region="false"
-      className="w-full h-full flex flex-col justify-between p-3 select-none pointer-events-auto overflow-hidden relative"
-    >
+    <div className="w-full h-full flex flex-col justify-between p-3 select-none pointer-events-auto overflow-hidden relative">
       {/* Single Horizontal Row of Monochromatic Theme-Adaptive Logo Tiles */}
       <div className="flex-1 w-full flex items-center justify-center my-auto px-1">
         <div className="grid grid-cols-5 gap-3.5 w-full">
@@ -123,7 +120,6 @@ export const PowerView: React.FC<PowerViewProps> = ({ stats, onActionTriggered }
             <button
               key={item.id}
               type="button"
-              data-tauri-drag-region="false"
               onClick={() => handleActionClick(item)}
               className="group h-[190px] rounded-2xl border flex flex-col items-center justify-center gap-3 transition-all duration-200 hover:scale-[1.03] active:scale-95 pointer-events-auto cursor-pointer focus:outline-none relative overflow-hidden"
               style={{
@@ -219,7 +215,6 @@ export const PowerView: React.FC<PowerViewProps> = ({ stats, onActionTriggered }
       {/* Theme-Adaptive 4-second Confirmation Modal */}
       {pendingItem && (
         <div
-          data-tauri-drag-region="false"
           className="absolute inset-2.5 z-40 rounded-2xl p-5 flex flex-col justify-between backdrop-blur-2xl border shadow-2xl pointer-events-auto"
           style={{
             background: 'var(--theme-bg, rgba(18, 18, 24, 0.97))',
@@ -261,7 +256,6 @@ export const PowerView: React.FC<PowerViewProps> = ({ stats, onActionTriggered }
 
             <button
               type="button"
-              data-tauri-drag-region="false"
               onClick={clearPendingCountdown}
               className="p-1.5 rounded-full hover:bg-white/10 active:scale-95 transition-all pointer-events-auto cursor-pointer"
               style={{ color: 'var(--theme-text-secondary, #9E9EA7)' }}
@@ -289,7 +283,6 @@ export const PowerView: React.FC<PowerViewProps> = ({ stats, onActionTriggered }
           <div className="flex items-center justify-end gap-3">
             <button
               type="button"
-              data-tauri-drag-region="false"
               onClick={clearPendingCountdown}
               className="px-4 py-1.5 rounded-xl text-xs font-semibold border transition-all hover:bg-white/10 active:scale-95 pointer-events-auto cursor-pointer"
               style={{
@@ -303,7 +296,6 @@ export const PowerView: React.FC<PowerViewProps> = ({ stats, onActionTriggered }
 
             <button
               type="button"
-              data-tauri-drag-region="false"
               onClick={() => void triggerDirectAction(pendingItem.id)}
               className="px-4 py-1.5 rounded-xl text-xs font-bold transition-all active:scale-95 pointer-events-auto cursor-pointer flex items-center gap-1.5 shadow-lg"
               style={{

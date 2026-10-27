@@ -122,10 +122,22 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
     return [];
   });
 
-  const firedNotificationsRef = useRef<Record<string, true>>({});
-  const toastCallbackRef = useRef(onToastNotification);
-  toastCallbackRef.current = onToastNotification;
-
+  useEffect(() => {
+    const handleEventsUpdated = (e: Event) => {
+      const detail = (e as CustomEvent<CalendarEvent[]>).detail;
+      if (Array.isArray(detail)) {
+        setEvents(detail);
+      } else {
+        try {
+          const raw =
+            typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEY) : null;
+          if (raw) setEvents(JSON.parse(raw));
+        } catch {}
+      }
+    };
+    window.addEventListener('calendar-events-updated', handleEventsUpdated);
+    return () => window.removeEventListener('calendar-events-updated', handleEventsUpdated);
+  }, []);
   useEffect(() => {
     try {
       if (typeof window !== 'undefined') {
@@ -158,46 +170,7 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
     return () => window.cancelAnimationFrame(raf);
   }, [timePickerOpen]);
 
-  // Every 30 seconds, check if any reminder matches today's YYYY-MM-DD and current HH:MM
-  useEffect(() => {
-    const checkDueReminders = () => {
-      const now = new Date();
-      const y = now.getFullYear();
-      const m = String(now.getMonth() + 1).padStart(2, '0');
-      const d = String(now.getDate()).padStart(2, '0');
-      const currentIso = `${y}-${m}-${d}`;
-      const currentHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(
-        now.getMinutes(),
-      ).padStart(2, '0')}`;
-
-      for (const ev of events) {
-        if (ev.date === currentIso && ev.time === currentHHMM) {
-          const fireKey = `${ev.id}:${currentIso}:${currentHHMM}`;
-          if (!firedNotificationsRef.current[fireKey]) {
-            firedNotificationsRef.current[fireKey] = true;
-            toastCallbackRef.current?.(`Reminder: ${ev.text}`);
-            if (typeof window !== 'undefined' && 'Notification' in window) {
-              if (Notification.permission === 'granted') {
-                new Notification('Canopy Reminder', { body: ev.text });
-              } else if (Notification.permission === 'default') {
-                Notification.requestPermission()
-                  .then((perm) => {
-                    if (perm === 'granted') {
-                      new Notification('Canopy Reminder', { body: ev.text });
-                    }
-                  })
-                  .catch(() => undefined);
-              }
-            }
-          }
-        }
-      }
-    };
-
-    checkDueReminders();
-    const timer = window.setInterval(checkDueReminders, 30_000);
-    return () => window.clearInterval(timer);
-  }, [events]);
+  // Reminders are scheduled and monitored exclusively by the native host (MainWindow.CheckDueReminders)
 
   const viewYear = viewDate.getFullYear();
   const viewMonth = viewDate.getMonth();
@@ -331,7 +304,6 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
 
   return (
     <div
-      data-tauri-drag-region="false"
       style={{
         pointerEvents: 'auto',
         background: 'var(--theme-card, rgba(255, 255, 255, 0.035))',
@@ -341,15 +313,10 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
       className={`relative flex flex-col justify-between border shadow-[inset_0_1px_0_0_rgba(255,255,255,0.08)] rounded-2xl p-3 transition-all duration-200 select-none overflow-hidden ${className}`}
     >
       {/* Header: < Month Year > + Reminder drawer button */}
-      <div
-        data-tauri-drag-region="false"
-        style={{ pointerEvents: 'auto' }}
-        className="flex items-center justify-between mb-1.5"
-      >
+      <div style={{ pointerEvents: 'auto' }} className="flex items-center justify-between mb-1.5">
         <div className="flex items-center gap-0.5">
           <button
             type="button"
-            data-tauri-drag-region="false"
             style={{
               pointerEvents: 'auto',
               cursor: 'pointer',
@@ -366,7 +333,6 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
 
           <button
             type="button"
-            data-tauri-drag-region="false"
             style={{
               pointerEvents: 'auto',
               cursor: 'pointer',
@@ -387,7 +353,6 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
 
           <button
             type="button"
-            data-tauri-drag-region="false"
             style={{
               pointerEvents: 'auto',
               cursor: 'pointer',
@@ -405,7 +370,6 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
 
         <button
           type="button"
-          data-tauri-drag-region="false"
           style={{
             pointerEvents: 'auto',
             cursor: 'pointer',
@@ -448,7 +412,6 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
 
       {/* 6-row x 7-col date grid */}
       <div
-        data-tauri-drag-region="false"
         style={{ pointerEvents: 'auto' }}
         className="grid grid-cols-7 grid-rows-6 gap-y-0.5 gap-x-0.5 flex-1 items-center"
       >
@@ -490,7 +453,6 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
             <button
               key={cell.isoKey}
               type="button"
-              data-tauri-drag-region="false"
               style={inlineStyle}
               onClick={() => handleSelectCell(cell)}
               className={`pointer-events-auto cursor-pointer relative h-6 w-6 mx-auto flex flex-col items-center justify-center rounded-full text-[11px] tabular-nums transition-all duration-150 active:scale-90 ${
@@ -516,7 +478,6 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
       {/* Compact inline reminder drawer / popover */}
       {drawerOpen && (
         <div
-          data-tauri-drag-region="false"
           style={{
             pointerEvents: 'auto',
             background: 'var(--theme-bg, rgba(18, 18, 24, 0.96))',
@@ -549,7 +510,6 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
             </div>
             <button
               type="button"
-              data-tauri-drag-region="false"
               style={{
                 pointerEvents: 'auto',
                 cursor: 'pointer',
@@ -567,7 +527,6 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
           </div>
 
           <div
-            data-tauri-drag-region="false"
             style={{ pointerEvents: 'auto' }}
             className="flex-1 overflow-y-auto space-y-1 pr-0.5 my-0.5"
           >
@@ -582,7 +541,6 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
               selectedDayEvents.map((ev) => (
                 <div
                   key={ev.id}
-                  data-tauri-drag-region="false"
                   style={{
                     pointerEvents: 'auto',
                     background: 'var(--theme-card, rgba(255, 255, 255, 0.05))',
@@ -612,7 +570,6 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
                   </div>
                   <button
                     type="button"
-                    data-tauri-drag-region="false"
                     style={{
                       pointerEvents: 'auto',
                       cursor: 'pointer',
@@ -631,7 +588,6 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
 
           <form
             onSubmit={handleAddReminder}
-            data-tauri-drag-region="false"
             style={{
               pointerEvents: 'auto',
               borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.1))',
@@ -643,7 +599,6 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
               value={newReminderText}
               onChange={(e) => setNewReminderText(e.target.value)}
               placeholder="New reminder..."
-              data-tauri-drag-region="false"
               style={{
                 pointerEvents: 'auto',
                 background: 'var(--theme-track, rgba(255, 255, 255, 0.08))',
@@ -655,7 +610,6 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
             <button
               type="button"
               onClick={handleOpenTimePicker}
-              data-tauri-drag-region="false"
               title="Select reminder time"
               style={{
                 pointerEvents: 'auto',
@@ -676,7 +630,6 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
             </button>
             <button
               type="submit"
-              data-tauri-drag-region="false"
               style={{
                 pointerEvents: 'auto',
                 cursor: 'pointer',
@@ -693,7 +646,6 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
           {/* Interactive Time Selector Popup Modal */}
           {timePickerOpen && (
             <div
-              data-tauri-drag-region="false"
               style={{
                 pointerEvents: 'auto',
                 background: 'var(--theme-bg, rgba(16, 16, 22, 0.98))',
@@ -727,7 +679,6 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
 
               {/* Scrollable / Clickable Selector Columns: Hours (1-12), Minutes (00-59), AM/PM */}
               <div
-                data-tauri-drag-region="false"
                 style={{ pointerEvents: 'auto' }}
                 className="grid grid-cols-3 gap-1.5 flex-1 min-h-0 my-1.5"
               >
@@ -747,7 +698,6 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
                   </div>
                   <div
                     ref={hourColumnRef}
-                    data-tauri-drag-region="false"
                     style={{ pointerEvents: 'auto' }}
                     className="flex-1 overflow-y-auto space-y-0.5 pr-0.5"
                   >
@@ -758,7 +708,6 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
                           key={h}
                           type="button"
                           data-active={active}
-                          data-tauri-drag-region="false"
                           onClick={() => setPickerHour(h)}
                           style={{
                             pointerEvents: 'auto',
@@ -793,7 +742,6 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
                   </div>
                   <div
                     ref={minuteColumnRef}
-                    data-tauri-drag-region="false"
                     style={{ pointerEvents: 'auto' }}
                     className="flex-1 overflow-y-auto space-y-0.5 pr-0.5"
                   >
@@ -804,7 +752,6 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
                           key={m}
                           type="button"
                           data-active={active}
-                          data-tauri-drag-region="false"
                           onClick={() => setPickerMinute(m)}
                           style={{
                             pointerEvents: 'auto',
@@ -850,7 +797,6 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
                         <button
                           key={period}
                           type="button"
-                          data-tauri-drag-region="false"
                           onClick={() => setPickerPeriod(period)}
                           style={{
                             pointerEvents: 'auto',
@@ -877,7 +823,6 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
               >
                 <button
                   type="button"
-                  data-tauri-drag-region="false"
                   onClick={() => setTimePickerOpen(false)}
                   style={{
                     pointerEvents: 'auto',
@@ -892,7 +837,6 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
                 </button>
                 <button
                   type="button"
-                  data-tauri-drag-region="false"
                   onClick={handleConfirmTimePicker}
                   style={{
                     pointerEvents: 'auto',

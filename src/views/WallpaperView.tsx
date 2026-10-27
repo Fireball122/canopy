@@ -386,10 +386,7 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
     },
   ];
   return (
-    <div
-      data-tauri-drag-region="false"
-      className="w-full h-full flex flex-col gap-3 pointer-events-auto select-none overflow-hidden"
-    >
+    <div className="w-full h-full flex flex-col gap-3 pointer-events-auto select-none overflow-hidden">
       {/* Minimal Top Bar: 3 Dynamic Palette Pills + Minimal Folder / Refresh Controls */}
       <div className="flex items-center justify-between px-1 shrink-0">
         {/* Theme Mode Segmented Track Container */}
@@ -400,7 +397,6 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
               <button
                 key={pill.id}
                 type="button"
-                data-tauri-drag-region="false"
                 onClick={() => handlePalettePillClick(pill.id)}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-medium transition-all duration-200 pointer-events-auto cursor-pointer active:scale-95"
                 style={{
@@ -442,7 +438,6 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
             <Search className="w-3 h-3 opacity-60 shrink-0" />
             <input
               type="text"
-              data-tauri-drag-region="false"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search wallpapers..."
@@ -452,7 +447,6 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
             {searchQuery && (
               <button
                 type="button"
-                data-tauri-drag-region="false"
                 onClick={() => setSearchQuery('')}
                 className="opacity-60 hover:opacity-100 pointer-events-auto cursor-pointer"
               >
@@ -463,7 +457,6 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
 
           <button
             type="button"
-            data-tauri-drag-region="false"
             onClick={() => setFilterFavoritesOnly((prev) => !prev)}
             className={`p-1.5 rounded-full border transition-all active:scale-95 pointer-events-auto cursor-pointer ${
               filterFavoritesOnly ? 'shadow-sm' : 'opacity-70 hover:opacity-100'
@@ -493,7 +486,6 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
 
           <button
             type="button"
-            data-tauri-drag-region="false"
             onClick={handleBrowseFolder}
             disabled={browsingFolder}
             title="Change wallpaper folder"
@@ -510,7 +502,6 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
 
           <button
             type="button"
-            data-tauri-drag-region="false"
             onClick={handleRescan}
             title="Refresh wallpapers"
             className="p-1.5 rounded-full transition-all duration-200 hover:opacity-100 opacity-80 active:scale-95 pointer-events-auto cursor-pointer"
@@ -529,10 +520,7 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
       </div>
 
       {/* Sleek Borderless 16:9 Thumbnail Grid */}
-      <div
-        data-tauri-drag-region="false"
-        className="flex-1 overflow-y-auto overflow-x-hidden px-1 py-1 pointer-events-auto"
-      >
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-1 py-1 pointer-events-auto">
         <div className="grid grid-cols-3 gap-3">
           {filteredWallpapers.map((entry, idx) => {
             const isActive = Boolean(entry.active);
@@ -545,7 +533,6 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
               <button
                 key={entry.path}
                 type="button"
-                data-tauri-drag-region="false"
                 onClick={() => handleSelectWallpaper(entry)}
                 className="group relative w-full aspect-video rounded-[13px] overflow-hidden focus:outline-none pointer-events-auto cursor-pointer"
                 style={{
@@ -609,7 +596,6 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
                 {/* Favorite Heart Button (Top Right) */}
                 <button
                   type="button"
-                  data-tauri-drag-region="false"
                   onClick={(e) => toggleFavorite(e, entry.path)}
                   className={`absolute top-2 right-2 p-1.5 rounded-full backdrop-blur-md transition-all duration-200 z-10 pointer-events-auto cursor-pointer ${
                     isFav ? 'opacity-100 scale-105' : 'opacity-0 group-hover:opacity-100'
@@ -642,7 +628,6 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
       {/* EXPERIMENTAL: per-monitor wallpaper drawer (only rendered when enabled in Settings) */}
       {settings.wallpaperPerMonitor && (
         <div
-          data-tauri-drag-region="false"
           className="shrink-0 rounded-[13px] pointer-events-auto relative"
           style={{
             background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
@@ -651,7 +636,6 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
         >
           <button
             type="button"
-            data-tauri-drag-region="false"
             onClick={() => setShowPerMonitor((prev) => !prev)}
             className="w-full flex items-center justify-between px-3 py-2 pointer-events-auto cursor-pointer"
           >
@@ -767,7 +751,6 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
                           <div className="relative">
                             <button
                               type="button"
-                              data-tauri-drag-region="false"
                               disabled={busy}
                               onClick={() =>
                                 setPickingMonitorId(
@@ -786,10 +769,7 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
 
                             {/* Per-Monitor Image Picker Dropdown */}
                             {pickingMonitorId === monitor.id && (
-                              <div
-                                data-tauri-drag-region="false"
-                                className="absolute right-0 bottom-full mb-1.5 z-50 w-72 max-h-60 overflow-y-auto rounded-xl p-2.5 bento-card shadow-2xl border flex flex-col gap-2 bg-[#18171c]/95 backdrop-blur-xl pointer-events-auto"
-                              >
+                              <div className="absolute right-0 bottom-full mb-1.5 z-50 w-72 max-h-60 overflow-y-auto rounded-xl p-2.5 bento-card shadow-2xl border flex flex-col gap-2 bg-[#18171c]/95 backdrop-blur-xl pointer-events-auto">
                                 <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-[var(--theme-text-secondary)] pb-1 border-b border-white/10">
                                   <span>Wallpapers for {monitor.label}</span>
                                   <button
@@ -840,7 +820,6 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
                   <div className="flex items-center gap-2 flex-wrap pt-0.5">
                     <button
                       type="button"
-                      data-tauri-drag-region="false"
                       onClick={() => handleToggleSlideshow(!desktopState.slideshow_enabled)}
                       className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium transition-all active:scale-95 pointer-events-auto cursor-pointer"
                       style={{
@@ -863,7 +842,6 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
 
                     <button
                       type="button"
-                      data-tauri-drag-region="false"
                       onClick={handleToggleShuffle}
                       className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium transition-all active:scale-95 pointer-events-auto cursor-pointer"
                       style={{
@@ -893,7 +871,6 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
                         type="number"
                         min={1}
                         max={1440}
-                        data-tauri-drag-region="false"
                         value={slideshowMinutes}
                         onChange={(e) => {
                           const parsed = Number(e.target.value);

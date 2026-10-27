@@ -71,8 +71,9 @@ public sealed class WallpaperService : IDisposable
                 return $"data:image/jpeg;base64,{Convert.ToBase64String(bytes)}";
             }
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.Log($"[WallpaperService] GetOrCreateDiskThumbnailDataUrl error: {ex.Message}");
         }
         return null;
     }
@@ -95,8 +96,9 @@ public sealed class WallpaperService : IDisposable
                 {
                     File.Delete(stale);
                 }
-                catch
+                catch (Exception ex)
                 {
+                    DiagnosticsLog.Log($"[WallpaperService] Delete stale thumbnail warning: {ex.Message}");
                 }
             }
 
@@ -115,13 +117,15 @@ public sealed class WallpaperService : IDisposable
                 {
                     File.Delete(path);
                 }
-                catch
+                catch (Exception ex)
                 {
+                    DiagnosticsLog.Log($"[WallpaperService] Evict old thumbnail warning: {ex.Message}");
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.Log($"[WallpaperService] PruneThumbnailCache error: {ex.Message}");
         }
     }
 
@@ -131,8 +135,9 @@ public sealed class WallpaperService : IDisposable
         {
             return File.GetLastWriteTimeUtc(filePath);
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.Log($"[WallpaperService] TryGetLastWriteUtc error: {ex.Message}");
             return DateTime.MinValue;
         }
     }
@@ -167,8 +172,9 @@ public sealed class WallpaperService : IDisposable
                 return regPath;
             }
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.Log($"[WallpaperService] Registry load error: {ex.Message}");
         }
 
         try
@@ -182,8 +188,9 @@ public sealed class WallpaperService : IDisposable
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.Log($"[WallpaperService] File load error: {ex.Message}");
         }
 
         return string.Empty;
@@ -202,8 +209,9 @@ public sealed class WallpaperService : IDisposable
             WallpapersDirectory = directoryPath;
             TrySavePersistedDirectory(directoryPath);
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.Log($"[WallpaperService] SetWallpapersDirectory error: {ex.Message}");
         }
     }
 
@@ -214,8 +222,9 @@ public sealed class WallpaperService : IDisposable
             using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Canopy");
             key?.SetValue("WallpaperDirectory", directoryPath);
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.Log($"[WallpaperService] Registry save error: {ex.Message}");
         }
 
         try
@@ -227,8 +236,9 @@ public sealed class WallpaperService : IDisposable
             }
             File.WriteAllText(PersistFilePath, directoryPath);
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.Log($"[WallpaperService] File save error: {ex.Message}");
         }
     }
 
@@ -249,9 +259,9 @@ public sealed class WallpaperService : IDisposable
                 SeedDefaultWallpapers();
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Ignore permission or IO edge cases
+            DiagnosticsLog.Log($"[WallpaperService] EnsureDirectoryAndSeedSamples error: {ex.Message}");
         }
     }
 
@@ -317,9 +327,9 @@ public sealed class WallpaperService : IDisposable
                     Color.FromRgb(251, 146, 60));
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Ignore seeding errors
+            DiagnosticsLog.Log($"[WallpaperService] SeedDefaultWallpapers error: {ex.Message}");
         }
     }
 
@@ -401,8 +411,9 @@ public sealed class WallpaperService : IDisposable
             _thumbnailCache[cacheKey] = bitmap;
             return bitmap;
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.Log($"[WallpaperService] GetOrDecodeThumbnail error: {ex.Message}");
             return null;
         }
     }
@@ -423,8 +434,9 @@ public sealed class WallpaperService : IDisposable
                 Path.GetFullPath(second),
                 StringComparison.OrdinalIgnoreCase);
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.Log($"[WallpaperService] IsSameFile error: {ex.Message}");
             return false;
         }
     }
@@ -486,8 +498,9 @@ public sealed class WallpaperService : IDisposable
                     }
                 });
             }
-            catch
+            catch (Exception ex)
             {
+                DiagnosticsLog.Log($"[WallpaperService] Iris wipe prep error: {ex.Message}");
             }
         }
 
@@ -520,14 +533,16 @@ public sealed class WallpaperService : IDisposable
                         {
                             w.Close();
                         }
-                        catch
+                        catch (Exception ex)
                         {
+                            DiagnosticsLog.Log($"[WallpaperService] Iris window close error: {ex.Message}");
                         }
                     }
                 });
             }
-            catch
+            catch (Exception ex)
             {
+                DiagnosticsLog.Log($"[WallpaperService] Iris window cleanup error: {ex.Message}");
             }
         }
 
@@ -633,8 +648,9 @@ public sealed class WallpaperService : IDisposable
             overlay.Show();
             return overlay;
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.Log($"[WallpaperService] CreateDesktopIrisWipeWindow error: {ex.Message}");
             return null;
         }
     }
@@ -668,8 +684,9 @@ public sealed class WallpaperService : IDisposable
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.Log($"[WallpaperService] GetImageResolution error: {ex.Message}");
         }
 
         return "1920 × 1080";
@@ -712,8 +729,9 @@ public sealed class WallpaperService : IDisposable
                     });
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                DiagnosticsLog.Log($"[WallpaperService] GetWallpaperBridgeEntries error: {ex.Message}");
             }
 
             return list;

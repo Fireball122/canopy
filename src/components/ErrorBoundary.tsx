@@ -30,7 +30,6 @@ export class ErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       return (
         <div
-          data-tauri-drag-region="false"
           className="w-full h-full flex flex-col items-center justify-center p-6 text-center select-none"
           style={{
             background: 'var(--theme-bg, #0d1117)',
@@ -56,7 +55,6 @@ export class ErrorBoundary extends Component<Props, State> {
             {this.state.error?.message || 'An unexpected rendering error occurred in this view.'}
           </p>
           <button
-            data-tauri-drag-region="false"
             onClick={() => {
               this.setState({ hasError: false, error: null });
               this.props.onReset?.();

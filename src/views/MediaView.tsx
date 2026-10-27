@@ -50,6 +50,7 @@ export interface MediaViewProps {
   onNext: () => void;
   onSeek?: (seconds: number) => void;
   onSelectSession?: (sessionId: string) => void;
+  initialSubView?: 'main' | 'lyrics' | 'mixer';
 }
 
 interface LyricLine {
@@ -313,6 +314,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
   onNext,
   onSeek,
   onSelectSession,
+  initialSubView,
 }) => {
   const { settings } = useSettings();
   const isPlaying = Boolean(media.is_playing);
@@ -357,7 +359,10 @@ export const MediaView: React.FC<MediaViewProps> = ({
   const handleCycleRepeat = async () => {
     const next = (repeatMode + 1) % 3;
     setRepeatMode(next);
-    await mediaCycleRepeat();
+    const hostMode = await mediaCycleRepeat();
+    if (typeof hostMode === 'number') {
+      setRepeatMode(hostMode);
+    }
   };
   const lyricsCacheRef = useRef<
     Record<string, { lines: LyricLine[]; label: string; duration?: number }>
@@ -372,7 +377,17 @@ export const MediaView: React.FC<MediaViewProps> = ({
   const sessionPopoverRef = useRef<HTMLDivElement | null>(null);
 
   // Per-application volume mixer state (polled only while the mixer panel is visible)
-  const [showMixer, setShowMixer] = useState<boolean>(false);
+  const [showMixer, setShowMixer] = useState<boolean>(initialSubView === 'mixer');
+
+  useEffect(() => {
+    if (initialSubView === 'lyrics') {
+      setShowLyrics(true);
+      setShowMixer(false);
+    } else if (initialSubView === 'mixer') {
+      setShowMixer(true);
+      setShowLyrics(false);
+    }
+  }, [initialSubView]);
   const [mixerSessions, setMixerSessions] = useState<AudioSessionEntry[]>([]);
   const [mixerLoading, setMixerLoading] = useState<boolean>(false);
   const mixerInFlightRef = useRef<boolean>(false);
@@ -797,7 +812,6 @@ export const MediaView: React.FC<MediaViewProps> = ({
 
   return (
     <div
-      data-tauri-drag-region="false"
       className="w-full h-full bento-card p-4 flex items-center justify-between gap-4 relative overflow-visible pointer-events-auto select-none"
       style={{
         background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
@@ -832,7 +846,6 @@ export const MediaView: React.FC<MediaViewProps> = ({
 
           {/* Circular Rotating Album Thumbnail / Stylized Vinyl Disc at Center */}
           <div
-            data-tauri-drag-region="false"
             onClick={onPlayPause}
             className={`relative w-[114px] h-[114px] rounded-full overflow-hidden flex items-center justify-center border-2 shadow-[0_8px_28px_rgba(0,0,0,0.45)] pointer-events-auto cursor-pointer ${
               isPlaying ? 'animate-vinyl-spin' : ''
@@ -905,7 +918,6 @@ export const MediaView: React.FC<MediaViewProps> = ({
           <div className="shrink-0 flex items-center gap-1.5">
             <button
               type="button"
-              data-tauri-drag-region="false"
               onClick={() => {
                 setSessionMenuOpen(false);
                 setShowMixer(false);
@@ -935,7 +947,6 @@ export const MediaView: React.FC<MediaViewProps> = ({
 
             <button
               type="button"
-              data-tauri-drag-region="false"
               onClick={() => {
                 setSessionMenuOpen(false);
                 setShowLyrics(false);
@@ -980,7 +991,6 @@ export const MediaView: React.FC<MediaViewProps> = ({
             <div className="flex items-center justify-center gap-3">
               <button
                 type="button"
-                data-tauri-drag-region="false"
                 onClick={handleToggleShuffle}
                 className={`w-8 h-8 rounded-full flex items-center justify-center border transition-all hover:scale-105 active:scale-95 pointer-events-auto cursor-pointer ${
                   isShuffle ? 'shadow-sm' : 'opacity-50 hover:opacity-80'
@@ -997,7 +1007,6 @@ export const MediaView: React.FC<MediaViewProps> = ({
 
               <button
                 type="button"
-                data-tauri-drag-region="false"
                 onClick={onPrev}
                 className="w-10 h-10 rounded-full flex items-center justify-center border transition-all hover:scale-105 active:scale-95 pointer-events-auto cursor-pointer"
                 style={{
@@ -1012,7 +1021,6 @@ export const MediaView: React.FC<MediaViewProps> = ({
 
               <button
                 type="button"
-                data-tauri-drag-region="false"
                 onClick={onPlayPause}
                 className="w-13 h-13 p-3.5 rounded-full flex items-center justify-center shadow-lg transition-all hover:scale-105 hover:brightness-110 active:scale-95 pointer-events-auto cursor-pointer"
                 style={{
@@ -1031,7 +1039,6 @@ export const MediaView: React.FC<MediaViewProps> = ({
 
               <button
                 type="button"
-                data-tauri-drag-region="false"
                 onClick={onNext}
                 className="w-10 h-10 rounded-full flex items-center justify-center border transition-all hover:scale-105 active:scale-95 pointer-events-auto cursor-pointer"
                 style={{
@@ -1046,7 +1053,6 @@ export const MediaView: React.FC<MediaViewProps> = ({
 
               <button
                 type="button"
-                data-tauri-drag-region="false"
                 onClick={handleCycleRepeat}
                 className={`w-8 h-8 rounded-full flex items-center justify-center border transition-all hover:scale-105 active:scale-95 pointer-events-auto cursor-pointer relative ${
                   repeatMode > 0 ? 'shadow-sm' : 'opacity-50 hover:opacity-80'
@@ -1087,7 +1093,6 @@ export const MediaView: React.FC<MediaViewProps> = ({
 
               <input
                 type="range"
-                data-tauri-drag-region="false"
                 min={0}
                 max={effectiveDuration}
                 value={clampedPosition}
@@ -1113,9 +1118,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
             </div>
 
             {/* Alternate Audio Visualizer Modes (Linear Bars vs Oscilloscope Wave) */}
-            {(settings.visualizerStyle === 'bars' ||
-              settings.visualizerStyle === 'radial' ||
-              !settings.visualizerStyle) && (
+            {settings.visualizerStyle === 'bars' && (
               <div className="w-full max-w-[330px] h-9 flex items-end justify-between gap-1 px-1 pt-1.5 overflow-hidden">
                 {Array.from({ length: 32 }, (_, i) => {
                   const rawAmp = spectrumBands[i] || 0;
@@ -1163,7 +1166,6 @@ export const MediaView: React.FC<MediaViewProps> = ({
             <div ref={sessionPopoverRef} className="relative flex flex-col items-center">
               <button
                 type="button"
-                data-tauri-drag-region="false"
                 onClick={() => setSessionMenuOpen((prev) => !prev)}
                 className="px-3.5 py-1.5 rounded-full border flex items-center gap-2 text-xs font-semibold transition-all hover:scale-[1.02] active:scale-95 pointer-events-auto cursor-pointer"
                 style={{
@@ -1193,7 +1195,6 @@ export const MediaView: React.FC<MediaViewProps> = ({
               {/* Popover Dropdown List */}
               {sessionMenuOpen && (
                 <div
-                  data-tauri-drag-region="false"
                   className="absolute bottom-full mb-2 w-[240px] rounded-2xl p-1.5 border shadow-2xl z-40 backdrop-blur-xl pointer-events-auto"
                   style={{
                     background: 'var(--theme-surface, rgba(20, 20, 28, 0.96))',
@@ -1217,7 +1218,6 @@ export const MediaView: React.FC<MediaViewProps> = ({
                       return (
                         <button
                           key={session.id}
-                          data-tauri-drag-region="false"
                           onClick={async () => {
                             setSelectedSessionId(session.id);
                             setSessionMenuOpen(false);
@@ -1282,7 +1282,6 @@ export const MediaView: React.FC<MediaViewProps> = ({
           >
             <div
               ref={lyricsScrollRef}
-              data-tauri-drag-region="false"
               className={`flex-1 overflow-y-auto space-y-1.5 pr-1 py-2 ${
                 showLyrics ? 'pointer-events-auto' : 'pointer-events-none'
               }`}
@@ -1315,7 +1314,6 @@ export const MediaView: React.FC<MediaViewProps> = ({
                       key={`${line.time}-${index}`}
                       ref={isActive ? activeLyricItemRef : null}
                       type="button"
-                      data-tauri-drag-region="false"
                       onClick={() => {
                         handleUserSeek(line.time);
                       }}
@@ -1377,7 +1375,6 @@ export const MediaView: React.FC<MediaViewProps> = ({
           {/* STAGE C: Per-app volume mixer overlay, polled only while visible */}
           {showMixer && (
             <div
-              data-tauri-drag-region="false"
               className="absolute inset-0 z-30 rounded-xl border px-3 py-2.5 flex flex-col pointer-events-auto bg-[#18171c]/95 backdrop-blur-xl shadow-2xl"
               style={{
                 background: 'rgba(24, 23, 28, 0.95)',
@@ -1397,7 +1394,6 @@ export const MediaView: React.FC<MediaViewProps> = ({
                     <div className="relative" ref={deviceDropdownRef}>
                       <button
                         type="button"
-                        data-tauri-drag-region="false"
                         onClick={() => setDeviceDropdownOpen((o) => !o)}
                         className="flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-medium tracking-normal hover:border-[var(--theme-accent)] transition-all cursor-pointer pointer-events-auto"
                         style={{
@@ -1429,7 +1425,6 @@ export const MediaView: React.FC<MediaViewProps> = ({
                               <button
                                 key={dev.id}
                                 type="button"
-                                data-tauri-drag-region="false"
                                 onClick={async () => {
                                   await setDefaultAudioDevice(dev.id);
                                   setDeviceDropdownOpen(false);
@@ -1477,7 +1472,6 @@ export const MediaView: React.FC<MediaViewProps> = ({
                     <div key={session.id} className="flex items-center gap-2">
                       <button
                         type="button"
-                        data-tauri-drag-region="false"
                         onClick={() => handleMixerMute(session.id, !session.muted)}
                         className="w-6 h-6 shrink-0 rounded-md flex items-center justify-center border transition-all hover:scale-105 active:scale-95 pointer-events-auto cursor-pointer"
                         style={{
@@ -1511,7 +1505,6 @@ export const MediaView: React.FC<MediaViewProps> = ({
                       </span>
                       <input
                         type="range"
-                        data-tauri-drag-region="false"
                         min={0}
                         max={100}
                         value={Math.round(session.volume)}
