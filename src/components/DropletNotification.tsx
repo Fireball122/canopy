@@ -24,7 +24,8 @@ export const DropletNotification: React.FC<DropletNotificationProps> = ({
   const timerRef = useRef<number | null>(null);
   const isHoveredRef = useRef<boolean>(false);
   isHoveredRef.current = isHovered;
-
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
   // Symmetrical reverse dismiss animation
   const startDismissAnimation = useCallback(() => {
     setContentVisible(false);
@@ -48,11 +49,19 @@ export const DropletNotification: React.FC<DropletNotificationProps> = ({
       setContentVisible(false);
       return;
     }
+    if (phaseRef.current === 'expand') {
+      const dismissTimer = window.setTimeout(() => {
+        if (!isHoveredRef.current) {
+          startDismissAnimation();
+        }
+      }, durationMs);
+      timerRef.current = dismissTimer;
+      return () => window.clearTimeout(dismissTimer);
+    }
 
     // Phase 1: Pure liquid droplet bead drops from top bezel
     setPhase('drop');
     setContentVisible(false);
-
     // Phase 2: Zero-stutter momentum transfer: bloom to pill begins at 200ms
     let revealTimer: number | null = null;
     const expandTimer = window.setTimeout(() => {

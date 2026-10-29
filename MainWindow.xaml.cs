@@ -297,8 +297,8 @@ public partial class MainWindow : Window
         double targetZoom = physicalWidth > 0 ? (double)physicalWidth / (scaleX * BaseDesignWidth) : 1.0;
         int cornerRadius = (int)Math.Round(24.0 * scaleY * targetZoom);
 
-        // Clear GDI 1-bit clipping region in favor of DWM alpha composition with CSS border-radius
-        Win32.ClearWindowRegion(_hwnd);
+        // Clip HWND bottom corners to eliminate external DWM frame border artifact
+        Win32.ApplyWindowRoundedRegion(_hwnd, physicalWidth, physicalHeight, cornerRadius);
         ApplyAdaptiveZoom(panelMonitor);
     }
 
@@ -1119,7 +1119,9 @@ public partial class MainWindow : Window
                     args.TryGetProperty("url", out JsonElement urlEl) &&
                     urlEl.GetString() is string targetUrl &&
                     (targetUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
-                     targetUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase)))
+                     targetUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                     targetUrl.StartsWith("ms-settings:", StringComparison.OrdinalIgnoreCase) ||
+                     targetUrl.StartsWith("ms-availablenetworks:", StringComparison.OrdinalIgnoreCase)))
                 {
                     try
                     {
@@ -1419,6 +1421,127 @@ public partial class MainWindow : Window
                 return null;
             }
 
+            case "get_wifi_state":
+                return await QueryWifiStateAsync();
+
+            case "set_wifi_enabled":
+            {
+                bool enabled = true;
+                if (args.ValueKind == JsonValueKind.Object && args.TryGetProperty("enabled", out JsonElement enEl))
+                {
+                    enabled = enEl.GetBoolean();
+                }
+                return await SetRadioStateAsync(Windows.Devices.Radios.RadioKind.WiFi, enabled);
+            }
+
+            case "connect_wifi":
+            {
+                string ssid = string.Empty;
+                if (args.ValueKind == JsonValueKind.Object && args.TryGetProperty("ssid", out JsonElement sEl))
+                {
+                    ssid = sEl.GetString() ?? string.Empty;
+                }
+                if (!string.IsNullOrWhiteSpace(ssid))
+                {
+                    try
+                    {
+                        using var p = Process.Start(new ProcessStartInfo("netsh", $"wlan connect name=\"{ssid}\"")
+                        {
+                            CreateNoWindow = true,
+                            UseShellExecute = false
+                        });
+                        if (p != null) await p.WaitForExitAsync();
+                        return true;
+                    }
+                    catch
+                    {
+                        return false;
+                    }
+                }
+                return false;
+            }
+
+            case "add_and_connect_wifi":
+            {
+                string ssid = string.Empty;
+                string password = string.Empty;
+                if (args.ValueKind == JsonValueKind.Object)
+                {
+                    if (args.TryGetProperty("ssid", out var sEl)) ssid = sEl.GetString() ?? string.Empty;
+                    if (args.TryGetProperty("password", out var pEl)) password = pEl.GetString() ?? string.Empty;
+                }
+                return await AddAndConnectWifiAsync(ssid, password);
+            }
+
+            case "disconnect_wifi":
+            {
+                try
+                {
+                    using var p = Process.Start(new ProcessStartInfo("netsh", "wlan disconnect")
+                    {
+                        CreateNoWindow = true,
+                        UseShellExecute = false
+                    });
+                    if (p != null) await p.WaitForExitAsync();
+                    return true;
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+
+            case "get_bluetooth_state":
+                return await QueryBluetoothStateAsync();
+
+            case "set_bluetooth_enabled":
+            {
+                bool enabled = true;
+                if (args.ValueKind == JsonValueKind.Object && args.TryGetProperty("enabled", out JsonElement enEl))
+                {
+                    enabled = enEl.GetBoolean();
+                }
+                return await SetRadioStateAsync(Windows.Devices.Radios.RadioKind.Bluetooth, enabled);
+            }
+            case "get_hotspot_state":
+                return await QueryHotspotStateAsync();
+
+            case "toggle_hotspot":
+                return await ToggleHotspotAsync();
+
+            case "set_hotspot_config":
+            {
+                string cfgSsid = string.Empty;
+                string cfgPass = string.Empty;
+                if (args.ValueKind == JsonValueKind.Object)
+                {
+                    if (args.TryGetProperty("ssid", out JsonElement sEl))
+                    {
+                        cfgSsid = sEl.GetString() ?? string.Empty;
+                    }
+                    if (args.TryGetProperty("passphrase", out JsonElement pEl))
+                    {
+                        cfgPass = pEl.GetString() ?? string.Empty;
+                    }
+                }
+                return await SetHotspotConfigAsync(cfgSsid, cfgPass);
+            }
+
+            case "get_power_mode":
+                return await QueryPowerModeAsync();
+
+            case "toggle_power_saver":
+                return await TogglePowerSaverAsync();
+
+            case "get_desktop_monitor_thumbnail":
+            {
+                Win32.RECT mon = _expandedMonitor.Width > 0 ? _expandedMonitor : GetPanelMonitor();
+                string? dataUrl = CaptureDesktopThumbnail(mon);
+                return new { data_url = dataUrl };
+            }
+
+            case "get_network_adapters":
+                return QueryNetworkAdapters();
 
             default:
                 return null;
@@ -3043,6 +3166,617 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             _log.WriteException("open log folder", ex);
+        }
+    }
+
+    private static async Task<bool> SetRadioStateAsync(Windows.Devices.Radios.RadioKind kind, bool enabled)
+    {
+        try
+        {
+            var radios = await Windows.Devices.Radios.Radio.GetRadiosAsync();
+            var targetRadio = radios.FirstOrDefault(r => r.Kind == kind);
+            if (targetRadio != null)
+            {
+                var targetState = enabled ? Windows.Devices.Radios.RadioState.On : Windows.Devices.Radios.RadioState.Off;
+                var result = await targetRadio.SetStateAsync(targetState);
+                return result == Windows.Devices.Radios.RadioAccessStatus.Allowed;
+            }
+        }
+        catch
+        {
+        }
+        return false;
+    }
+
+    private static async Task<object> QueryWifiStateAsync()
+    {
+        bool isEnabled = false;
+        try
+        {
+            var radios = await Windows.Devices.Radios.Radio.GetRadiosAsync();
+            var wifiRadio = radios.FirstOrDefault(r => r.Kind == Windows.Devices.Radios.RadioKind.WiFi);
+            if (wifiRadio != null)
+            {
+                isEnabled = wifiRadio.State == Windows.Devices.Radios.RadioState.On;
+            }
+        }
+        catch
+        {
+        }
+
+        bool isConnected = false;
+        string? connectedSsid = null;
+        int? signalQuality = null;
+        string? bssid = null;
+        string? band = null;
+
+        try
+        {
+            var psi = new ProcessStartInfo("netsh", "wlan show interfaces")
+            {
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                RedirectStandardOutput = true
+            };
+            using var proc = Process.Start(psi);
+            if (proc != null)
+            {
+                string output = await proc.StandardOutput.ReadToEndAsync();
+                await proc.WaitForExitAsync();
+
+                var lines = output.Split(ChecksumLineSeparators, StringSplitOptions.RemoveEmptyEntries);
+                foreach (var line in lines)
+                {
+                    var parts = line.Split(':', 2);
+                    if (parts.Length != 2) continue;
+
+                    string key = parts[0].Trim();
+                    string val = parts[1].Trim();
+
+                    if (key.Equals("State", StringComparison.OrdinalIgnoreCase))
+                    {
+                        isConnected = val.Equals("connected", StringComparison.OrdinalIgnoreCase);
+                    }
+                    else if (key.Equals("SSID", StringComparison.OrdinalIgnoreCase) && !key.Contains("BSSID", StringComparison.OrdinalIgnoreCase))
+                    {
+                        connectedSsid = val;
+                    }
+                    else if (key.Equals("Signal", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string digits = val.Replace("%", "").Trim();
+                        if (int.TryParse(digits, out int sig))
+                        {
+                            signalQuality = sig;
+                        }
+                    }
+                    else if (key.Equals("BSSID", StringComparison.OrdinalIgnoreCase))
+                    {
+                        bssid = val;
+                    }
+                    else if (key.Equals("Radio status", StringComparison.OrdinalIgnoreCase) || key.Equals("Software", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (val.Contains("On", StringComparison.OrdinalIgnoreCase))
+                        {
+                            isEnabled = true;
+                        }
+                    }
+                    else if (key.Equals("Band", StringComparison.OrdinalIgnoreCase))
+                    {
+                        band = val;
+                    }
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        var profiles = new List<string>();
+        try
+        {
+            var psi = new ProcessStartInfo("netsh", "wlan show profiles")
+            {
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                RedirectStandardOutput = true
+            };
+            using var proc = Process.Start(psi);
+            if (proc != null)
+            {
+                string output = await proc.StandardOutput.ReadToEndAsync();
+                await proc.WaitForExitAsync();
+
+                var lines = output.Split(ChecksumLineSeparators, StringSplitOptions.RemoveEmptyEntries);
+                foreach (var line in lines)
+                {
+                    var parts = line.Split(':', 2);
+                    if (parts.Length == 2 && parts[0].Contains("User Profile", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string profileName = parts[1].Trim();
+                        if (!string.IsNullOrEmpty(profileName) && !profiles.Contains(profileName))
+                        {
+                            profiles.Add(profileName);
+                        }
+                    }
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return new
+        {
+            enabled = isEnabled,
+            connected = isConnected,
+            ssid = connectedSsid,
+            signal = signalQuality,
+            profiles = profiles,
+            bssid = bssid,
+            band = band
+        };
+    }
+
+    private static async Task<object> QueryBluetoothStateAsync()
+    {
+        bool isEnabled = false;
+        try
+        {
+            var radios = await Windows.Devices.Radios.Radio.GetRadiosAsync();
+            var btRadio = radios.FirstOrDefault(r => r.Kind == Windows.Devices.Radios.RadioKind.Bluetooth);
+            if (btRadio != null)
+            {
+                isEnabled = btRadio.State == Windows.Devices.Radios.RadioState.On;
+            }
+        }
+        catch
+        {
+        }
+
+        var deviceList = new List<object>();
+        try
+        {
+            var psi = new ProcessStartInfo("powershell", "-NoProfile -NonInteractive -Command \"Get-PnpDevice -Class Bluetooth -Status OK | Select-Object -Property InstanceId, FriendlyName, Status | ConvertTo-Json -Compress\"")
+            {
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                RedirectStandardOutput = true
+            };
+            using var proc = Process.Start(psi);
+            if (proc != null)
+            {
+                string json = await proc.StandardOutput.ReadToEndAsync();
+                await proc.WaitForExitAsync();
+
+                if (!string.IsNullOrWhiteSpace(json))
+                {
+                    using var doc = JsonDocument.Parse(json);
+                    var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                    void AddDevice(JsonElement el)
+                    {
+                        string? name = el.TryGetProperty("FriendlyName", out var fEl) ? fEl.GetString() : null;
+                        string? id = el.TryGetProperty("InstanceId", out var iEl) ? iEl.GetString() : null;
+                        string? status = el.TryGetProperty("Status", out var sEl) ? sEl.GetString() : "OK";
+
+                        if (string.IsNullOrWhiteSpace(name)) return;
+                        if (name.Contains("Enumerator", StringComparison.OrdinalIgnoreCase) ||
+                            name.Contains("Protocol", StringComparison.OrdinalIgnoreCase) ||
+                            name.Contains("Service", StringComparison.OrdinalIgnoreCase) ||
+                            name.Contains("Transport", StringComparison.OrdinalIgnoreCase) ||
+                            name.Contains("Adapter", StringComparison.OrdinalIgnoreCase) ||
+                            name.Contains("Generic Attribute", StringComparison.OrdinalIgnoreCase) ||
+                            name.Contains("Generic Access", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return;
+                        }
+
+                        if (seenNames.Add(name))
+                        {
+                            deviceList.Add(new
+                            {
+                                id = id ?? name,
+                                name = name,
+                                status = status ?? "OK",
+                                connected = true
+                            });
+                        }
+                    }
+
+                    if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var el in doc.RootElement.EnumerateArray())
+                        {
+                            AddDevice(el);
+                        }
+                    }
+                    else if (doc.RootElement.ValueKind == JsonValueKind.Object)
+                    {
+                        AddDevice(doc.RootElement);
+                    }
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return new
+        {
+            enabled = isEnabled,
+            devices = deviceList
+        };
+    }
+
+    private static Task<object> QueryHotspotStateAsync()
+    {
+        return Task.Run<object>(() =>
+        {
+            try
+            {
+                var profile = Windows.Networking.Connectivity.NetworkInformation.GetInternetConnectionProfile();
+                if (profile == null)
+                {
+                    return new { enabled = false, supported = false, ssid = "Hotspot", clients = 0, band = "5 GHz" };
+                }
+
+                var tm = Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager.CreateFromConnectionProfile(profile);
+                var cfg = tm.GetCurrentAccessPointConfiguration();
+                return new
+                {
+                    enabled = tm.TetheringOperationalState == Windows.Networking.NetworkOperators.TetheringOperationalState.On,
+                    supported = true,
+                    ssid = cfg.Ssid,
+                    passphrase = cfg.Passphrase ?? string.Empty,
+                    clients = tm.ClientCount,
+                    band = cfg.Band == Windows.Networking.NetworkOperators.TetheringWiFiBand.TwoPointFourGigahertz ? "2.4 GHz" : "5.0 GHz"
+                };
+            }
+            catch
+            {
+                return new { enabled = false, supported = false, ssid = "Hotspot", passphrase = string.Empty, clients = 0, band = "5 GHz" };
+            }
+        });
+    }
+
+    private static async Task<object> ToggleHotspotAsync()
+    {
+        try
+        {
+            var profile = Windows.Networking.Connectivity.NetworkInformation.GetInternetConnectionProfile();
+            if (profile == null) return new { enabled = false, success = false };
+
+            var tm = Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager.CreateFromConnectionProfile(profile);
+            if (tm.TetheringOperationalState == Windows.Networking.NetworkOperators.TetheringOperationalState.On)
+            {
+                var stopRes = await tm.StopTetheringAsync();
+                return new { enabled = false, success = stopRes.Status == Windows.Networking.NetworkOperators.TetheringOperationStatus.Success };
+            }
+            else
+            {
+                var startRes = await tm.StartTetheringAsync();
+                return new { enabled = startRes.Status == Windows.Networking.NetworkOperators.TetheringOperationStatus.Success, success = startRes.Status == Windows.Networking.NetworkOperators.TetheringOperationStatus.Success };
+            }
+        }
+        catch
+        {
+            return new { enabled = false, success = false };
+        }
+    }
+
+    private static async Task<object> SetHotspotConfigAsync(string ssid, string passphrase)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(ssid) || ssid.Length > 32)
+            {
+                return new { success = false, reason = "SSID must be 1-32 characters" };
+            }
+            if (passphrase.Length is < 8 or > 64)
+            {
+                return new { success = false, reason = "Password must be 8-64 characters" };
+            }
+
+            var profile = Windows.Networking.Connectivity.NetworkInformation.GetInternetConnectionProfile();
+            if (profile == null)
+            {
+                return new { success = false, reason = "No active internet connection" };
+            }
+
+            var tm = Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager.CreateFromConnectionProfile(profile);
+            var cfg = new Windows.Networking.NetworkOperators.NetworkOperatorTetheringAccessPointConfiguration
+            {
+                Ssid = ssid,
+                Passphrase = passphrase,
+                Band = Windows.Networking.NetworkOperators.TetheringWiFiBand.TwoPointFourGigahertz
+            };
+            await tm.ConfigureAccessPointAsync(cfg);
+            return new { success = true, ssid = ssid };
+        }
+        catch (Exception ex)
+        {
+            return new { success = false, reason = ex.Message };
+        }
+    }
+
+    private static string _savedActivePowerScheme = "904d4403-7d62-4952-baeb-38640036c448";
+
+    private static async Task<object> QueryPowerModeAsync()
+    {
+        bool isPowerSaver = false;
+        string activeGuid = string.Empty;
+        try
+        {
+            var psi = new ProcessStartInfo("powercfg", "/getactivescheme")
+            {
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                RedirectStandardOutput = true
+            };
+            using var p = Process.Start(psi);
+            if (p != null)
+            {
+                string text = await p.StandardOutput.ReadToEndAsync();
+                await p.WaitForExitAsync();
+                if (text.Contains("a1841308-3541-4fab-bc81-f71556f20b4a", StringComparison.OrdinalIgnoreCase))
+                {
+                    isPowerSaver = true;
+                }
+                var m = System.Text.RegularExpressions.Regex.Match(text, @"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                if (m.Success)
+                {
+                    activeGuid = m.Value.ToLowerInvariant();
+                    if (!isPowerSaver)
+                    {
+                        _savedActivePowerScheme = activeGuid;
+                    }
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        bool hasBattery = Windows.System.Power.PowerManager.BatteryStatus != Windows.System.Power.BatteryStatus.NotPresent;
+        return new
+        {
+            is_power_saver = isPowerSaver,
+            active_scheme = activeGuid,
+            has_battery = hasBattery
+        };
+    }
+
+    private static async Task<string?> GetActivePowerSchemeGuidAsync()
+    {
+        try
+        {
+            var psi = new ProcessStartInfo("powercfg", "/getactivescheme")
+            {
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                RedirectStandardOutput = true
+            };
+            using var p = Process.Start(psi);
+            if (p != null)
+            {
+                string text = await p.StandardOutput.ReadToEndAsync();
+                await p.WaitForExitAsync();
+                var m = System.Text.RegularExpressions.Regex.Match(text, @"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                if (m.Success) return m.Value.ToLowerInvariant();
+            }
+        }
+        catch
+        {
+        }
+        return null;
+    }
+
+    private static async Task<object> TogglePowerSaverAsync()
+    {
+        try
+        {
+            string? activeGuid = await GetActivePowerSchemeGuidAsync();
+            bool currentlySaver = activeGuid is not null && activeGuid == "a1841308-3541-4fab-bc81-f71556f20b4a";
+            if (activeGuid is not null && !currentlySaver)
+            {
+                _savedActivePowerScheme = activeGuid;
+            }
+
+            string targetScheme = currentlySaver
+                ? (_savedActivePowerScheme ?? "381b4222-f694-41f0-9685-ff5bb260df2e")
+                : "a1841308-3541-4fab-bc81-f71556f20b4a";
+
+            using var p = Process.Start(new ProcessStartInfo("powercfg", $"/s {targetScheme}")
+            {
+                CreateNoWindow = true,
+                UseShellExecute = false
+            });
+            if (p != null) await p.WaitForExitAsync();
+
+            return new { is_power_saver = !currentlySaver, success = true };
+        }
+        catch
+        {
+            return new { is_power_saver = false, success = false };
+        }
+    }
+
+    private static string? CaptureDesktopThumbnail(Win32.RECT monitor)
+    {
+        try
+        {
+            IntPtr hDesktop = Win32.GetDesktopWindow();
+            IntPtr hdcSrc = Win32.GetDC(hDesktop);
+            if (hdcSrc == IntPtr.Zero) return null;
+
+            IntPtr hdcDest = Win32.CreateCompatibleDC(hdcSrc);
+            int targetW = 64;
+            int targetH = 36;
+            IntPtr hBitmap = Win32.CreateCompatibleBitmap(hdcSrc, targetW, targetH);
+            IntPtr hOld = Win32.SelectObject(hdcDest, hBitmap);
+
+            Win32.SetStretchBltMode(hdcDest, 4); // HALFTONE
+            int monW = monitor.Width > 0 ? monitor.Width : 1920;
+            int monH = monitor.Height > 0 ? monitor.Height : 1080;
+            Win32.StretchBlt(hdcDest, 0, 0, targetW, targetH, hdcSrc, monitor.Left, monitor.Top, monW, monH, 0x00CC0020);
+
+            Win32.SelectObject(hdcDest, hOld);
+            Win32.DeleteDC(hdcDest);
+            Win32.ReleaseDC(hDesktop, hdcSrc);
+
+            using var bmp = System.Drawing.Image.FromHbitmap(hBitmap);
+            Win32.DeleteObject(hBitmap);
+
+            using var ms = new System.IO.MemoryStream();
+            bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+            return "data:image/png;base64," + Convert.ToBase64String(ms.ToArray());
+        }
+        catch (Exception ex)
+        {
+            DiagnosticsLog.Log($"[DesktopCapture] Error: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static List<object> QueryNetworkAdapters()
+    {
+        var list = new List<object>();
+        try
+        {
+            foreach (var ni in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Loopback)
+                    continue;
+
+                string desc = ni.Description ?? string.Empty;
+                if (desc.Contains("VirtualBox", StringComparison.OrdinalIgnoreCase) ||
+                    desc.Contains("Wintun", StringComparison.OrdinalIgnoreCase) ||
+                    desc.Contains("Wi-Fi Direct", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string type = ni.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Wireless80211
+                    ? "wifi"
+                    : "ethernet";
+
+                string ip = string.Empty;
+                try
+                {
+                    var ipProps = ni.GetIPProperties();
+                    foreach (var addr in ipProps.UnicastAddresses)
+                    {
+                        if (addr.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork &&
+                            !addr.Address.ToString().StartsWith("169.254.", StringComparison.Ordinal))
+                        {
+                            ip = addr.Address.ToString();
+                            break;
+                        }
+                    }
+                }
+                catch { }
+
+                long speedMbps = ni.Speed > 0 ? ni.Speed / 1_000_000L : 0L;
+
+                list.Add(new
+                {
+                    id = ni.Id,
+                    name = ni.Name,
+                    description = ni.Description,
+                    type = type,
+                    status = ni.OperationalStatus.ToString().ToLowerInvariant(),
+                    speed_mbps = speedMbps,
+                    ip_address = ip,
+                    is_connected = ni.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            DiagnosticsLog.Log($"[NetworkAdapters] Query error: {ex.Message}");
+        }
+        return list;
+    }
+
+    private static async Task<object> AddAndConnectWifiAsync(string ssid, string password)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(ssid)) return new { success = false, message = "SSID is required" };
+
+            string profileXml = string.IsNullOrEmpty(password) ? $@"<?xml version=""1.0""?>
+<WLANProfile xmlns=""http://www.microsoft.com/networking/WLAN/profile/v1"">
+    <name>{ssid}</name>
+    <SSIDConfig>
+        <SSID>
+            <name>{ssid}</name>
+        </SSID>
+    </SSIDConfig>
+    <connectionType>ESS</connectionType>
+    <connectionMode>manual</connectionMode>
+    <MSM>
+        <security>
+            <authEncryption>
+                <authentication>open</authentication>
+                <encryption>none</encryption>
+                <useOneX>false</useOneX>
+            </authEncryption>
+        </security>
+    </MSM>
+</WLANProfile>" : $@"<?xml version=""1.0""?>
+<WLANProfile xmlns=""http://www.microsoft.com/networking/WLAN/profile/v1"">
+    <name>{ssid}</name>
+    <SSIDConfig>
+        <SSID>
+            <name>{ssid}</name>
+        </SSID>
+    </SSIDConfig>
+    <connectionType>ESS</connectionType>
+    <connectionMode>manual</connectionMode>
+    <MSM>
+        <security>
+            <authEncryption>
+                <authentication>WPA2PSK</authentication>
+                <encryption>AES</encryption>
+                <useOneX>false</useOneX>
+            </authEncryption>
+            <sharedKey>
+                <keyType>passPhrase</keyType>
+                <protected>false</protected>
+                <keyMaterial>{password}</keyMaterial>
+            </sharedKey>
+        </security>
+    </MSM>
+</WLANProfile>";
+
+            string tempFile = Path.Combine(Path.GetTempPath(), $"wifi_profile_{Guid.NewGuid():N}.xml");
+            await File.WriteAllTextAsync(tempFile, profileXml);
+            try
+            {
+                using var pAdd = Process.Start(new ProcessStartInfo("netsh", $"wlan add profile filename=\"{tempFile}\" user=current")
+                {
+                    CreateNoWindow = true,
+                    UseShellExecute = false
+                });
+                if (pAdd != null) await pAdd.WaitForExitAsync();
+
+                using var pConn = Process.Start(new ProcessStartInfo("netsh", $"wlan connect name=\"{ssid}\"")
+                {
+                    CreateNoWindow = true,
+                    UseShellExecute = false
+                });
+                if (pConn != null) await pConn.WaitForExitAsync();
+
+                return new { success = true, message = $"Connected to {ssid}" };
+            }
+            finally
+            {
+                try { File.Delete(tempFile); } catch { }
+            }
+        }
+        catch (Exception ex)
+        {
+            return new { success = false, message = ex.Message };
         }
     }
 }

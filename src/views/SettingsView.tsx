@@ -481,23 +481,102 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               {matches([
                 'dashboard',
                 'hud',
+                'header',
+                'search',
+                'battery',
+                'chip',
+                'tabs',
+                'connect',
+                'wifi',
+                'bluetooth',
+                'hotspot',
+                'casting',
+                'media',
                 'apps tab',
                 'terminal',
                 'developer',
                 'brightness',
                 'slider',
-                'battery',
-                'chip',
                 'notification',
                 'raindrop',
                 'test',
               ]) && (
                 <SettingSection
-                  title="Dashboard & HUD"
+                  title="Navigation & Header"
                   icon={<AppWindow className="w-4 h-4" />}
-                  badge="Navigation"
+                  badge="Customization"
                 >
-                  <SettingRow title="Apps Tab" description="Windows start menu app launcher tab">
+                  {/* Header Bar Controls */}
+                  <SettingRow
+                    title="Header Quick Search Button"
+                    description="Show the command palette search icon in the top header"
+                  >
+                    <ToggleSwitch
+                      checked={settings.showHeaderSearch}
+                      onChange={(val) => updateSettings({ showHeaderSearch: val })}
+                    />
+                  </SettingRow>
+
+                  <SettingRow
+                    title="Battery Indicator Position"
+                    description="Choose which side of the top header shows the battery status"
+                  >
+                    <SegmentedChoice
+                      options={[
+                        { id: 'left', label: 'Left (Default)' },
+                        { id: 'right', label: 'Right' },
+                      ]}
+                      value={settings.batteryPosition || 'left'}
+                      onChange={(val) =>
+                        updateSettings({ batteryPosition: val as 'left' | 'right' })
+                      }
+                    />
+                  </SettingRow>
+
+                  <SettingRow
+                    title="Battery Status Chip"
+                    description="Display the battery charge percentage in the top header"
+                  >
+                    <ToggleSwitch
+                      checked={settings.showBatteryChip}
+                      onChange={(val) => updateSettings({ showBatteryChip: val })}
+                    />
+                  </SettingRow>
+
+                  {/* Customizable Tabs */}
+                  <div className="pt-2 pb-1 border-t border-[var(--theme-border)]">
+                    <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--theme-accent)] mb-1">
+                      Customizable Navigation Tabs
+                    </div>
+                    <div className="text-[11px] text-[var(--theme-text-secondary)] mb-2">
+                      Dashboard, Media, Power, and Settings are essential permanent tabs.
+                    </div>
+                  </div>
+
+                  <SettingRow
+                    title="Connect Tab"
+                    description="Wi-Fi networks, Bluetooth devices, Hotspot, and Wireless Display"
+                  >
+                    <ToggleSwitch
+                      checked={settings.showNetworkTab}
+                      onChange={(val) => updateSettings({ showNetworkTab: val })}
+                    />
+                  </SettingRow>
+
+                  <SettingRow
+                    title="Performance Tab"
+                    description="CPU, GPU, RAM, Disk, and hardware telemetry gauges"
+                  >
+                    <ToggleSwitch
+                      checked={settings.showPerformanceTab}
+                      onChange={(val) => updateSettings({ showPerformanceTab: val })}
+                    />
+                  </SettingRow>
+
+                  <SettingRow
+                    title="Apps Tab"
+                    description="Windows start menu app launcher & pinned dock items"
+                  >
                     <ToggleSwitch
                       checked={settings.showAppsTab}
                       onChange={(val) => updateSettings({ showAppsTab: val })}
@@ -505,14 +584,77 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </SettingRow>
 
                   <SettingRow
+                    title="Wallpaper Tab"
+                    description="Desktop wallpapers & theme switcher"
+                  >
+                    <ToggleSwitch
+                      checked={settings.showWallpaperTab}
+                      onChange={(val) => updateSettings({ showWallpaperTab: val })}
+                    />
+                  </SettingRow>
+
+                  <SettingRow
+                    title="Weather Tab"
+                    description="Weather station, low/high, and forecast"
+                  >
+                    <ToggleSwitch
+                      checked={settings.showWeatherTab}
+                      onChange={(val) => updateSettings({ showWeatherTab: val })}
+                    />
+                  </SettingRow>
+
+                  <SettingRow
                     title="Developer Tab"
-                    description="Show the Developer PowerShell console & fastfetch tab"
+                    description="Developer PowerShell console and system info (off by default)"
                   >
                     <ToggleSwitch
                       checked={settings.showTerminalTab}
                       onChange={(val) => updateSettings({ showTerminalTab: val })}
                     />
                   </SettingRow>
+                  {/* Connect Tab Optional Features */}
+                  <div className="pt-2 pb-1 border-t border-[var(--theme-border)]">
+                    <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--theme-accent)] mb-1">
+                      Connect Tab Optional Features
+                    </div>
+                  </div>
+
+                  <SettingRow
+                    title="Mobile Hotspot Toggle"
+                    description="Show Mobile Hotspot toggle in Connect tab"
+                  >
+                    <ToggleSwitch
+                      checked={settings.enableHotspotToggle}
+                      onChange={(val) => updateSettings({ enableHotspotToggle: val })}
+                    />
+                  </SettingRow>
+
+                  <SettingRow
+                    title="Battery Saver Toggle"
+                    description="Show Battery Saver toggle in Connect tab"
+                  >
+                    <ToggleSwitch
+                      checked={settings.enablePowerSaverToggle}
+                      onChange={(val) => updateSettings({ enablePowerSaverToggle: val })}
+                    />
+                  </SettingRow>
+
+                  <SettingRow
+                    title="Wireless Display / Cast Button"
+                    description="Show Wireless Display casting launcher in Connect tab"
+                  >
+                    <ToggleSwitch
+                      checked={settings.enableCastingToggle}
+                      onChange={(val) => updateSettings({ enableCastingToggle: val })}
+                    />
+                  </SettingRow>
+
+                  {/* Other Dashboard Controls */}
+                  <div className="pt-2 pb-1 border-t border-[var(--theme-border)]">
+                    <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--theme-text-secondary)] mb-1">
+                      Display & Notification
+                    </div>
+                  </div>
 
                   <SettingRow
                     title="Hardware Brightness Slider"
@@ -521,16 +663,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <ToggleSwitch
                       checked={settings.enableBrightnessSlider}
                       onChange={(val) => updateSettings({ enableBrightnessSlider: val })}
-                    />
-                  </SettingRow>
-
-                  <SettingRow
-                    title="Battery Indicator Chip"
-                    description="Display the battery status badge in the top header"
-                  >
-                    <ToggleSwitch
-                      checked={settings.showBatteryChip}
-                      onChange={(val) => updateSettings({ showBatteryChip: val })}
                     />
                   </SettingRow>
 

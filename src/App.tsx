@@ -19,6 +19,7 @@ import {
   Settings as SettingsIcon,
   Sliders,
   Terminal as TerminalIcon,
+  Wifi,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CommandPalette, type CommandPaletteItem } from './components/CommandPalette';
@@ -36,6 +37,7 @@ import {
   getBatteryStatus,
   getBrightness,
   getCaffeineStatus,
+  getDesktopMonitorThumbnail,
   getDndStatus,
   getInstalledApps,
   getMasterVolume,
@@ -77,6 +79,7 @@ import { fetchWeather, type WeatherData } from './services/weather';
 import { AppsView } from './views/AppsView';
 import { DashboardView } from './views/DashboardView';
 import { MediaView } from './views/MediaView';
+import { NetworkView } from './views/NetworkView';
 import { PerformanceView } from './views/PerformanceView';
 import { PowerView } from './views/PowerView';
 import { SettingsView } from './views/SettingsView';
@@ -362,12 +365,20 @@ const CanopyShellContent: React.FC = () => {
         label: 'Dashboard',
         icon: <LayoutGrid className="w-3.5 h-3.5" strokeWidth={1.9} />,
       },
-      { id: 'media', label: 'Media', icon: <Music className="w-3.5 h-3.5" strokeWidth={1.9} /> },
       {
-        id: 'performance',
-        label: 'Performance',
-        icon: <Activity className="w-3.5 h-3.5" strokeWidth={1.9} />,
+        id: 'media' as TabId,
+        label: 'Media',
+        icon: <Music className="w-3.5 h-3.5" strokeWidth={1.9} />,
       },
+      ...(settings.showPerformanceTab
+        ? [
+            {
+              id: 'performance' as TabId,
+              label: 'Performance',
+              icon: <Activity className="w-3.5 h-3.5" strokeWidth={1.9} />,
+            },
+          ]
+        : []),
       ...(settings.showAppsTab
         ? [
             {
@@ -377,16 +388,24 @@ const CanopyShellContent: React.FC = () => {
             },
           ]
         : []),
-      {
-        id: 'wallpaper',
-        label: 'Wallpaper',
-        icon: <ImageIcon className="w-3.5 h-3.5" strokeWidth={1.9} />,
-      },
-      {
-        id: 'weather',
-        label: 'Weather',
-        icon: <CloudSun className="w-3.5 h-3.5" strokeWidth={1.9} />,
-      },
+      ...(settings.showWallpaperTab
+        ? [
+            {
+              id: 'wallpaper' as TabId,
+              label: 'Wallpaper',
+              icon: <ImageIcon className="w-3.5 h-3.5" strokeWidth={1.9} />,
+            },
+          ]
+        : []),
+      ...(settings.showWeatherTab
+        ? [
+            {
+              id: 'weather' as TabId,
+              label: 'Weather',
+              icon: <CloudSun className="w-3.5 h-3.5" strokeWidth={1.9} />,
+            },
+          ]
+        : []),
       ...(settings.showTerminalTab
         ? [
             {
@@ -396,39 +415,63 @@ const CanopyShellContent: React.FC = () => {
             },
           ]
         : []),
+      ...(settings.showNetworkTab
+        ? [
+            {
+              id: 'network' as TabId,
+              label: 'Connect',
+              icon: <Wifi className="w-3.5 h-3.5" strokeWidth={1.9} />,
+            },
+          ]
+        : []),
       {
         id: 'power' as TabId,
         label: 'Power',
         icon: <PowerIcon className="w-3.5 h-3.5" strokeWidth={1.9} />,
       },
       {
-        id: 'settings',
+        id: 'settings' as TabId,
         label: 'Settings',
         icon: <SettingsIcon className="w-3.5 h-3.5" strokeWidth={1.9} />,
       },
     ],
-    [settings.showAppsTab, settings.showTerminalTab],
+    [
+      settings.showNetworkTab,
+      settings.showPerformanceTab,
+      settings.showAppsTab,
+      settings.showWallpaperTab,
+      settings.showWeatherTab,
+      settings.showTerminalTab,
+    ],
   );
 
-  // If the Apps tab is toggled off in Settings while active, return to Dashboard.
-  // The Quick Launch "Add App" picker also lives on the Apps tab, so keep it mounted while
-  // appPickerMode is on — otherwise the picker closes the moment it opens for users with the
-  // Apps tab hidden.
+  // If active tab is disabled in Settings while active, return to Dashboard.
+  // (Keep Apps tab mounted while appPickerMode is active so picker does not abruptly close)
   useEffect(() => {
-    if (!settings.showAppsTab && activeTab === 'apps' && !appPickerMode) {
+    const isVisible = visibleTabs.some((t) => t.id === activeTab);
+    if (!isVisible && activeTab !== 'dashboard') {
+      if (activeTab === 'apps' && appPickerMode) {
+        return;
+      }
       setActiveTab('dashboard');
     }
-  }, [settings.showAppsTab, activeTab, appPickerMode]);
-  // If the Terminal tab is toggled off in Settings while active, return to Dashboard
-  useEffect(() => {
-    if (!settings.showTerminalTab && activeTab === 'terminal') {
-      setActiveTab('dashboard');
-    }
-  }, [settings.showTerminalTab, activeTab]);
+  }, [visibleTabs, activeTab, appPickerMode]);
 
   const toastTimerRef = useRef<number | null>(null);
+  const lastToastTimeRef = useRef<number>(0);
+  const lastToastMsgRef = useRef<string>('');
 
   const handleToastNotification = useCallback((msg: string) => {
+    const now = Date.now();
+    if (msg === lastToastMsgRef.current && now - lastToastTimeRef.current < 3000) {
+      return;
+    }
+    if (now - lastToastTimeRef.current < 900) {
+      return;
+    }
+    lastToastTimeRef.current = now;
+    lastToastMsgRef.current = msg;
+
     if (toastTimerRef.current !== null) {
       window.clearTimeout(toastTimerRef.current);
       toastTimerRef.current = null;
@@ -437,9 +480,21 @@ const CanopyShellContent: React.FC = () => {
     toastTimerRef.current = window.setTimeout(() => {
       setToastMessage(null);
       toastTimerRef.current = null;
-    }, 7000);
+    }, 4500);
   }, []);
 
+  // Per-monitor background color sampling: captures whatever is actively rendered on the current monitor
+  // (including Wallpaper Engine dynamic/video backgrounds or custom per-monitor wallpapers) with 0 idle drain.
+  useEffect(() => {
+    if (!panelOpen) return;
+    if (settings.themeMode === 'adaptive' || settings.themeMode === 'auto') {
+      void getDesktopMonitorThumbnail().then((thumb) => {
+        if (thumb?.data_url) {
+          void applyThemeFromImageSrc(thumb.data_url);
+        }
+      });
+    }
+  }, [panelOpen, settings.themeMode]);
   useEffect(() => {
     return () => {
       if (toastTimerRef.current !== null) {
@@ -1157,78 +1212,14 @@ const CanopyShellContent: React.FC = () => {
       <div className="canopy-shell canopy-dropdown canopy-dropdown-open w-full h-full mt-0 rounded-t-none rounded-b-[24px] flex flex-col justify-between overflow-hidden">
         {/* Top Centered Navigation Bar */}
         <header
-          className="w-full shrink-0 flex items-center justify-between px-3 py-1 select-none relative"
+          className="w-full shrink-0 flex items-center justify-between px-2.5 py-1.5 select-none relative"
           style={{ borderBottom: '1px solid var(--theme-border)' }}
         >
-          {/* Left Wing: Quick Search Icon Button (centered halfway between window start and tabs) */}
-          <div className="flex-1 flex items-center justify-center pointer-events-auto">
-            <button
-              type="button"
-              onClick={() => {
-                setPaletteQuery('');
-                setPaletteOpen(true);
-              }}
-              className="p-1 rounded-full text-xs transition-all duration-150 cursor-pointer flex items-center justify-center opacity-75 hover:opacity-100 shadow-sm"
-              style={{
-                background: 'var(--theme-card)',
-                border: '1px solid var(--theme-border)',
-                color: 'var(--theme-accent)',
-              }}
-              title="Quick Search / Command Palette (` or Ctrl+P)"
-            >
-              <Search className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          {/* Center: Tabs sized to fit comfortably without scrolling */}
-          <nav
-            className="flex items-center gap-0.5 p-0.5 rounded-full pointer-events-auto flex-nowrap justify-center shrink-0"
-            style={{
-              background: 'var(--theme-card)',
-              border: '1px solid var(--theme-border)',
-            }}
-          >
-            {visibleTabs.map((tab) => {
-              const active = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => {
-                    setActiveTab(tab.id);
-                    void notifyTabSwitched();
-                  }}
-                  className={`relative flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-medium tracking-tight transition-all duration-200 pointer-events-auto cursor-pointer shrink-0 ${
-                    active ? 'font-semibold shadow-sm' : 'opacity-70 hover:opacity-100'
-                  }`}
-                  style={{
-                    color: active ? 'var(--theme-text-primary)' : 'var(--theme-text-secondary)',
-                    background: active ? 'var(--theme-track)' : 'transparent',
-                    border: active ? '1px solid var(--theme-accent)' : '1px solid transparent',
-                  }}
-                >
-                  <span
-                    style={{
-                      color: active ? 'var(--theme-accent)' : 'var(--theme-text-secondary)',
-                    }}
-                  >
-                    {tab.icon}
-                  </span>
-                  <span>{tab.label}</span>
-                  {active && (
-                    <span
-                      className="absolute -bottom-[2px] left-1/2 -translate-x-1/2 w-4 h-[2px] rounded-full"
-                      style={{ backgroundColor: 'var(--theme-accent)' }}
-                    />
-                  )}
-                </button>
-              );
-            })}
-          </nav>
-
-          {/* Right Wing: Battery status centered halfway between the tabs and the window edge */}
-          <div className="flex-1 flex items-center justify-center pointer-events-auto">
-            {settings.showBatteryChip && battery?.has_battery && (
+          {/* Left Wing: Battery (Default) or Search Button */}
+          <div className="shrink-0 flex items-center justify-start pointer-events-auto min-w-[32px]">
+            {settings.batteryPosition === 'left' &&
+            settings.showBatteryChip &&
+            battery?.has_battery ? (
               <span
                 className="px-2 py-0.5 rounded-full text-[10px] font-mono flex items-center gap-1 shadow-sm select-none"
                 style={{
@@ -1249,7 +1240,118 @@ const CanopyShellContent: React.FC = () => {
                 )}
                 <span>{Math.round(battery.percent)}%</span>
               </span>
-            )}
+            ) : settings.showHeaderSearch ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setPaletteQuery('');
+                  setPaletteOpen(true);
+                }}
+                className="p-1.5 rounded-full text-xs transition-all duration-150 cursor-pointer flex items-center justify-center opacity-75 hover:opacity-100 shadow-sm"
+                style={{
+                  background: 'var(--theme-card)',
+                  border: '1px solid var(--theme-border)',
+                  color: 'var(--theme-accent)',
+                }}
+                title="Quick Search / Command Palette (` or Ctrl+P)"
+              >
+                <Search className="w-3.5 h-3.5" />
+              </button>
+            ) : null}
+          </div>
+
+          {/* Center: Tabs sized much bigger, dividing the whole remaining width equally */}
+          <nav
+            className="flex-1 min-w-0 mx-2 flex items-center p-1 rounded-full pointer-events-auto h-9"
+            style={{
+              background: 'var(--theme-card)',
+              border: '1px solid var(--theme-border)',
+            }}
+          >
+            {visibleTabs.map((tab) => {
+              const active = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => {
+                    setActiveTab(tab.id);
+                    void notifyTabSwitched();
+                  }}
+                  className={`relative flex-1 min-w-0 h-[29px] flex items-center justify-center gap-1 px-1 rounded-full tracking-tight transition-all duration-200 pointer-events-auto cursor-pointer ${
+                    active ? 'font-semibold shadow-sm' : 'opacity-70 hover:opacity-100'
+                  }`}
+                  style={{
+                    color: active ? 'var(--theme-text-primary)' : 'var(--theme-text-secondary)',
+                    background: active ? 'var(--theme-track)' : 'transparent',
+                    border: active ? '1px solid var(--theme-accent)' : '1px solid transparent',
+                  }}
+                >
+                  <span
+                    className="w-3.5 h-3.5 flex items-center justify-center shrink-0"
+                    style={{
+                      color: active ? 'var(--theme-accent)' : 'var(--theme-text-secondary)',
+                    }}
+                  >
+                    {tab.icon}
+                  </span>
+                  <span className="truncate text-[9.5px] font-semibold tracking-tighter leading-none">
+                    {tab.label}
+                  </span>
+                  {active && (
+                    <span
+                      className="absolute -bottom-[2px] left-1/2 -translate-x-1/2 w-4 h-[2px] rounded-full"
+                      style={{ backgroundColor: 'var(--theme-accent)' }}
+                    />
+                  )}
+                </button>
+              );
+            })}
+          </nav>
+
+          {/* Right Wing: Battery status (if on right) or Search Button (if battery is on left) */}
+          <div className="shrink-0 flex items-center justify-end pointer-events-auto min-w-[32px]">
+            {settings.batteryPosition === 'right' &&
+            settings.showBatteryChip &&
+            battery?.has_battery ? (
+              <span
+                className="px-2 py-0.5 rounded-full text-[10px] font-mono flex items-center gap-1 shadow-sm select-none"
+                style={{
+                  background: 'var(--theme-card)',
+                  border: '1px solid var(--theme-border)',
+                  color: battery.charging ? 'var(--theme-accent)' : 'var(--theme-text-secondary)',
+                }}
+                title={
+                  battery.charging
+                    ? `Charging — ${Math.round(battery.percent)}%`
+                    : `On battery — ${Math.round(battery.percent)}%`
+                }
+              >
+                {battery.charging ? (
+                  <BatteryCharging className="w-3 h-3 shrink-0" />
+                ) : (
+                  <Battery className="w-3 h-3 shrink-0" />
+                )}
+                <span>{Math.round(battery.percent)}%</span>
+              </span>
+            ) : settings.showHeaderSearch && settings.batteryPosition === 'left' ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setPaletteQuery('');
+                  setPaletteOpen(true);
+                }}
+                className="p-1.5 rounded-full text-xs transition-all duration-150 cursor-pointer flex items-center justify-center opacity-75 hover:opacity-100 shadow-sm"
+                style={{
+                  background: 'var(--theme-card)',
+                  border: '1px solid var(--theme-border)',
+                  color: 'var(--theme-accent)',
+                }}
+                title="Quick Search / Command Palette (` or Ctrl+P)"
+              >
+                <Search className="w-3.5 h-3.5" />
+              </button>
+            ) : null}
           </div>
         </header>
 
@@ -1318,6 +1420,15 @@ const CanopyShellContent: React.FC = () => {
                 onSelectSession={handleSelectSession}
                 initialSubView={mediaSubView}
               />
+            </ErrorBoundary>
+          )}
+
+          {/* ================================================================================= */}
+          {/* TAB: CONNECT (Wi-Fi Networks, Bluetooth Devices, Hotspot, Power Saver, Casting)  */}
+          {/* ================================================================================= */}
+          {activeTab === 'network' && (
+            <ErrorBoundary fallbackTitle="Connections Hub">
+              <NetworkView stats={stats} onToastNotification={handleToastNotification} />
             </ErrorBoundary>
           )}
 

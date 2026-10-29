@@ -231,7 +231,7 @@ public sealed class SmtcMediaController : IDisposable
                 return new SmtcMediaSnapshot("No media", "Idle", string.Empty, false, 0.0, 1.0, null, "System Audio", []);
             }
 
-            IReadOnlyList<MediaSessionSnapshot> sessions = [];
+            IReadOnlyList<MediaSessionSnapshot> sessions = await GetSessionsAsync();
             var session = ResolveTargetSession(manager);
             if (session is null)
             {

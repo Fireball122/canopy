@@ -30,6 +30,19 @@ interface ConcentricGaugeProps {
   icon: React.ReactNode;
 }
 
+function formatShortGpuName(raw: string | undefined): string {
+  if (!raw) return 'GPU Core';
+  const clean = raw
+    .replace(/^NVIDIA\s+/i, '')
+    .replace(/^AMD\s+/i, '')
+    .replace(/^Intel(\(R\))?\s+/i, '')
+    .replace(/GeForce\s+/i, '')
+    .replace(/Graphics\s*$/i, '')
+    .replace(/Laptop GPU\s*$/i, '')
+    .trim();
+  return clean || 'GPU Core';
+}
+
 const ConcentricDualArcGauge: React.FC<ConcentricGaugeProps> = ({
   outerPercent,
   innerPercent,
@@ -139,8 +152,9 @@ const ConcentricDualArcGauge: React.FC<ConcentricGaugeProps> = ({
             {centerValue}
           </div>
           <div
-            className="text-[11px] font-medium mt-1"
+            className="text-[11px] font-medium mt-1 max-w-[110px] truncate"
             style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))' }}
+            title={typeof centerSublabel === 'string' ? centerSublabel : undefined}
           >
             {centerSublabel}
           </div>
@@ -344,11 +358,7 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initial
           innerColor="#89dceb"
           centerValue={gpuTempC !== null ? `${gpuTempC}°C` : gpuAvailable ? `${gpuUsage}%` : 'N/A'}
           centerSublabel={
-            stats.gpu_name
-              ? stats.gpu_name
-              : gpuAvailable
-                ? 'GPU active'
-                : 'GPU telemetry unavailable'
+            stats.gpu_name ? formatShortGpuName(stats.gpu_name) : gpuAvailable ? 'GPU Core' : 'GPU'
           }
           pillText={
             gpuAvailable

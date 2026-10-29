@@ -145,7 +145,7 @@ input[type="range"].caelestia-slider {
   color: var(--theme-text-primary);
   backdrop-filter: blur(var(--glass-blur, 24px)) saturate(180%);
   -webkit-backdrop-filter: blur(var(--glass-blur, 24px)) saturate(180%);
-  border: 1px solid var(--theme-border);
+  border: 1.5px solid var(--theme-border);
   border-top: none;
   border-top-left-radius: 0px;
   border-top-right-radius: 0px;

@@ -52,6 +52,28 @@ export interface MediaInfo {
   is_shuffle?: boolean | null;
   auto_repeat?: number; // 0 = none, 1 = track, 2 = list
 }
+export interface WifiState {
+  enabled: boolean;
+  connected: boolean;
+  ssid?: string;
+  signal?: number; // 0-100
+  profiles: string[];
+  bssid?: string;
+  band?: string;
+}
+
+export interface BluetoothDeviceInfo {
+  id: string;
+  name: string;
+  status: string;
+  connected: boolean;
+}
+
+export interface BluetoothState {
+  enabled: boolean;
+  devices: BluetoothDeviceInfo[];
+}
+
 export interface AudioState {
   volume: number;
   muted: boolean;
@@ -452,7 +474,13 @@ export async function getMediaInfo(): Promise<MediaInfo> {
     sessions: fallbackSessions,
   }));
 
-  const hasValidSessionList = Array.isArray(info.sessions) && info.sessions.length > 0;
+  const isHost = isWebViewHost();
+  const sessionsToUse = isHost
+    ? (info.sessions ?? [])
+    : Array.isArray(info.sessions) && info.sessions.length > 0
+      ? info.sessions
+      : fallbackSessions;
+
   return {
     title: info.title || activeFallbackTrack.title,
     artist: info.artist || activeFallbackTrack.artist,
@@ -465,7 +493,7 @@ export async function getMediaInfo(): Promise<MediaInfo> {
         : fallbackDuration,
     artwork_url: info.artwork_url ?? activeFallbackTrack.artwork_url,
     source_app: info.source_app || activeFallbackTrack.source_app,
-    sessions: hasValidSessionList ? info.sessions : fallbackSessions,
+    sessions: sessionsToUse,
     is_shuffle: typeof info.is_shuffle === 'boolean' ? info.is_shuffle : false,
     auto_repeat: typeof info.auto_repeat === 'number' ? info.auto_repeat : 0,
   };
@@ -475,6 +503,9 @@ export async function getMediaSessions(): Promise<MediaSessionItem[]> {
   const sessions = await invokeBridge<MediaSessionItem[]>('get_media_sessions', undefined, () =>
     buildFallbackSessions(),
   );
+  if (isWebViewHost()) {
+    return Array.isArray(sessions) ? sessions : [];
+  }
   if (!Array.isArray(sessions) || sessions.length === 0) {
     return buildFallbackSessions();
   }
@@ -1198,4 +1229,164 @@ export async function executePowerAction(
   action: 'sleep' | 'restart' | 'shutdown' | 'lock' | 'signout' | 'hibernate',
 ): Promise<boolean> {
   return invokeBridge<boolean>('execute_power_action', { action }, () => true);
+}
+
+let fallbackWifiEnabled = true;
+let fallbackWifiConnected = true;
+let fallbackWifiSsid = 'Canopy-Studio-WiFi6E';
+let fallbackBluetoothEnabled = true;
+
+export async function getWifiState(): Promise<WifiState> {
+  return invokeBridge<WifiState>('get_wifi_state', undefined, () => ({
+    enabled: fallbackWifiEnabled,
+    connected: fallbackWifiConnected,
+    ssid: fallbackWifiConnected ? fallbackWifiSsid : undefined,
+    signal: fallbackWifiConnected ? 95 : 0,
+    profiles: ['Canopy-Studio-WiFi6E', 'Ultaria-Home-5G', 'Guest_Access_Protected'],
+    bssid: '60:e9:aa:ca:50:2f',
+    band: '6 GHz',
+  }));
+}
+
+export async function setWifiEnabled(enabled: boolean): Promise<boolean> {
+  fallbackWifiEnabled = enabled;
+  if (!enabled) {
+    fallbackWifiConnected = false;
+  }
+  return invokeBridge<boolean>('set_wifi_enabled', { enabled }, () => true);
+}
+
+export async function connectWifi(ssid: string): Promise<boolean> {
+  fallbackWifiConnected = true;
+  fallbackWifiSsid = ssid;
+  return invokeBridge<boolean>('connect_wifi', { ssid }, () => true);
+}
+
+export async function disconnectWifi(): Promise<boolean> {
+  fallbackWifiConnected = false;
+  return invokeBridge<boolean>('disconnect_wifi', undefined, () => true);
+}
+
+export async function getBluetoothState(): Promise<BluetoothState> {
+  return invokeBridge<BluetoothState>('get_bluetooth_state', undefined, () => ({
+    enabled: fallbackBluetoothEnabled,
+    devices: [
+      { id: 'bt-1', name: 'Sony WH-1000XM5', status: 'OK', connected: true },
+      { id: 'bt-2', name: 'Xbox Wireless Controller', status: 'OK', connected: true },
+      { id: 'bt-3', name: 'MX Master 3S', status: 'OK', connected: false },
+      { id: 'bt-4', name: 'Pixel 8 Pro', status: 'OK', connected: false },
+    ],
+  }));
+}
+
+export async function setBluetoothEnabled(enabled: boolean): Promise<boolean> {
+  fallbackBluetoothEnabled = enabled;
+  return invokeBridge<boolean>('set_bluetooth_enabled', { enabled }, () => true);
+}
+
+export interface HotspotState {
+  enabled: boolean;
+  supported: boolean;
+  ssid: string;
+  passphrase: string;
+  clients: number;
+  band: string;
+}
+
+export async function getHotspotState(): Promise<HotspotState> {
+  return invokeBridge<HotspotState>('get_hotspot_state', undefined, () => ({
+    enabled: false,
+    supported: true,
+    ssid: 'Hotspot',
+    passphrase: '',
+    clients: 0,
+    band: '5.0 GHz',
+  }));
+}
+
+export async function toggleHotspot(): Promise<{ enabled: boolean; success: boolean }> {
+  return invokeBridge<{ enabled: boolean; success: boolean }>('toggle_hotspot', undefined, () => ({
+    enabled: true,
+    success: true,
+  }));
+}
+
+export async function setHotspotConfig(
+  ssid: string,
+  passphrase: string,
+): Promise<{ success: boolean; reason?: string; ssid?: string }> {
+  return invokeBridge<{ success: boolean; reason?: string; ssid?: string }>(
+    'set_hotspot_config',
+    { ssid, passphrase },
+    () => ({ success: true, ssid }),
+  );
+}
+
+export interface PowerModeState {
+  is_power_saver: boolean;
+  active_scheme: string;
+  has_battery: boolean;
+}
+
+export async function getPowerMode(): Promise<PowerModeState> {
+  return invokeBridge<PowerModeState>('get_power_mode', undefined, () => ({
+    is_power_saver: false,
+    active_scheme: 'Balanced',
+    has_battery: false,
+  }));
+}
+
+export async function togglePowerSaver(): Promise<{ is_power_saver: boolean; success: boolean }> {
+  return invokeBridge<{ is_power_saver: boolean; success: boolean }>(
+    'toggle_power_saver',
+    undefined,
+    () => ({ is_power_saver: true, success: true }),
+  );
+}
+
+export async function getDesktopMonitorThumbnail(): Promise<{ data_url: string | null }> {
+  return invokeBridge<{ data_url: string | null }>(
+    'get_desktop_monitor_thumbnail',
+    undefined,
+    () => ({
+      data_url: null,
+    }),
+  );
+}
+
+export interface NetworkAdapterInfo {
+  id: string;
+  name: string;
+  description: string;
+  type: 'ethernet' | 'wifi';
+  status: string;
+  speed_mbps: number;
+  ip_address: string;
+  is_connected: boolean;
+}
+
+export async function getNetworkAdapters(): Promise<NetworkAdapterInfo[]> {
+  return invokeBridge<NetworkAdapterInfo[]>('get_network_adapters', undefined, () => [
+    {
+      id: 'eth-1',
+      name: 'Ethernet',
+      description: 'Gigabit Ethernet Adapter',
+      type: 'ethernet',
+      status: 'up',
+      speed_mbps: 1000,
+      ip_address: '192.168.1.189',
+      is_connected: true,
+    },
+  ]);
+}
+
+export async function addAndConnectWifi(
+  ssid: string,
+  password: string,
+): Promise<{ success: boolean; message: string }> {
+  return invokeBridge<{ success: boolean; message: string }>(
+    'add_and_connect_wifi',
+    { ssid, password },
+    () => ({ success: true, message: `Connected to ${ssid}` }),
+  );
 }

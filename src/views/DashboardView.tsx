@@ -4,6 +4,7 @@ import {
   BatteryCharging,
   BellOff,
   Calculator,
+  Check,
   ChevronRight,
   Clock,
   CloudSun,
@@ -23,10 +24,11 @@ import {
   Scissors,
   SkipBack,
   SkipForward,
+  Sliders,
   Terminal as TerminalIcon,
 } from 'lucide-react';
 import type React from 'react';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarCard } from '../components/CalendarCard';
 import { CanopyMascot } from '../components/CanopyMascot';
 import { RadialGauge } from '../components/RadialGauge';
@@ -141,13 +143,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const dateNum = currentTime.getDate();
 
   const compactUptime = useMemo(() => {
-    return (stats.uptime_formatted || '0m')
-      .replace(' days', 'd')
-      .replace(' day', 'd')
-      .replace(' hours', 'h')
-      .replace(' hour', 'h')
-      .replace(' mins', 'm')
-      .replace(' min', 'm');
+    const raw = stats.uptime_formatted || '';
+    const cleaned = raw
+      .replace(/^up\s+/i, '')
+      .replace(/\s*days?/gi, 'd')
+      .replace(/\s*hours?/gi, 'h')
+      .replace(/\s*minutes?/gi, 'm')
+      .replace(/\s*mins?/gi, 'm')
+      .replace(/,\s*/g, ' ')
+      .trim();
+    return cleaned || '0m';
   }, [stats.uptime_formatted]);
 
   // Track & Title fallback: in WebView2 host mode, display Idle when no media is playing
@@ -174,13 +179,30 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const vinylStroke = 3;
   const vinylRadius = (vinylSize - vinylStroke) / 2;
   const vinylCircumference = 2 * Math.PI * vinylRadius;
+
+  // Interactive circular ring scrubbing (hold position visually while dragging, seek only on release)
+  const [scrubPreviewSecs, setScrubPreviewSecs] = useState<number | null>(null);
+  const [sessionDropdownOpen, setSessionDropdownOpen] = useState(false);
+  const sessionDropdownRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!sessionDropdownOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (sessionDropdownRef.current && !sessionDropdownRef.current.contains(e.target as Node)) {
+        setSessionDropdownOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', handleClickOutside);
+    return () => window.removeEventListener('mousedown', handleClickOutside);
+  }, [sessionDropdownOpen]);
+
+  const displayedPosition = scrubPreviewSecs ?? effectivePosition;
   const progressRatio =
-    effectiveDuration > 0 ? Math.min(1, Math.max(0, effectivePosition / effectiveDuration)) : 0;
+    effectiveDuration > 0 ? Math.min(1, Math.max(0, displayedPosition / effectiveDuration)) : 0;
   const vinylDashoffset = vinylCircumference * (1 - progressRatio);
 
-  // Interactive circular ring scrubbing
-  const handleRingScrub = useCallback(
-    (e: React.PointerEvent<SVGSVGElement>) => {
+  const calcScrubSecs = useCallback(
+    (e: React.PointerEvent<SVGSVGElement>): number => {
       const rect = e.currentTarget.getBoundingClientRect();
       const cx = rect.left + rect.width / 2;
       const cy = rect.top + rect.height / 2;
@@ -192,10 +214,44 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       if (angle < 0) angle += 2 * Math.PI;
 
       const frac = Math.max(0, Math.min(1, angle / (2 * Math.PI)));
-      const targetSecs = Math.round(frac * (effectiveDuration || 300));
-      onSeek(targetSecs);
+      return Math.round(frac * (effectiveDuration || 300));
     },
-    [effectiveDuration, onSeek],
+    [effectiveDuration],
+  );
+
+  const handleRingPointerDown = useCallback(
+    (e: React.PointerEvent<SVGSVGElement>) => {
+      e.currentTarget.setPointerCapture(e.pointerId);
+      const secs = calcScrubSecs(e);
+      setScrubPreviewSecs(secs);
+    },
+    [calcScrubSecs],
+  );
+
+  const handleRingPointerMove = useCallback(
+    (e: React.PointerEvent<SVGSVGElement>) => {
+      if (scrubPreviewSecs !== null || e.buttons === 1) {
+        const secs = calcScrubSecs(e);
+        setScrubPreviewSecs(secs);
+      }
+    },
+    [calcScrubSecs, scrubPreviewSecs],
+  );
+
+  const handleRingPointerUp = useCallback(
+    (e: React.PointerEvent<SVGSVGElement>) => {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        try {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        } catch {
+          // Ignore
+        }
+      }
+      const secs = scrubPreviewSecs ?? calcScrubSecs(e);
+      setScrubPreviewSecs(null);
+      onSeek(secs);
+    },
+    [calcScrubSecs, onSeek, scrubPreviewSecs],
   );
 
   return (
@@ -204,17 +260,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       <div className="w-[165px] shrink-0 flex flex-col gap-2 h-full">
         {/* Weather Card (Top) */}
         <div
-          role="button"
-          tabIndex={0}
-          onClick={() => onNavigateTab('weather')}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              onNavigateTab('weather');
-            }
-          }}
-          className="bento-card bento-card-interactive flex-1 p-3 flex flex-col justify-between text-left group relative overflow-hidden pointer-events-auto cursor-pointer"
-          title="Click to open Weather station"
+          role={settings.showWeatherTab ? 'button' : undefined}
+          tabIndex={settings.showWeatherTab ? 0 : undefined}
+          onClick={settings.showWeatherTab ? () => onNavigateTab('weather') : undefined}
+          onKeyDown={
+            settings.showWeatherTab
+              ? (e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onNavigateTab('weather');
+                  }
+                }
+              : undefined
+          }
+          className={`bento-card flex-1 p-3 flex flex-col justify-between text-left group relative overflow-hidden pointer-events-auto ${
+            settings.showWeatherTab ? 'bento-card-interactive cursor-pointer' : 'cursor-default'
+          }`}
+          title={settings.showWeatherTab ? 'Click to open Weather station' : 'Weather station'}
         >
           <div className="flex items-start justify-between w-full">
             <div className="min-w-0">
@@ -353,21 +415,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           {/* Day & Date Badge Underneath */}
           <div
-            className="flex items-center justify-between pt-1.5"
+            className="flex items-center justify-between pt-1.5 gap-1 select-none"
             style={{ borderTop: '1px solid var(--theme-border)' }}
           >
             <span
-              className="text-[11px] font-medium"
+              className="text-[11px] font-medium shrink-0 whitespace-nowrap"
               style={{ color: 'var(--theme-text-primary)' }}
             >
               {dayName}, {monthName} {dateNum}
             </span>
             <span
-              className="text-[9px] font-mono flex items-center gap-1"
+              className="text-[9px] font-mono flex items-center gap-1 shrink-0 whitespace-nowrap tabular-nums"
               style={{ color: 'var(--theme-text-secondary)' }}
-              title="System Uptime"
+              title={`System Uptime: ${stats.uptime_formatted || compactUptime}`}
             >
-              <Clock className="w-2.5 h-2.5 opacity-70" />
+              <Clock className="w-2.5 h-2.5 opacity-70 shrink-0" />
               <span>up {compactUptime}</span>
             </span>
           </div>
@@ -573,35 +635,111 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <Disc className={`w-3 h-3 ${isMusicPlaying ? 'animate-spin' : ''}`} />
             <span>{isMusicPlaying ? 'Playing' : 'Paused'}</span>
           </span>
-          {media.sessions && media.sessions.length > 1 ? (
+          <div ref={sessionDropdownRef}>
             <button
               type="button"
               onClick={() => {
-                const sessions = media.sessions;
-                if (!sessions || sessions.length <= 1) return;
-                const currentIdx = sessions.findIndex((s) => s.is_current);
-                const nextIdx = currentIdx >= 0 ? (currentIdx + 1) % sessions.length : 0;
-                void onSelectSession(sessions[nextIdx].id);
+                if (media.sessions && media.sessions.length > 1) {
+                  setSessionDropdownOpen((prev) => !prev);
+                } else {
+                  onNavigateTab('media');
+                }
               }}
-              title="Click to cycle media source (Spotify, Chrome, etc.)"
-              className="text-[9px] font-mono truncate max-w-[100px] px-1.5 py-0.5 rounded border flex items-center gap-1 transition-colors cursor-pointer hover:border-[var(--theme-accent)]"
+              title={
+                media.sessions && media.sessions.length > 1
+                  ? 'Click to switch active media source'
+                  : 'Click to open Media Hub & Mixer'
+              }
+              className="text-[9px] font-mono truncate max-w-[110px] px-1.5 py-0.5 rounded border flex items-center gap-1 transition-all cursor-pointer hover:border-[var(--theme-accent)] select-none active:scale-95"
               style={{
                 color: 'var(--theme-text-primary)',
                 background: 'var(--theme-card, rgba(255, 255, 255, 0.05))',
-                borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
+                borderColor: sessionDropdownOpen
+                  ? 'var(--theme-accent)'
+                  : 'var(--theme-border, rgba(255, 255, 255, 0.08))',
               }}
             >
-              <span className="truncate">{media.source_app || 'Audio'}</span>
-              <ChevronRight className="w-2.5 h-2.5 shrink-0 opacity-70" />
+              <span className="truncate">{media.source_app || 'System Audio'}</span>
+              <ChevronRight
+                className={`w-2.5 h-2.5 shrink-0 opacity-70 transition-transform duration-200 ${sessionDropdownOpen ? 'rotate-90' : ''}`}
+              />
             </button>
-          ) : (
-            <span
-              className="text-[9px] font-mono truncate max-w-[90px]"
-              style={{ color: 'var(--theme-text-secondary)' }}
-            >
-              {media.source_app || 'System Audio'}
-            </span>
-          )}
+
+            {/* Floating Audio Source Dropdown Popover */}
+            {sessionDropdownOpen && media.sessions && media.sessions.length > 0 && (
+              <div
+                className="absolute inset-x-1.5 top-7 z-40 max-h-[160px] p-1.5 rounded-xl border shadow-2xl backdrop-blur-2xl flex flex-col gap-1 animate-in fade-in zoom-in-95 duration-150"
+                style={{
+                  background: 'var(--theme-bg, #11111b)',
+                  borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.15))',
+                  boxShadow: '0 12px 36px rgba(0, 0, 0, 0.65)',
+                }}
+              >
+                <div className="flex items-center justify-between px-2 py-1 text-[9px] font-mono uppercase tracking-wider text-[var(--theme-text-secondary)] border-b border-[var(--theme-border)]">
+                  <span>Audio Sources</span>
+                  <span className="tabular-nums">{media.sessions.length} active</span>
+                </div>
+
+                <div className="flex flex-col gap-0.5 max-h-[140px] overflow-y-auto canopy-scroll">
+                  {media.sessions.map((sess) => {
+                    const isCur = sess.is_current;
+                    return (
+                      <button
+                        key={sess.id}
+                        type="button"
+                        onClick={() => {
+                          setSessionDropdownOpen(false);
+                          void onSelectSession(sess.id);
+                        }}
+                        className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg text-left transition-colors pointer-events-auto cursor-pointer hover:bg-white/10 group"
+                        style={{
+                          background: isCur ? 'var(--theme-track)' : 'transparent',
+                        }}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div
+                            className="text-[10px] font-semibold truncate flex items-center gap-1"
+                            style={{ color: 'var(--theme-text-primary)' }}
+                          >
+                            <span className="truncate">{sess.app_name || 'App'}</span>
+                            {isCur && (
+                              <Check className="w-2.5 h-2.5 text-[var(--theme-accent)] shrink-0" />
+                            )}
+                          </div>
+                          <div
+                            className="text-[9px] truncate text-[var(--theme-text-secondary)]"
+                            title={sess.title || 'Idle'}
+                          >
+                            {sess.title || 'No track title'}
+                          </div>
+                        </div>
+                        {sess.is_playing ? (
+                          <Play className="w-2.5 h-2.5 text-[var(--theme-accent)] shrink-0 fill-current" />
+                        ) : (
+                          <Pause className="w-2.5 h-2.5 text-[var(--theme-text-secondary)] shrink-0" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSessionDropdownOpen(false);
+                    onNavigateTab('media');
+                  }}
+                  className="w-full mt-0.5 pt-1 border-t border-[var(--theme-border)] px-2 py-1 rounded-md text-[9px] font-mono flex items-center justify-between text-[var(--theme-accent)] hover:bg-white/5 transition-colors cursor-pointer"
+                >
+                  <span className="flex items-center gap-1">
+                    <Sliders className="w-2.5 h-2.5" />
+                    <span>Open Media Mixer</span>
+                  </span>
+                  <ChevronRight className="w-2.5 h-2.5" />
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Circular Vinyl Artwork with Interactive Circular Progress Ring */}
@@ -624,14 +762,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <svg
               className="w-full h-full -rotate-90 pointer-events-auto cursor-pointer"
               viewBox={`0 0 ${vinylSize} ${vinylSize}`}
-              onPointerDown={(e) => {
-                e.currentTarget.setPointerCapture(e.pointerId);
-                handleRingScrub(e);
-              }}
-              onPointerMove={(e) => {
-                if (e.buttons === 1) {
-                  handleRingScrub(e);
-                }
+              onPointerDown={handleRingPointerDown}
+              onPointerMove={handleRingPointerMove}
+              onPointerUp={handleRingPointerUp}
+              onPointerCancel={() => setScrubPreviewSecs(null)}
+              style={{
+                transition: scrubPreviewSecs !== null ? 'none' : undefined,
               }}
             >
               <title>Click or drag ring to seek anywhere in track</title>

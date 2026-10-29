@@ -80,8 +80,8 @@ export const RadialGauge: React.FC<RadialGaugeProps> = ({
       <svg width={size} height={size} className="overflow-visible" aria-hidden="true">
         <defs>
           <linearGradient id={spokeGradientId} x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor={accentColor} />
-            <stop offset="100%" stopColor={secondaryColor} />
+            <stop offset="0%" style={{ stopColor: accentColor }} stopColor={accentColor} />
+            <stop offset="100%" style={{ stopColor: secondaryColor }} stopColor={secondaryColor} />
           </linearGradient>
         </defs>
 
@@ -104,12 +104,13 @@ export const RadialGauge: React.FC<RadialGaugeProps> = ({
                 x2={spoke.x2}
                 y2={spoke.y2}
                 stroke={active ? `url(#${spokeGradientId})` : 'rgba(255, 255, 255, 0.22)'}
-                strokeWidth={Math.max(1.6, (size / 190) * 2.6)}
-                strokeLinecap="round"
                 style={{
+                  stroke: active ? undefined : 'rgba(255, 255, 255, 0.22)',
                   transition: 'all 85ms ease-out',
                   opacity: active ? Math.min(1, 0.55 + spoke.length / (size * 0.17)) : 0.45,
                 }}
+                strokeWidth={Math.max(1.6, (size / 190) * 2.6)}
+                strokeLinecap="round"
               />
             ))}
           </>

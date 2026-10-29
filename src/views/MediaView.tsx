@@ -326,6 +326,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
   // The dashboard already runs the shared playhead and hands it to us through `media.position_secs`;
   // re-anchoring here keeps this view correct even if it is ever mounted on its own.
   const [isDraggingScrubber, setIsDraggingScrubber] = useState<boolean>(false);
+  const [sliderScrubSecs, setSliderScrubSecs] = useState<number | null>(null);
   const playbackClock = usePlaybackClock(media, { enabled: panelOpen, hold: isDraggingScrubber });
 
   // Continuous rhythmic harmonic tick (dances whenever music is playing)
@@ -599,7 +600,8 @@ export const MediaView: React.FC<MediaViewProps> = ({
   const effectiveDuration =
     smtcDuration > 2.0 ? smtcDuration : inferredDuration > 2.0 ? inferredDuration : 219;
   const clampedPosition = Math.min(effectiveDuration, Math.max(0, playbackClock.position));
-  const progressPercent = Math.min(100, Math.max(0, (clampedPosition / effectiveDuration) * 100));
+  const activePosition = sliderScrubSecs ?? clampedPosition;
+  const progressPercent = Math.min(100, Math.max(0, (activePosition / effectiveDuration) * 100));
 
   const trackTitle = media.title?.trim() || 'No Media Playing';
   const trackArtist = media.artist?.trim() || 'Windows SMTC Audio';
@@ -1088,27 +1090,29 @@ export const MediaView: React.FC<MediaViewProps> = ({
                 className="text-[11px] font-mono tabular-nums w-9 text-right shrink-0"
                 style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))' }}
               >
-                {formatMediaTime(clampedPosition)}
+                {formatMediaTime(activePosition)}
               </span>
 
               <input
                 type="range"
                 min={0}
                 max={effectiveDuration}
-                value={clampedPosition}
-                onMouseDown={() => setIsDraggingScrubber(true)}
-                onMouseUp={() => setIsDraggingScrubber(false)}
-                onTouchStart={() => setIsDraggingScrubber(true)}
-                onTouchEnd={() => setIsDraggingScrubber(false)}
+                value={activePosition}
+                onPointerDown={() => setIsDraggingScrubber(true)}
+                onPointerUp={(e) => {
+                  setIsDraggingScrubber(false);
+                  const target = Number((e.target as HTMLInputElement).value);
+                  setSliderScrubSecs(null);
+                  handleUserSeek(target);
+                }}
                 onChange={(e) => {
-                  handleUserSeek(Number(e.target.value));
+                  setSliderScrubSecs(Number(e.target.value));
                 }}
                 className="caelestia-slider flex-1 h-1.5 rounded-full pointer-events-auto cursor-pointer"
                 style={{
                   background: `linear-gradient(to right, var(--theme-accent, #cba6f7) 0%, #89dceb ${progressPercent}%, var(--theme-track, rgba(255,255,255,0.14)) ${progressPercent}%, var(--theme-track, rgba(255,255,255,0.14)) 100%)`,
                 }}
               />
-
               <span
                 className="text-[11px] font-mono tabular-nums w-9 shrink-0"
                 style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))' }}

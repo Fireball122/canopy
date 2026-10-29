@@ -13,6 +13,7 @@ import { getSettingsJson, saveSettingsJson, setHostConfig } from '../services/ho
 export type TabId =
   | 'dashboard'
   | 'media'
+  | 'network'
   | 'performance'
   | 'apps'
   | 'wallpaper'
@@ -42,10 +43,22 @@ export interface CanopySettings {
 
   // Dashboard, Media & Navigation Customization
   enableBrightnessSlider: boolean; // default false (ideal for desktop PCs)
+  showMediaTab: boolean; // toggles [ Media ] tab
+  showNetworkTab: boolean; // toggles [ Connect ] tab (Wi-Fi, Bluetooth, Hotspot, Battery Saver, Cast)
+  showPerformanceTab: boolean; // toggles [ Performance ] tab
   showAppsTab: boolean; // toggles [ Apps ] tab between Performance and Wallpaper
+  showWallpaperTab: boolean; // toggles [ Wallpaper ] tab
+  showWeatherTab: boolean; // toggles [ Weather ] tab
+  showPowerTab: boolean; // toggles [ Power ] tab
+  showSettingsTab: boolean; // toggles [ Settings ] tab
   mascotMode: 'bongo' | 'gif' | 'none'; // 'bongo', 'gif', or 'none' (No GIF option)
   customMascotGifUrl: string; // optional custom GIF URL or data URL replacing Bongo Cat
-  showTerminalTab: boolean; // toggles [ Terminal ] tab on/off
+  showTerminalTab: boolean; // toggles [ Developer / Terminal ] tab on/off (off by default)
+  showHeaderSearch: boolean; // toggles Quick Search Command Palette icon in top header
+  batteryPosition: 'left' | 'right'; // battery indicator placement ('left' by default, 'right' optional)
+  enableHotspotToggle: boolean; // toggles Hotspot button in Connect tab
+  enablePowerSaverToggle: boolean; // toggles Battery Saver button in Connect tab
+  enableCastingToggle: boolean; // toggles Wireless Display / Casting button in Connect tab
   pinnedApps: string[]; // App IDs pinned to Dashboard dock
   customApps?: Record<string, { label: string; path: string; icon_data_url?: string | null }>; // Metadata for custom pinned apps
   visualizerStyle: 'radial' | 'bars' | 'wave'; // Audio visualizer mode
@@ -123,10 +136,22 @@ export const DEFAULT_SETTINGS: CanopySettings = {
   glassBlurStrength: 24,
   glassOpacity: 0.86,
   enableBrightnessSlider: false,
+  showMediaTab: true,
+  showNetworkTab: true,
+  showPerformanceTab: true,
   showAppsTab: true,
+  showWallpaperTab: true,
+  showWeatherTab: true,
+  showPowerTab: true,
+  showSettingsTab: true,
   mascotMode: 'bongo',
   customMascotGifUrl: '',
   showTerminalTab: false,
+  showHeaderSearch: false,
+  batteryPosition: 'left',
+  enableHotspotToggle: true,
+  enablePowerSaverToggle: true,
+  enableCastingToggle: true,
   pinnedApps: ['terminal', 'explorer', 'taskmgr', 'msedge', 'code'],
   customApps: {},
   visualizerStyle: 'radial',

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using NAudio.CoreAudioApi;
 using NAudio.CoreAudioApi.Interfaces;
@@ -28,13 +29,18 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
     private MMDevice? _micDevice;
     private AudioEndpointVolume? _micEndpointVolume;
 
+    private sealed class DeviceCaptureState
+    {
+        public readonly float[] SampleBuffer = new float[FftLength];
+        public int SampleBufferPos;
+        public int DecimateCounter;
+        public readonly Complex[] FftBuffer = new Complex[FftLength];
+    }
+
     private readonly List<WasapiLoopbackCapture> _loopbackCaptures = new();
-    private readonly float[] _sampleBuffer = new float[FftLength];
-    private int _sampleBufferPos;
-    private readonly Complex[] _fftBuffer = new Complex[FftLength];
+    private readonly ConcurrentDictionary<WasapiLoopbackCapture, DeviceCaptureState> _captureStates = new();
     private readonly float[] _spectrumBands = new float[SpectrumBands];
     private readonly object _spectrumLock = new();
-    private int _decimateCounter;
     private bool _disposed;
     private volatile bool _isCapturePaused;
     // Diagnostics: last failure surfaced to the host instead of being swallowed by catch {}.
@@ -138,6 +144,7 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
             {
                 previous = new List<WasapiLoopbackCapture>(_loopbackCaptures);
                 _loopbackCaptures.Clear();
+                _captureStates.Clear();
             }
 
             foreach (var cap in previous)
@@ -150,34 +157,58 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
 
             if (_enumerator is null) return;
 
-            if (_device is null)
+            try
             {
-                try
-                {
-                    _device = _enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
-                }
-                catch (Exception ex)
-                {
-                    DiagnosticsLog.Log($"[AudioController] GetDefaultAudioEndpoint error: {ex.Message}");
-                }
+                _device = _enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+            }
+            catch (Exception ex)
+            {
+                DiagnosticsLog.Log($"[AudioController] GetDefaultAudioEndpoint error: {ex.Message}");
             }
 
             var newCaptures = new List<WasapiLoopbackCapture>();
-            if (_device is not null)
+            try
+            {
+                var endpoints = _enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
+                foreach (var dev in endpoints)
+                {
+                    try
+                    {
+                        var capture = new WasapiLoopbackCapture(dev);
+                        _captureStates[capture] = new DeviceCaptureState();
+                        capture.DataAvailable += OnLoopbackDataAvailable;
+                        capture.RecordingStopped += OnLoopbackRecordingStopped;
+                        capture.StartRecording();
+                        newCaptures.Add(capture);
+                    }
+                    catch (Exception ex)
+                    {
+                        DiagnosticsLog.Log($"[AudioController] Loopback capture start on {dev.FriendlyName} warning: {ex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                DiagnosticsLog.Log($"[AudioController] EnumerateAudioEndPoints error: {ex.Message}");
+            }
+
+            if (newCaptures.Count == 0)
             {
                 try
                 {
-                    var capture = new WasapiLoopbackCapture(_device);
-                    capture.DataAvailable += OnLoopbackDataAvailable;
-                    capture.RecordingStopped += OnLoopbackRecordingStopped;
-                    capture.StartRecording();
-                    newCaptures.Add(capture);
+                    var fallbackCapture = new WasapiLoopbackCapture();
+                    _captureStates[fallbackCapture] = new DeviceCaptureState();
+                    fallbackCapture.DataAvailable += OnLoopbackDataAvailable;
+                    fallbackCapture.RecordingStopped += OnLoopbackRecordingStopped;
+                    fallbackCapture.StartRecording();
+                    newCaptures.Add(fallbackCapture);
                 }
                 catch (Exception ex)
                 {
-                    DiagnosticsLog.Log($"[AudioController] Loopback capture start failed: {ex.Message}");
+                    DiagnosticsLog.Log($"[AudioController] Default loopback fallback failed: {ex.Message}");
                 }
             }
+
             if (newCaptures.Count > 0)
             {
                 Interlocked.Exchange(ref _restartAttempt, 0);
@@ -245,6 +276,7 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
         {
             capturesToStop = new List<WasapiLoopbackCapture>(_loopbackCaptures);
             _loopbackCaptures.Clear();
+            _captureStates.Clear();
         }
 
         foreach (var cap in capturesToStop)
@@ -280,67 +312,63 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
             if (e.BytesRecorded <= 0 || _disposed)
                 return;
 
-        var capture = sender as WasapiLoopbackCapture;
-        var wf = capture?.WaveFormat;
-        if (wf is null) return;
-        int channels = Math.Max(1, wf.Channels);
-        int bitsPerSample = wf.BitsPerSample;
-        int bytesPerSample = bitsPerSample / 8;
-        if (bytesPerSample <= 0) bytesPerSample = 4;
-        int frameSize = bytesPerSample * channels;
-        int frames = e.BytesRecorded / frameSize;
-        bool isFloat = wf.Encoding == WaveFormatEncoding.IeeeFloat;
+            if (sender is not WasapiLoopbackCapture capture || !_captureStates.TryGetValue(capture, out var state))
+                return;
 
-        // Downsample high-resolution audio (192kHz/96kHz) to ~48kHz for fine frequency FFT resolution
-        int decimateFactor = Math.Max(1, (int)Math.Round(wf.SampleRate / 48000.0));
+            var wf = capture.WaveFormat;
+            if (wf is null) return;
+            int channels = Math.Max(1, wf.Channels);
+            int bitsPerSample = wf.BitsPerSample;
+            int bytesPerSample = bitsPerSample / 8;
+            if (bytesPerSample <= 0) bytesPerSample = 4;
+            int frameSize = bytesPerSample * channels;
+            int frames = e.BytesRecorded / frameSize;
+            bool isFloat = wf.Encoding == WaveFormatEncoding.IeeeFloat || bytesPerSample == 4;
 
-        for (int i = 0; i < frames; i++)
-        {
-            if (++_decimateCounter % decimateFactor != 0)
-                continue;
+            // Downsample high-resolution audio (192kHz/96kHz) to ~48kHz for fine frequency FFT resolution
+            int decimateFactor = Math.Max(1, (int)Math.Round(wf.SampleRate / 48000.0));
 
-            int offset = i * frameSize;
-            float left;
-            float right;
-
-            if (isFloat && bytesPerSample == 4 && offset + bytesPerSample <= e.Buffer.Length)
+            for (int i = 0; i < frames; i++)
             {
-                left = BitConverter.ToSingle(e.Buffer, offset);
-                right = (channels > 1 && offset + frameSize <= e.Buffer.Length)
-                    ? BitConverter.ToSingle(e.Buffer, offset + bytesPerSample)
-                    : left;
-            }
-            else if (bytesPerSample == 2 && offset + bytesPerSample <= e.Buffer.Length)
-            {
-                left = BitConverter.ToInt16(e.Buffer, offset) / 32768.0f;
-                right = (channels > 1 && offset + frameSize <= e.Buffer.Length)
-                    ? BitConverter.ToInt16(e.Buffer, offset + bytesPerSample) / 32768.0f
-                    : left;
-            }
-            else
-            {
-                left = 0f;
-                right = 0f;
-            }
+                if (++state.DecimateCounter % decimateFactor != 0)
+                    continue;
 
-            if (float.IsNaN(left) || float.IsInfinity(left)) left = 0f;
-            if (float.IsNaN(right) || float.IsInfinity(right)) right = 0f;
+                int offset = i * frameSize;
+                float left;
+                float right;
 
-            float mono = (left + right) * 0.5f;
-
-            lock (_sampleBuffer)
-            {
-                if (_sampleBufferPos < _sampleBuffer.Length)
+                if (isFloat && bytesPerSample == 4 && offset + bytesPerSample <= e.Buffer.Length)
                 {
-                    _sampleBuffer[_sampleBufferPos++] = mono;
+                    left = BitConverter.ToSingle(e.Buffer, offset);
+                    right = (channels > 1 && offset + frameSize <= e.Buffer.Length)
+                        ? BitConverter.ToSingle(e.Buffer, offset + bytesPerSample)
+                        : left;
                 }
-                if (_sampleBufferPos >= FftLength)
+                else if (bytesPerSample == 2 && offset + bytesPerSample <= e.Buffer.Length)
                 {
-                    _sampleBufferPos = 0;
-                    ComputeFftSpectrum();
+                    left = BitConverter.ToInt16(e.Buffer, offset) / 32768.0f;
+                    right = (channels > 1 && offset + frameSize <= e.Buffer.Length)
+                        ? BitConverter.ToInt16(e.Buffer, offset + bytesPerSample) / 32768.0f
+                        : left;
+                }
+                else
+                {
+                    left = 0f;
+                    right = 0f;
+                }
+
+                if (float.IsNaN(left) || float.IsInfinity(left)) left = 0f;
+                if (float.IsNaN(right) || float.IsInfinity(right)) right = 0f;
+
+                float mono = (left + right) * 0.5f;
+
+                state.SampleBuffer[state.SampleBufferPos++] = mono;
+                if (state.SampleBufferPos >= FftLength)
+                {
+                    state.SampleBufferPos = 0;
+                    ComputeFftSpectrum(state);
                 }
             }
-        }
         }
         catch (Exception ex)
         {
@@ -348,7 +376,7 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
         }
     }
 
-    private void ComputeFftSpectrum()
+    private void ComputeFftSpectrum(DeviceCaptureState state)
     {
         try
         {
@@ -356,21 +384,20 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
             for (int i = 0; i < FftLength; i++)
             {
                 float window = 0.5f * (1.0f - MathF.Cos(2.0f * MathF.PI * i / (FftLength - 1)));
-                _fftBuffer[i].X = _sampleBuffer[i] * window;
-                _fftBuffer[i].Y = 0.0f;
+                state.FftBuffer[i].X = state.SampleBuffer[i] * window;
+                state.FftBuffer[i].Y = 0.0f;
             }
 
-            // Frame RMS from the raw (unwindowed) capture samples: used to gate digital
-            // silence to exactly zero and as the level reference when no peak meter exists.
+            // Frame RMS from the raw (unwindowed) capture samples
             float sumSq = 0.0f;
             for (int i = 0; i < FftLength; i++)
             {
-                sumSq += _sampleBuffer[i] * _sampleBuffer[i];
+                sumSq += state.SampleBuffer[i] * state.SampleBuffer[i];
             }
             float frameRms = MathF.Sqrt(sumSq / FftLength);
             _lastFrameRms = frameRms;
 
-            FastFourierTransform.FFT(true, FftOrder, _fftBuffer);
+            FastFourierTransform.FFT(true, FftOrder, state.FftBuffer);
 
             lock (_spectrumLock)
             {
@@ -384,14 +411,11 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
                     int startBin = Math.Clamp((int)(lowFrac * maxBin), 0, maxBin - 1);
                     int endBin = Math.Clamp((int)(highFrac * maxBin), startBin + 1, maxBin);
 
-                    // Real per-band magnitude (peak bin in the band). NAudio's un-normalised
-                    // FFT puts a full-scale sine near 0.235, so magnitudes are far below 1.0
-                    // and must be mapped logarithmically rather than scaled linearly.
                     float bandMag = 0.0f;
                     for (int bin = startBin; bin < endBin; bin++)
                     {
-                        float real = _fftBuffer[bin].X;
-                        float imag = _fftBuffer[bin].Y;
+                        float real = state.FftBuffer[bin].X;
+                        float imag = state.FftBuffer[bin].Y;
                         float mag = MathF.Sqrt(real * real + imag * imag);
                         if (mag > bandMag)
                             bandMag = mag;
@@ -400,15 +424,12 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
                     float db = 20.0f * MathF.Log10(MathF.Max(bandMag, 1e-7f));
                     float currentVal = Math.Clamp((db - SpectrumFloorDb) / (SpectrumCeilDb - SpectrumFloorDb), 0.0f, 1.0f);
 
-                    // No synthetic floor: true silence must read 0, not a constant bump.
-                    // (MasterPeakValue is unreliable on loopback devices, so the captured
-                    //  signal's own RMS is the authority here.)
                     if (frameRms < 1e-5f)
                     {
                         currentVal = 0.0f;
                     }
 
-                    // Smooth attack and decay
+                    // Smooth attack and decay across active audio streams
                     if (currentVal > _spectrumBands[b])
                     {
                         _spectrumBands[b] = _spectrumBands[b] * 0.20f + currentVal * 0.80f;
