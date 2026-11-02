@@ -1240,7 +1240,9 @@ const CanopyShellContent: React.FC = () => {
                 )}
                 <span>{Math.round(battery.percent)}%</span>
               </span>
-            ) : settings.showHeaderSearch ? (
+            ) : settings.showHeaderSearch &&
+              (settings.searchPosition ||
+                (settings.batteryPosition === 'left' ? 'right' : 'left')) === 'left' ? (
               <button
                 type="button"
                 onClick={() => {
@@ -1334,7 +1336,9 @@ const CanopyShellContent: React.FC = () => {
                 )}
                 <span>{Math.round(battery.percent)}%</span>
               </span>
-            ) : settings.showHeaderSearch && settings.batteryPosition === 'left' ? (
+            ) : settings.showHeaderSearch &&
+              (settings.searchPosition ||
+                (settings.batteryPosition === 'left' ? 'right' : 'left')) === 'right' ? (
               <button
                 type="button"
                 onClick={() => {

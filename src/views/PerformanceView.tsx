@@ -43,6 +43,17 @@ function formatShortGpuName(raw: string | undefined): string {
   return clean || 'GPU Core';
 }
 
+function formatShortCpuName(raw: string | undefined): string {
+  if (!raw) return 'CPU Core';
+  const clean = raw
+    .replace(/^AMD\s+/i, '')
+    .replace(/^Intel(\(R\))?\s+/i, '')
+    .replace(/Processor\s*$/i, '')
+    .replace(/Core\(TM\)\s*/i, '')
+    .replace(/\d+-Core\s*/i, '')
+    .trim();
+  return clean || 'CPU Core';
+}
 const ConcentricDualArcGauge: React.FC<ConcentricGaugeProps> = ({
   outerPercent,
   innerPercent,
@@ -381,8 +392,14 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initial
           outerColor="var(--theme-accent, #cba6f7)"
           innerColor="#f9e2af"
           centerValue={cpuTempC !== null ? `${cpuTempC}°C` : `${cpuUsage}%`}
-          centerSublabel={cpuTempC !== null ? 'CPU temp' : 'CPU load'}
-          pillText={`${cpuUsage}% Usage`}
+          centerSublabel={
+            stats.cpu_name
+              ? formatShortCpuName(stats.cpu_name)
+              : cpuTempC !== null
+                ? 'CPU temp'
+                : 'CPU load'
+          }
+          pillText={`${cpuUsage}% Usage${cpuTempC !== null ? ` • ${cpuTempC}°C` : ''}`}
           icon={
             <Cpu
               className="w-4 h-4"

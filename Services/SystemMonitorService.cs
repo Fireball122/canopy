@@ -472,6 +472,12 @@ public sealed class SystemMonitorService : IDisposable
         // NVML is the only non-spawning source of GPU temperature; null when no NVIDIA driver is present.
         _cachedGpuTempC = NvmlGpu.TryReadTemperatureCelsius();
 
+        double? nvmlUsage = NvmlGpu.TryReadUtilizationPercent();
+        if (nvmlUsage.HasValue)
+        {
+            _cachedGpuUsage = Math.Clamp(Math.Round(nvmlUsage.Value, 1), 0.0, 100.0);
+            return;
+        }
         List<PerformanceCounter> gpuCounters = _gpuCounters;
         if (gpuCounters.Count > 0)
         {

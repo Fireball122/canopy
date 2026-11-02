@@ -519,7 +519,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
                   <SettingRow
                     title="Battery Indicator Position"
-                    description="Choose which side of the top header shows the battery status"
+                    description="Choose which side shows battery (automatically places Search on opposite side)"
                   >
                     <SegmentedChoice
                       options={[
@@ -529,6 +529,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       value={settings.batteryPosition || 'left'}
                       onChange={(val) =>
                         updateSettings({ batteryPosition: val as 'left' | 'right' })
+                      }
+                    />
+                  </SettingRow>
+
+                  <SettingRow
+                    title="Header Search Position"
+                    description="Side of the header bar where Quick Search button appears"
+                  >
+                    <SegmentedChoice
+                      options={[
+                        { id: 'left', label: 'Left' },
+                        { id: 'right', label: 'Right (Default)' },
+                      ]}
+                      value={
+                        settings.searchPosition ||
+                        (settings.batteryPosition === 'left' ? 'right' : 'left')
+                      }
+                      onChange={(val) =>
+                        updateSettings({ searchPosition: val as 'left' | 'right' })
                       }
                     />
                   </SettingRow>

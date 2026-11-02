@@ -92,7 +92,9 @@ public partial class MainWindow : Window
     private bool _caffeineEnabled;
     private static readonly char[] ChecksumLineSeparators = ['\r', '\n'];
     private static readonly char[] ChecksumSpaceSeparators = [' ', '\t'];
-
+    private static readonly string[] BluetoothDeviceProperties = ["System.Devices.Aep.IsConnected", "System.Devices.Aep.Bluetooth.Le.IsConnectable"];
+    private static List<string>? s_cachedWifiProfiles;
+    private static long s_lastWifiProfilesTicks;
     /// <summary>Deferred reminders are dropped once they are this stale, so a long game session never
     /// dumps a burst of overdue alerts the moment gameplay ends.</summary>
     private static readonly TimeSpan ReminderDeferWindow = TimeSpan.FromMinutes(10);
@@ -1491,9 +1493,55 @@ public partial class MainWindow : Window
                 }
             }
 
+            case "delete_wifi_profile":
+            {
+                string profileName = string.Empty;
+                if (args.ValueKind == JsonValueKind.Object && args.TryGetProperty("name", out var nEl))
+                {
+                    profileName = nEl.GetString() ?? string.Empty;
+                }
+                if (!string.IsNullOrWhiteSpace(profileName))
+                {
+                    try
+                    {
+                        using var p = Process.Start(new ProcessStartInfo("netsh", $"wlan delete profile name=\"{profileName}\"")
+                        {
+                            CreateNoWindow = true,
+                            UseShellExecute = false
+                        });
+                        if (p != null) await p.WaitForExitAsync();
+                        s_lastWifiProfilesTicks = 0;
+                        return true;
+                    }
+                    catch
+                    {
+                        return false;
+                    }
+                }
+                return false;
+            }
             case "get_bluetooth_state":
                 return await QueryBluetoothStateAsync();
 
+            case "connect_bluetooth_device":
+            {
+                string devId = string.Empty;
+                if (args.ValueKind == JsonValueKind.Object && args.TryGetProperty("id", out var idEl))
+                {
+                    devId = idEl.GetString() ?? string.Empty;
+                }
+                return await ConnectBluetoothDeviceAsync(devId);
+            }
+
+            case "disconnect_bluetooth_device":
+            {
+                string devId = string.Empty;
+                if (args.ValueKind == JsonValueKind.Object && args.TryGetProperty("id", out var idEl))
+                {
+                    devId = idEl.GetString() ?? string.Empty;
+                }
+                return await DisconnectBluetoothDeviceAsync(devId);
+            }
             case "set_bluetooth_enabled":
             {
                 bool enabled = true;
@@ -3271,40 +3319,50 @@ public partial class MainWindow : Window
         {
         }
 
-        var profiles = new List<string>();
-        try
+        List<string> profiles;
+        long nowTicks = Environment.TickCount64;
+        if (s_cachedWifiProfiles != null && nowTicks - s_lastWifiProfilesTicks < 15000)
         {
-            var psi = new ProcessStartInfo("netsh", "wlan show profiles")
+            profiles = s_cachedWifiProfiles;
+        }
+        else
+        {
+            profiles = new List<string>();
+            try
             {
-                CreateNoWindow = true,
-                UseShellExecute = false,
-                RedirectStandardOutput = true
-            };
-            using var proc = Process.Start(psi);
-            if (proc != null)
-            {
-                string output = await proc.StandardOutput.ReadToEndAsync();
-                await proc.WaitForExitAsync();
-
-                var lines = output.Split(ChecksumLineSeparators, StringSplitOptions.RemoveEmptyEntries);
-                foreach (var line in lines)
+                var psi = new ProcessStartInfo("netsh", "wlan show profiles")
                 {
-                    var parts = line.Split(':', 2);
-                    if (parts.Length == 2 && parts[0].Contains("User Profile", StringComparison.OrdinalIgnoreCase))
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true
+                };
+                using var proc = Process.Start(psi);
+                if (proc != null)
+                {
+                    string output = await proc.StandardOutput.ReadToEndAsync();
+                    await proc.WaitForExitAsync();
+
+                    var lines = output.Split(ChecksumLineSeparators, StringSplitOptions.RemoveEmptyEntries);
+                    foreach (var line in lines)
                     {
-                        string profileName = parts[1].Trim();
-                        if (!string.IsNullOrEmpty(profileName) && !profiles.Contains(profileName))
+                        var parts = line.Split(':', 2);
+                        if (parts.Length == 2 && parts[0].Contains("User Profile", StringComparison.OrdinalIgnoreCase))
                         {
-                            profiles.Add(profileName);
+                            string profileName = parts[1].Trim();
+                            if (!string.IsNullOrEmpty(profileName) && !profiles.Contains(profileName))
+                            {
+                                profiles.Add(profileName);
+                            }
                         }
                     }
                 }
+                s_cachedWifiProfiles = profiles;
+                s_lastWifiProfilesTicks = nowTicks;
+            }
+            catch
+            {
             }
         }
-        catch
-        {
-        }
-
         return new
         {
             enabled = isEnabled,
@@ -3317,7 +3375,7 @@ public partial class MainWindow : Window
         };
     }
 
-    private static async Task<object> QueryBluetoothStateAsync()
+    private async Task<object> QueryBluetoothStateAsync()
     {
         bool isEnabled = false;
         try
@@ -3329,76 +3387,78 @@ public partial class MainWindow : Window
                 isEnabled = btRadio.State == Windows.Devices.Radios.RadioState.On;
             }
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.Log($"[Bluetooth] GetRadios error: {ex.Message}");
         }
 
         var deviceList = new List<object>();
+        var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var activeAudioNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            var psi = new ProcessStartInfo("powershell", "-NoProfile -NonInteractive -Command \"Get-PnpDevice -Class Bluetooth -Status OK | Select-Object -Property InstanceId, FriendlyName, Status | ConvertTo-Json -Compress\"")
+            var audioDevs = _audioController.GetAudioDevices(NAudio.CoreAudioApi.DataFlow.Render);
+            foreach (var ad in audioDevs)
             {
-                CreateNoWindow = true,
-                UseShellExecute = false,
-                RedirectStandardOutput = true
-            };
-            using var proc = Process.Start(psi);
-            if (proc != null)
-            {
-                string json = await proc.StandardOutput.ReadToEndAsync();
-                await proc.WaitForExitAsync();
-
-                if (!string.IsNullOrWhiteSpace(json))
+                if (!string.IsNullOrWhiteSpace(ad.Name))
                 {
-                    using var doc = JsonDocument.Parse(json);
-                    var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-                    void AddDevice(JsonElement el)
-                    {
-                        string? name = el.TryGetProperty("FriendlyName", out var fEl) ? fEl.GetString() : null;
-                        string? id = el.TryGetProperty("InstanceId", out var iEl) ? iEl.GetString() : null;
-                        string? status = el.TryGetProperty("Status", out var sEl) ? sEl.GetString() : "OK";
-
-                        if (string.IsNullOrWhiteSpace(name)) return;
-                        if (name.Contains("Enumerator", StringComparison.OrdinalIgnoreCase) ||
-                            name.Contains("Protocol", StringComparison.OrdinalIgnoreCase) ||
-                            name.Contains("Service", StringComparison.OrdinalIgnoreCase) ||
-                            name.Contains("Transport", StringComparison.OrdinalIgnoreCase) ||
-                            name.Contains("Adapter", StringComparison.OrdinalIgnoreCase) ||
-                            name.Contains("Generic Attribute", StringComparison.OrdinalIgnoreCase) ||
-                            name.Contains("Generic Access", StringComparison.OrdinalIgnoreCase))
-                        {
-                            return;
-                        }
-
-                        if (seenNames.Add(name))
-                        {
-                            deviceList.Add(new
-                            {
-                                id = id ?? name,
-                                name = name,
-                                status = status ?? "OK",
-                                connected = true
-                            });
-                        }
-                    }
-
-                    if (doc.RootElement.ValueKind == JsonValueKind.Array)
-                    {
-                        foreach (var el in doc.RootElement.EnumerateArray())
-                        {
-                            AddDevice(el);
-                        }
-                    }
-                    else if (doc.RootElement.ValueKind == JsonValueKind.Object)
-                    {
-                        AddDevice(doc.RootElement);
-                    }
+                    activeAudioNames.Add(ad.Name);
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.Log($"[Bluetooth] GetAudioDevices error: {ex.Message}");
+        }
+
+        try
+        {
+            string aqs = Windows.Devices.Bluetooth.BluetoothDevice.GetDeviceSelectorFromPairingState(true);
+            var winRtDevices = await Windows.Devices.Enumeration.DeviceInformation.FindAllAsync(
+                aqs,
+                BluetoothDeviceProperties);
+
+            foreach (var d in winRtDevices)
+            {
+                string name = d.Name?.Trim() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(name) || !seenNames.Add(name))
+                    continue;
+
+                bool isConnected = false;
+                if (d.Properties.TryGetValue("System.Devices.Aep.IsConnected", out var connVal) && connVal is bool b)
+                {
+                    isConnected = b;
+                }
+
+                if (!isConnected && activeAudioNames.Any(an => an.Contains(name, StringComparison.OrdinalIgnoreCase) || name.Contains(an, StringComparison.OrdinalIgnoreCase)))
+                {
+                    isConnected = true;
+                }
+
+                bool isAudio = name.Contains("Buds", StringComparison.OrdinalIgnoreCase) ||
+                               name.Contains("Head", StringComparison.OrdinalIgnoreCase) ||
+                               name.Contains("Ear", StringComparison.OrdinalIgnoreCase) ||
+                               name.Contains("ANC", StringComparison.OrdinalIgnoreCase) ||
+                               name.Contains("Wireless", StringComparison.OrdinalIgnoreCase) ||
+                               name.Contains("soundcore", StringComparison.OrdinalIgnoreCase) ||
+                               name.Contains("Jabra", StringComparison.OrdinalIgnoreCase) ||
+                               name.Contains("Speaker", StringComparison.OrdinalIgnoreCase) ||
+                               activeAudioNames.Any(an => an.Contains(name, StringComparison.OrdinalIgnoreCase));
+
+                deviceList.Add(new
+                {
+                    id = d.Id,
+                    name = name,
+                    status = isConnected ? "Connected" : "Paired",
+                    connected = isConnected,
+                    is_audio = isAudio
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            DiagnosticsLog.Log($"[Bluetooth] WinRT FindAllAsync error: {ex.Message}");
         }
 
         return new
@@ -3406,6 +3466,48 @@ public partial class MainWindow : Window
             enabled = isEnabled,
             devices = deviceList
         };
+    }
+
+    private static async Task<object> ConnectBluetoothDeviceAsync(string deviceId)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(deviceId))
+            {
+                var btDevice = await Windows.Devices.Bluetooth.BluetoothDevice.FromIdAsync(deviceId);
+                if (btDevice != null)
+                {
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+                            await btDevice.GetRfcommServicesAsync(Windows.Devices.Bluetooth.BluetoothCacheMode.Uncached).AsTask(cts.Token);
+                        }
+                        catch {}
+                    });
+                }
+            }
+            Process.Start(new ProcessStartInfo("ms-settings:bluetooth") { UseShellExecute = true });
+            return new { success = true };
+        }
+        catch (Exception ex)
+        {
+            return new { success = false, message = ex.Message };
+        }
+    }
+
+    private static Task<object> DisconnectBluetoothDeviceAsync(string deviceId)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("ms-settings:bluetooth") { UseShellExecute = true });
+            return Task.FromResult<object>(new { success = true });
+        }
+        catch (Exception ex)
+        {
+            return Task.FromResult<object>(new { success = false, message = ex.Message });
+        }
     }
 
     private static Task<object> QueryHotspotStateAsync()
@@ -3417,19 +3519,25 @@ public partial class MainWindow : Window
                 var profile = Windows.Networking.Connectivity.NetworkInformation.GetInternetConnectionProfile();
                 if (profile == null)
                 {
+                    var profiles = Windows.Networking.Connectivity.NetworkInformation.GetConnectionProfiles();
+                    profile = profiles.Count > 0 ? profiles[0] : null;
+                }
+                if (profile == null)
+                {
                     return new { enabled = false, supported = false, ssid = "Hotspot", clients = 0, band = "5 GHz" };
                 }
 
                 var tm = Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager.CreateFromConnectionProfile(profile);
                 var cfg = tm.GetCurrentAccessPointConfiguration();
+                string curSsid = string.IsNullOrWhiteSpace(cfg?.Ssid) ? "Hotspot" : cfg.Ssid;
                 return new
                 {
                     enabled = tm.TetheringOperationalState == Windows.Networking.NetworkOperators.TetheringOperationalState.On,
                     supported = true,
-                    ssid = cfg.Ssid,
-                    passphrase = cfg.Passphrase ?? string.Empty,
+                    ssid = curSsid,
+                    passphrase = cfg?.Passphrase ?? string.Empty,
                     clients = tm.ClientCount,
-                    band = cfg.Band == Windows.Networking.NetworkOperators.TetheringWiFiBand.TwoPointFourGigahertz ? "2.4 GHz" : "5.0 GHz"
+                    band = cfg?.Band == Windows.Networking.NetworkOperators.TetheringWiFiBand.TwoPointFourGigahertz ? "2.4 GHz" : "5.0 GHz"
                 };
             }
             catch
@@ -3444,23 +3552,32 @@ public partial class MainWindow : Window
         try
         {
             var profile = Windows.Networking.Connectivity.NetworkInformation.GetInternetConnectionProfile();
-            if (profile == null) return new { enabled = false, success = false };
+            if (profile == null)
+            {
+                var profiles = Windows.Networking.Connectivity.NetworkInformation.GetConnectionProfiles();
+                profile = profiles.Count > 0 ? profiles[0] : null;
+            }
+            if (profile == null) return new { enabled = false, success = false, ssid = "Hotspot" };
 
             var tm = Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager.CreateFromConnectionProfile(profile);
+            var cfg = tm.GetCurrentAccessPointConfiguration();
+            string curSsid = string.IsNullOrWhiteSpace(cfg?.Ssid) ? "Hotspot" : cfg.Ssid;
+
             if (tm.TetheringOperationalState == Windows.Networking.NetworkOperators.TetheringOperationalState.On)
             {
                 var stopRes = await tm.StopTetheringAsync();
-                return new { enabled = false, success = stopRes.Status == Windows.Networking.NetworkOperators.TetheringOperationStatus.Success };
+                return new { enabled = false, success = stopRes.Status == Windows.Networking.NetworkOperators.TetheringOperationStatus.Success, ssid = curSsid };
             }
             else
             {
                 var startRes = await tm.StartTetheringAsync();
-                return new { enabled = startRes.Status == Windows.Networking.NetworkOperators.TetheringOperationStatus.Success, success = startRes.Status == Windows.Networking.NetworkOperators.TetheringOperationStatus.Success };
+                bool ok = startRes.Status == Windows.Networking.NetworkOperators.TetheringOperationStatus.Success;
+                return new { enabled = ok, success = ok, ssid = curSsid };
             }
         }
         catch
         {
-            return new { enabled = false, success = false };
+            return new { enabled = false, success = false, ssid = "Hotspot" };
         }
     }
 
@@ -3767,6 +3884,7 @@ public partial class MainWindow : Window
                 });
                 if (pConn != null) await pConn.WaitForExitAsync();
 
+                s_lastWifiProfilesTicks = 0;
                 return new { success = true, message = $"Connected to {ssid}" };
             }
             finally

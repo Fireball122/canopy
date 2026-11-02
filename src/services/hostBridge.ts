@@ -67,8 +67,8 @@ export interface BluetoothDeviceInfo {
   name: string;
   status: string;
   connected: boolean;
+  is_audio?: boolean;
 }
-
 export interface BluetoothState {
   enabled: boolean;
   devices: BluetoothDeviceInfo[];
@@ -1267,6 +1267,9 @@ export async function disconnectWifi(): Promise<boolean> {
   return invokeBridge<boolean>('disconnect_wifi', undefined, () => true);
 }
 
+export async function deleteWifiProfile(name: string): Promise<boolean> {
+  return invokeBridge<boolean>('delete_wifi_profile', { name }, () => true);
+}
 export async function getBluetoothState(): Promise<BluetoothState> {
   return invokeBridge<BluetoothState>('get_bluetooth_state', undefined, () => ({
     enabled: fallbackBluetoothEnabled,
@@ -1284,6 +1287,29 @@ export async function setBluetoothEnabled(enabled: boolean): Promise<boolean> {
   return invokeBridge<boolean>('set_bluetooth_enabled', { enabled }, () => true);
 }
 
+export async function connectBluetoothDevice(
+  id: string,
+): Promise<{ success: boolean; message?: string }> {
+  return invokeBridge<{ success: boolean; message?: string }>(
+    'connect_bluetooth_device',
+    { id },
+    () => ({
+      success: true,
+    }),
+  );
+}
+
+export async function disconnectBluetoothDevice(
+  id: string,
+): Promise<{ success: boolean; message?: string }> {
+  return invokeBridge<{ success: boolean; message?: string }>(
+    'disconnect_bluetooth_device',
+    { id },
+    () => ({
+      success: true,
+    }),
+  );
+}
 export interface HotspotState {
   enabled: boolean;
   supported: boolean;

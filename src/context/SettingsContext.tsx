@@ -55,6 +55,7 @@ export interface CanopySettings {
   customMascotGifUrl: string; // optional custom GIF URL or data URL replacing Bongo Cat
   showTerminalTab: boolean; // toggles [ Developer / Terminal ] tab on/off (off by default)
   showHeaderSearch: boolean; // toggles Quick Search Command Palette icon in top header
+  searchPosition?: 'left' | 'right'; // search button placement (opposite batteryPosition)
   batteryPosition: 'left' | 'right'; // battery indicator placement ('left' by default, 'right' optional)
   enableHotspotToggle: boolean; // toggles Hotspot button in Connect tab
   enablePowerSaverToggle: boolean; // toggles Battery Saver button in Connect tab
@@ -148,6 +149,7 @@ export const DEFAULT_SETTINGS: CanopySettings = {
   customMascotGifUrl: '',
   showTerminalTab: false,
   showHeaderSearch: false,
+  searchPosition: 'right',
   batteryPosition: 'left',
   enableHotspotToggle: true,
   enablePowerSaverToggle: true,
@@ -422,6 +424,12 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           ...prev,
           ...partial,
         };
+        // Enforce strict mutual exclusion: battery indicator and search button can never be on the same side
+        if (partial.batteryPosition) {
+          next.searchPosition = partial.batteryPosition === 'left' ? 'right' : 'left';
+        } else if (partial.searchPosition) {
+          next.batteryPosition = partial.searchPosition === 'left' ? 'right' : 'left';
+        }
         applyGlassCssVariables(next.glassBlurStrength, next.glassOpacity);
         try {
           if (typeof window !== 'undefined') {

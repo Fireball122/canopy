@@ -23,6 +23,15 @@ internal static class NvmlGpu
     [DllImport("nvml.dll", EntryPoint = "nvmlDeviceGetTemperature")]
     private static extern int NvmlDeviceGetTemperature(IntPtr device, int sensorType, out uint temperature);
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NvmlUtilization
+    {
+        public uint Gpu;
+        public uint Memory;
+    }
+
+    [DllImport("nvml.dll", EntryPoint = "nvmlDeviceGetUtilizationRates")]
+    private static extern int NvmlDeviceGetUtilizationRates(IntPtr device, out NvmlUtilization utilization);
     private static readonly object Gate = new();
     private static bool _probed;
     private static IntPtr _device;
@@ -63,6 +72,31 @@ internal static class NvmlGpu
             {
                 return NvmlDeviceGetTemperature(_device, NvmlTemperatureGpu, out uint celsius) == NvmlSuccess
                     ? celsius
+                    : null;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+    }
+
+    public static double? TryReadUtilizationPercent()
+    {
+        lock (Gate)
+        {
+            if (!_probed)
+            {
+                _ = TryReadTemperatureCelsius();
+            }
+
+            if (_device == IntPtr.Zero)
+                return null;
+
+            try
+            {
+                return NvmlDeviceGetUtilizationRates(_device, out NvmlUtilization util) == NvmlSuccess
+                    ? util.Gpu
                     : null;
             }
             catch (Exception)

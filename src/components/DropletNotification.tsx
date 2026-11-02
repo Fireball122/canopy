@@ -50,6 +50,8 @@ export const DropletNotification: React.FC<DropletNotificationProps> = ({
       return;
     }
     if (phaseRef.current === 'expand') {
+      setContentVisible(true);
+      if (timerRef.current) window.clearTimeout(timerRef.current);
       const dismissTimer = window.setTimeout(() => {
         if (!isHoveredRef.current) {
           startDismissAnimation();
@@ -107,10 +109,21 @@ export const DropletNotification: React.FC<DropletNotificationProps> = ({
   // Step 2: Pill width smoothly shrinks back to 48px circular bead
   // Step 3: Pure bead retracts straight up into top bezel
 
+  const category = (() => {
+    if (!message) return 'NOTICE';
+    const low = message.toLowerCase();
+    if (low.includes('hotspot')) return 'HOTSPOT';
+    if (low.includes('wi-fi') || low.includes('wifi')) return 'WI-FI';
+    if (low.includes('bluetooth')) return 'BLUETOOTH';
+    if (low.includes('reminder')) return 'REMINDER';
+    if (low.includes('power') || low.includes('battery')) return 'POWER';
+    if (low.includes('wallpaper')) return 'WALLPAPER';
+    return 'CANOPY';
+  })();
+
   if (!message || phase === 'idle') return null;
 
   const isBead = phase === 'drop' || phase === 'retract';
-
   return (
     <div
       className="fixed top-0 left-1/2 -translate-x-1/2 z-50 pointer-events-auto select-none"
@@ -204,7 +217,7 @@ export const DropletNotification: React.FC<DropletNotificationProps> = ({
                   className="text-[10px] tracking-widest font-bold uppercase"
                   style={{ color: 'var(--theme-accent, #74a86c)' }}
                 >
-                  REMINDER
+                  {category}
                 </span>
                 <span className="text-[9px] text-white/50 font-mono">• Just now</span>
               </div>

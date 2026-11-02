@@ -15,6 +15,7 @@ import {
   Disc,
   FileText,
   FolderOpen,
+  Headphones,
   MapPin,
   Monitor,
   Music,
@@ -26,6 +27,7 @@ import {
   SkipForward,
   Sliders,
   Terminal as TerminalIcon,
+  Zap,
 } from 'lucide-react';
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -35,18 +37,20 @@ import { RadialGauge } from '../components/RadialGauge';
 import { VerticalSliders } from '../components/VerticalSliders';
 import { useSettings } from '../context/SettingsContext';
 import {
+  type AudioDeviceInfo,
   type BatteryStatus,
   isWebViewHost,
   launchApp,
+  listAudioDevices,
   type MediaInfo,
   type SystemStats,
+  setDefaultAudioDevice,
   toggleCaffeine,
   toggleDnd,
   triggerScreenSnip,
 } from '../services/hostBridge';
 import type { WeatherData } from '../services/weather';
 import { renderWeatherIcon } from './WeatherView';
-
 export interface DashboardViewProps {
   stats: SystemStats;
   weather: WeatherData;
@@ -183,8 +187,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   // Interactive circular ring scrubbing (hold position visually while dragging, seek only on release)
   const [scrubPreviewSecs, setScrubPreviewSecs] = useState<number | null>(null);
   const [sessionDropdownOpen, setSessionDropdownOpen] = useState(false);
+  const [audioOutputs, setAudioOutputs] = useState<AudioDeviceInfo[]>([]);
   const sessionDropdownRef = useRef<HTMLDivElement | null>(null);
 
+  useEffect(() => {
+    if (!sessionDropdownOpen) return;
+    void listAudioDevices('render')
+      .then((devs) => {
+        if (Array.isArray(devs)) setAudioOutputs(devs);
+      })
+      .catch(() => undefined);
+  }, [sessionDropdownOpen]);
+
+  const handleSelectAudioDevice = async (dev: AudioDeviceInfo) => {
+    try {
+      await setDefaultAudioDevice(dev.id);
+      setAudioOutputs((prev) => prev.map((d) => ({ ...d, is_default: d.id === dev.id })));
+      onToastNotification?.(`Audio output set to ${dev.name}`);
+    } catch {
+      onToastNotification?.(`Could not switch to ${dev.name}`);
+    }
+  };
   useEffect(() => {
     if (!sessionDropdownOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
@@ -346,27 +369,42 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <span>Time</span>
             </span>
             <div className="flex items-center gap-1">
-              {settings.showBatteryChip && battery?.has_battery && (
-                <span
-                  className="px-1.5 py-0.5 rounded-md text-[9px] font-mono flex items-center gap-1"
-                  style={{
-                    background: 'var(--theme-track)',
-                    color: battery.charging ? 'var(--theme-accent)' : 'var(--theme-text-secondary)',
-                  }}
-                  title={
-                    battery.charging
-                      ? `Charging — ${Math.round(battery.percent)}%`
-                      : `On battery — ${Math.round(battery.percent)}%`
-                  }
-                >
-                  {battery.charging ? (
-                    <BatteryCharging className="w-2.5 h-2.5 shrink-0" />
-                  ) : (
-                    <Battery className="w-2.5 h-2.5 shrink-0" />
-                  )}
-                  <span>{Math.round(battery.percent)}%</span>
-                </span>
-              )}
+              {settings.showBatteryChip &&
+                (battery?.has_battery ? (
+                  <span
+                    className="px-1.5 py-0.5 rounded-md text-[9px] font-mono flex items-center gap-1"
+                    style={{
+                      background: 'var(--theme-track)',
+                      color: battery.charging
+                        ? 'var(--theme-accent)'
+                        : 'var(--theme-text-secondary)',
+                    }}
+                    title={
+                      battery.charging
+                        ? `Charging — ${Math.round(battery.percent)}%`
+                        : `On battery — ${Math.round(battery.percent)}%`
+                    }
+                  >
+                    {battery.charging ? (
+                      <BatteryCharging className="w-2.5 h-2.5 shrink-0" />
+                    ) : (
+                      <Battery className="w-2.5 h-2.5 shrink-0" />
+                    )}
+                    <span>{Math.round(battery.percent)}%</span>
+                  </span>
+                ) : (
+                  <span
+                    className="px-1.5 py-0.5 rounded-md text-[9px] font-mono flex items-center gap-1"
+                    style={{
+                      background: 'var(--theme-track)',
+                      color: 'var(--theme-accent)',
+                    }}
+                    title="Desktop Rig — Wall Power (AC)"
+                  >
+                    <Zap className="w-2.5 h-2.5 shrink-0" />
+                    <span>AC Power</span>
+                  </span>
+                ))}
               {!use24Hour && (
                 <span
                   className="px-1.5 py-0.5 rounded-md text-[9px] font-mono"
@@ -638,19 +676,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div ref={sessionDropdownRef}>
             <button
               type="button"
-              onClick={() => {
-                if (media.sessions && media.sessions.length > 1) {
-                  setSessionDropdownOpen((prev) => !prev);
-                } else {
-                  onNavigateTab('media');
-                }
-              }}
-              title={
-                media.sessions && media.sessions.length > 1
-                  ? 'Click to switch active media source'
-                  : 'Click to open Media Hub & Mixer'
-              }
-              className="text-[9px] font-mono truncate max-w-[110px] px-1.5 py-0.5 rounded border flex items-center gap-1 transition-all cursor-pointer hover:border-[var(--theme-accent)] select-none active:scale-95"
+              onClick={() => setSessionDropdownOpen((prev) => !prev)}
+              title="Click to switch audio output device or active media stream"
+              className="text-[9px] font-mono truncate max-w-[125px] px-1.5 py-0.5 rounded border flex items-center gap-1 transition-all cursor-pointer hover:border-[var(--theme-accent)] select-none active:scale-95"
               style={{
                 color: 'var(--theme-text-primary)',
                 background: 'var(--theme-card, rgba(255, 255, 255, 0.05))',
@@ -666,62 +694,82 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </button>
 
             {/* Floating Audio Source Dropdown Popover */}
-            {sessionDropdownOpen && media.sessions && media.sessions.length > 0 && (
+            {/* Floating Audio Source & Output Devices Popover */}
+            {sessionDropdownOpen && (
               <div
-                className="absolute inset-x-1.5 top-7 z-40 max-h-[160px] p-1.5 rounded-xl border shadow-2xl backdrop-blur-2xl flex flex-col gap-1 animate-in fade-in zoom-in-95 duration-150"
+                className="absolute inset-x-1.5 top-7 z-40 max-h-[220px] p-1.5 rounded-xl border shadow-2xl backdrop-blur-2xl flex flex-col gap-1.5 animate-in fade-in zoom-in-95 duration-150"
                 style={{
                   background: 'var(--theme-bg, #11111b)',
                   borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.15))',
                   boxShadow: '0 12px 36px rgba(0, 0, 0, 0.65)',
                 }}
               >
-                <div className="flex items-center justify-between px-2 py-1 text-[9px] font-mono uppercase tracking-wider text-[var(--theme-text-secondary)] border-b border-[var(--theme-border)]">
-                  <span>Audio Sources</span>
-                  <span className="tabular-nums">{media.sessions.length} active</span>
-                </div>
+                {/* Physical Audio Output Devices (Speakers / Headphones / Earbuds) */}
+                {audioOutputs.length > 0 && (
+                  <div className="flex flex-col gap-0.5">
+                    <div className="flex items-center justify-between px-2 py-0.5 text-[9px] font-mono uppercase tracking-wider text-[var(--theme-accent)] border-b border-[var(--theme-border)]">
+                      <span>Audio Outputs</span>
+                      <Headphones className="w-2.5 h-2.5" />
+                    </div>
+                    <div className="flex flex-col gap-0.5 max-h-[85px] overflow-y-auto canopy-scroll">
+                      {audioOutputs.map((dev) => (
+                        <button
+                          key={dev.id}
+                          type="button"
+                          onClick={() => void handleSelectAudioDevice(dev)}
+                          className="flex items-center justify-between gap-1.5 px-2 py-1 rounded-md text-left text-[9.5px] font-medium transition-colors hover:bg-white/10 cursor-pointer"
+                          style={{
+                            background: dev.is_default ? 'var(--theme-track)' : 'transparent',
+                            color: dev.is_default
+                              ? 'var(--theme-accent)'
+                              : 'var(--theme-text-primary)',
+                          }}
+                        >
+                          <span className="truncate">{dev.name}</span>
+                          {dev.is_default && (
+                            <Check className="w-3 h-3 text-[var(--theme-accent)] shrink-0" />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
-                <div className="flex flex-col gap-0.5 max-h-[140px] overflow-y-auto canopy-scroll">
-                  {media.sessions.map((sess) => {
-                    const isCur = sess.is_current;
-                    return (
-                      <button
-                        key={sess.id}
-                        type="button"
-                        onClick={() => {
-                          setSessionDropdownOpen(false);
-                          void onSelectSession(sess.id);
-                        }}
-                        className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg text-left transition-colors pointer-events-auto cursor-pointer hover:bg-white/10 group"
-                        style={{
-                          background: isCur ? 'var(--theme-track)' : 'transparent',
-                        }}
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div
-                            className="text-[10px] font-semibold truncate flex items-center gap-1"
-                            style={{ color: 'var(--theme-text-primary)' }}
+                {/* Active Media Sessions */}
+                {media.sessions && media.sessions.length > 0 && (
+                  <div className="flex flex-col gap-0.5">
+                    <div className="flex items-center justify-between px-2 py-0.5 text-[9px] font-mono uppercase tracking-wider text-[var(--theme-text-secondary)] border-b border-[var(--theme-border)]">
+                      <span>App Streams</span>
+                      <span className="tabular-nums">{media.sessions.length}</span>
+                    </div>
+                    <div className="flex flex-col gap-0.5 max-h-[75px] overflow-y-auto canopy-scroll">
+                      {media.sessions.map((sess) => {
+                        const isCur = sess.is_current;
+                        return (
+                          <button
+                            key={sess.id}
+                            type="button"
+                            onClick={() => {
+                              setSessionDropdownOpen(false);
+                              void onSelectSession(sess.id);
+                            }}
+                            className="flex items-center justify-between gap-2 px-2 py-1 rounded-md text-left transition-colors hover:bg-white/10 cursor-pointer"
+                            style={{
+                              background: isCur ? 'var(--theme-track)' : 'transparent',
+                            }}
                           >
-                            <span className="truncate">{sess.app_name || 'App'}</span>
+                            <span className="text-[9.5px] truncate text-[var(--theme-text-primary)]">
+                              {sess.app_name || 'App'}
+                            </span>
                             {isCur && (
                               <Check className="w-2.5 h-2.5 text-[var(--theme-accent)] shrink-0" />
                             )}
-                          </div>
-                          <div
-                            className="text-[9px] truncate text-[var(--theme-text-secondary)]"
-                            title={sess.title || 'Idle'}
-                          >
-                            {sess.title || 'No track title'}
-                          </div>
-                        </div>
-                        {sess.is_playing ? (
-                          <Play className="w-2.5 h-2.5 text-[var(--theme-accent)] shrink-0 fill-current" />
-                        ) : (
-                          <Pause className="w-2.5 h-2.5 text-[var(--theme-text-secondary)] shrink-0" />
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 <button
                   type="button"

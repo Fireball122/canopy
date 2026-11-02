@@ -25,7 +25,7 @@ public partial class NotificationWindow : Window
     {
         InitializeComponent();
 
-        string cleanMsg = message.Trim();
+        string cleanMsg = (message ?? string.Empty).Trim();
         if (cleanMsg.StartsWith("Canopy Reminder: ", StringComparison.OrdinalIgnoreCase))
         {
             cleanMsg = cleanMsg.Substring("Canopy Reminder: ".Length).Trim();
@@ -33,6 +33,10 @@ public partial class NotificationWindow : Window
         else if (cleanMsg.StartsWith("Reminder: ", StringComparison.OrdinalIgnoreCase))
         {
             cleanMsg = cleanMsg.Substring("Reminder: ".Length).Trim();
+        }
+        if (string.IsNullOrWhiteSpace(cleanMsg))
+        {
+            cleanMsg = "Notification";
         }
         MessageText.Text = cleanMsg;
 
@@ -111,6 +115,9 @@ public partial class NotificationWindow : Window
     /// </summary>
     public static void ShowNotification(string message, string? title = "Canopy Reminder", string? accentColorHex = null, string? bgColorHex = null)
     {
+        if (string.IsNullOrWhiteSpace(message))
+            return;
+
         Application.Current.Dispatcher.Invoke(() =>
         {
             try

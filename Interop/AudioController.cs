@@ -155,41 +155,42 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
                 try { cap.Dispose(); } catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] Dispose warning: {ex.Message}"); }
             }
 
+            if (_enumerator is null)
+            {
+                InitializeEndpoint();
+            }
             if (_enumerator is null) return;
 
+            var newCaptures = new List<WasapiLoopbackCapture>();
+            MMDevice? defaultDevice = null;
             try
             {
-                _device = _enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                if (_enumerator.HasDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia))
+                {
+                    defaultDevice = _enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                }
             }
             catch (Exception ex)
             {
                 DiagnosticsLog.Log($"[AudioController] GetDefaultAudioEndpoint error: {ex.Message}");
             }
 
-            var newCaptures = new List<WasapiLoopbackCapture>();
-            try
+            if (defaultDevice != null)
             {
-                var endpoints = _enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
-                foreach (var dev in endpoints)
+                try
                 {
-                    try
-                    {
-                        var capture = new WasapiLoopbackCapture(dev);
-                        _captureStates[capture] = new DeviceCaptureState();
-                        capture.DataAvailable += OnLoopbackDataAvailable;
-                        capture.RecordingStopped += OnLoopbackRecordingStopped;
-                        capture.StartRecording();
-                        newCaptures.Add(capture);
-                    }
-                    catch (Exception ex)
-                    {
-                        DiagnosticsLog.Log($"[AudioController] Loopback capture start on {dev.FriendlyName} warning: {ex.Message}");
-                    }
+                    var capture = new WasapiLoopbackCapture(defaultDevice);
+                    _captureStates[capture] = new DeviceCaptureState();
+                    capture.DataAvailable += OnLoopbackDataAvailable;
+                    capture.RecordingStopped += OnLoopbackRecordingStopped;
+                    capture.StartRecording();
+                    newCaptures.Add(capture);
+                    _device = defaultDevice;
                 }
-            }
-            catch (Exception ex)
-            {
-                DiagnosticsLog.Log($"[AudioController] EnumerateAudioEndPoints error: {ex.Message}");
+                catch (Exception ex)
+                {
+                    DiagnosticsLog.Log($"[AudioController] Default device loopback capture start on {defaultDevice.FriendlyName} error: {ex.Message}");
+                }
             }
 
             if (newCaptures.Count == 0)
@@ -208,7 +209,6 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
                     DiagnosticsLog.Log($"[AudioController] Default loopback fallback failed: {ex.Message}");
                 }
             }
-
             if (newCaptures.Count > 0)
             {
                 Interlocked.Exchange(ref _restartAttempt, 0);
