@@ -1041,7 +1041,7 @@ public partial class MainWindow : Window
             case "get_version":
             {
                 var ver = typeof(MainWindow).Assembly.GetName().Version;
-                string verStr = ver != null ? $"{ver.Major}.{ver.Minor}.{ver.Build}" : "1.0.7";
+                string verStr = ver != null ? $"{ver.Major}.{ver.Minor}.{ver.Build}" : "1.0.8";
                 return new { version = verStr };
             }
 
