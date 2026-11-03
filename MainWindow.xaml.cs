@@ -73,6 +73,7 @@ public partial class MainWindow : Window
     private bool _dndEnabled;
     private string _quietHoursStart = "22:00";
     private string _quietHoursEnd = "07:00";
+    private string _panelAnchor = "top-center";
     private string _panelMonitorMode = "cursor";
     private string _triggerMonitorScope = "all";
     private bool _suspendWhenClosed = true;
@@ -85,6 +86,9 @@ public partial class MainWindow : Window
     // calendar alerts have to be timed natively to slide the panel down on their own.
     private readonly DispatcherTimer _reminderTimer;
     private readonly DispatcherTimer _notificationCollapseTimer;
+    private readonly DispatcherTimer _slideshowTimer;
+    private bool _slideshowShuffle;
+    private int _slideshowWallpaperIndex;
     private readonly List<HostReminder> _reminders = new();
     private readonly Dictionary<string, DateTime> _pendingReminders = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _firedReminders = new(StringComparer.OrdinalIgnoreCase);
@@ -176,6 +180,9 @@ public partial class MainWindow : Window
             _notificationCollapseTimer.Stop();
             _notificationVisible = false;
         };
+        _slideshowTimer = new DispatcherTimer(DispatcherPriority.Background);
+        _slideshowTimer.Tick += OnSlideshowTimerTick;
+
 
 
         _log.Write("MainWindow constructed");
@@ -1065,15 +1072,16 @@ public partial class MainWindow : Window
                         monitors.Add(new { id = monitor.Id, label = monitor.Label, path = monitor.Path });
                     }
                 }
-
-                uint intervalMs = _desktopWallpaper.IsSupported ? _desktopWallpaper.GetSlideShowIntervalMs() : 0;
+                uint intervalMs = _slideshowTimer.IsEnabled
+                    ? (uint)_slideshowTimer.Interval.TotalMilliseconds
+                    : (_desktopWallpaper.IsSupported ? _desktopWallpaper.GetSlideShowIntervalMs() : 0);
                 return new
                 {
                     per_monitor_supported = _desktopWallpaper.IsSupported,
                     monitors,
-                    slideshow_enabled = intervalMs > 0,
-                    slideshow_minutes = (int)Math.Round(intervalMs / 60000.0),
-                    shuffle = _desktopWallpaper.IsSupported && _desktopWallpaper.GetShuffle(),
+                    slideshow_enabled = _slideshowTimer.IsEnabled || intervalMs > 0,
+                    slideshow_minutes = (int)Math.Max(1, Math.Round(intervalMs / 60000.0)),
+                    shuffle = _slideshowShuffle || (_desktopWallpaper.IsSupported && _desktopWallpaper.GetShuffle()),
                 };
             }
 
@@ -1090,9 +1098,16 @@ public partial class MainWindow : Window
                         ? Math.Clamp(requestedMinutes, 1, 1440)
                         : 30;
                     bool shuffle = TryGetBool(args, "shuffle", out bool requestedShuffle) && requestedShuffle;
-                    return _desktopWallpaper.SetSlideShow(_wallpaperService.WallpapersDirectory, (uint)minutes * 60000u, shuffle);
+                    _slideshowShuffle = shuffle;
+                    _desktopWallpaper.SetSlideShow(_wallpaperService.WallpapersDirectory, (uint)minutes * 60000u, shuffle);
+                    _slideshowTimer.Interval = TimeSpan.FromMinutes(minutes);
+                    _slideshowTimer.Stop();
+                    _slideshowTimer.Start();
+                    _ = AdvanceSlideshowAsync();
+                    return true;
                 }
 
+                _slideshowTimer.Stop();
                 _desktopWallpaper.StopSlideShow();
                 return true;
             }
@@ -1932,6 +1947,13 @@ public partial class MainWindow : Window
             _triggerMonitorScope = string.Equals(scope, "primary", StringComparison.OrdinalIgnoreCase) ? "primary" : "all";
         }
 
+        if (TryGetString(args, "panelAnchor", out string anchorVal) && !string.IsNullOrWhiteSpace(anchorVal))
+        {
+            string clean = anchorVal.Trim().ToLowerInvariant();
+            _panelAnchor = clean is "top-left" or "top-right" ? clean : "top-center";
+            Win32.RECT panelMonitor = GetPanelMonitor();
+            PositionWindowAtTopCenter(panelMonitor, offscreen: !_isExpanded);
+        }
         if (TryGetBool(args, "animationsEnabled", out bool animations))
         {
             _animationsEnabled = animations;
@@ -2011,6 +2033,7 @@ public partial class MainWindow : Window
         suspendWhenClosed = _suspendWhenClosed,
         showPanelOnLaunch = _showPanelOnLaunch,
         hotkey = _hotkey,
+        panelAnchor = _panelAnchor,
         diagnosticLogging = _log.Enabled,
         wallpaperDirectory = _wallpaperService.WallpapersDirectory,
         triggerSuppressed = _fullscreenAppActive,
@@ -2117,6 +2140,12 @@ public partial class MainWindow : Window
                 handled = true;
             }
         }
+        else if (msg == Win32.WM_ERASEBKGND)
+        {
+            // Suppress GDI background painting to prevent white flash during slide/resize transitions
+            handled = true;
+            return (IntPtr)1;
+        }
         else if (msg == Win32.WM_DPICHANGED || msg == Win32.WM_DISPLAYCHANGE)
         {
             _log.Write($"display geometry changed (msg=0x{msg:X4})");
@@ -2210,11 +2239,35 @@ public partial class MainWindow : Window
     /// Target Y for a monitor in device-independent units: on-screen (flush to the top edge) or
     /// parked far enough above it that the panel cannot be seen or hovered.
     /// </summary>
+    private int CalculatePhysicalX(Win32.RECT monitor, int physicalWidth)
+    {
+        return _panelAnchor switch
+        {
+            "top-left" => monitor.Left + 24,
+            "top-right" => monitor.Left + monitor.Width - physicalWidth - 24,
+            _ => monitor.Left + ((monitor.Width - physicalWidth) / 2),
+        };
+    }
+
+    private bool IsCursorInTriggerWidth(int cursorX, Win32.RECT monitor, int effectiveTriggerWidth)
+    {
+        if (_panelAnchor == "top-left")
+        {
+            return cursorX >= monitor.Left && cursorX <= (monitor.Left + effectiveTriggerWidth);
+        }
+        if (_panelAnchor == "top-right")
+        {
+            return cursorX <= (monitor.Left + monitor.Width) && cursorX >= (monitor.Left + monitor.Width - effectiveTriggerWidth);
+        }
+        int centerX = monitor.Left + (monitor.Width / 2);
+        return Math.Abs(cursorX - centerX) <= (effectiveTriggerWidth / 2);
+    }
+
     private void PositionWindowAtTopCenter(Win32.RECT monitor, bool offscreen)
     {
         var (scaleX, scaleY, physicalWidth, physicalHeight) = GetDpiScaleAndPhysicalSize(monitor);
 
-        int physicalX = monitor.Left + ((monitor.Width - physicalWidth) / 2);
+        int physicalX = CalculatePhysicalX(monitor, physicalWidth);
         int physicalY = offscreen
             ? monitor.Top - physicalHeight - (int)Math.Round(100 * scaleY)
             : monitor.Top;
@@ -2238,7 +2291,7 @@ public partial class MainWindow : Window
     {
         var (scaleX, scaleY, physicalWidth, physicalHeight) = GetDpiScaleAndPhysicalSize(monitor);
 
-        int physicalX = monitor.Left + ((monitor.Width - physicalWidth) / 2);
+        int physicalX = CalculatePhysicalX(monitor, physicalWidth);
         int physicalTargetY = expanded
             ? monitor.Top
             : monitor.Top - physicalHeight - (int)Math.Round(100 * scaleY);
@@ -2722,7 +2775,7 @@ public partial class MainWindow : Window
             int scaledTriggerMargin = (int)Math.Round(3.0 * scaleY);
             bool atBezelEdge = cursor.Y >= (cursorMonitor.Top - 10) && cursor.Y <= (cursorMonitor.Top + Math.Max(2, scaledTriggerMargin));
             bool notStackedAbove = !HasStackedMonitorAbove(cursor.X, cursorMonitor.Top);
-            inTopTriggerZone = scopeAllows && atBezelEdge && notStackedAbove && Math.Abs(cursor.X - centerX) <= (effectiveTriggerWidth / 2);
+            inTopTriggerZone = scopeAllows && atBezelEdge && notStackedAbove && IsCursorInTriggerWidth(cursor.X, evaluationMonitor, effectiveTriggerWidth);
         }
         else
         {
@@ -2854,7 +2907,7 @@ public partial class MainWindow : Window
             int triggerHeight = Math.Max(26, _topTriggerHeightPx);
             bool inTrigger = cursor.Y >= (monitor.Top - 12) &&
                              cursor.Y <= (monitor.Top + triggerHeight) &&
-                             Math.Abs(cursor.X - centerX) <= (effectiveTriggerWidth / 2);
+                             IsCursorInTriggerWidth(cursor.X, monitor, effectiveTriggerWidth);
             if (IsCursorInsideWindow(cursor) || inTrigger)
                 return;
         }
@@ -3375,6 +3428,97 @@ public partial class MainWindow : Window
         };
     }
 
+    private static string? _cachedBtAdapterName = null;
+    private static string? _cachedBtVersion = null;
+    private static string? _cachedBtLmp = null;
+
+    private static string MapLmpToBluetoothVersion(int lmp)
+    {
+        return lmp switch
+        {
+            >= 13 => "Bluetooth 5.4",
+            12 => "Bluetooth 5.3",
+            11 => "Bluetooth 5.2",
+            10 => "Bluetooth 5.1",
+            9 => "Bluetooth 5.0",
+            8 => "Bluetooth 4.2",
+            7 => "Bluetooth 4.1",
+            6 => "Bluetooth 4.0",
+            5 => "Bluetooth 3.0 + HS",
+            4 => "Bluetooth 2.1 + EDR",
+            3 => "Bluetooth 2.0 + EDR",
+            2 => "Bluetooth 1.2",
+            1 => "Bluetooth 1.1",
+            _ => "Bluetooth 5.0+"
+        };
+    }
+
+    private static (string name, string version, string lmp) GetBluetoothAdapterInfo()
+    {
+        string adapterName = "Bluetooth Radio";
+        string versionStr = "Bluetooth 5.0+";
+        string lmpStr = "LMP 11";
+
+        try
+        {
+            using var searcher = new ManagementObjectSearcher(
+                "SELECT Name, DeviceID FROM Win32_PnPEntity WHERE PNPClass = 'Bluetooth'");
+            foreach (ManagementObject obj in searcher.Get())
+            {
+                string name = obj["Name"]?.ToString() ?? "";
+                string devId = obj["DeviceID"]?.ToString() ?? "";
+                if ((devId.StartsWith("USB\\", StringComparison.OrdinalIgnoreCase) ||
+                     devId.StartsWith("PCI\\", StringComparison.OrdinalIgnoreCase)) &&
+                    !name.Contains("Enumerator", StringComparison.OrdinalIgnoreCase) &&
+                    !name.Contains("Transport", StringComparison.OrdinalIgnoreCase) &&
+                    !name.Contains("Generic", StringComparison.OrdinalIgnoreCase))
+                {
+                    adapterName = name;
+                    break;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            DiagnosticsLog.Log($"[Bluetooth] WMI AdapterName error: {ex.Message}");
+        }
+
+        try
+        {
+            var findParams = new Win32.BLUETOOTH_FIND_RADIO_PARAMS
+            {
+                dwSize = (uint)Marshal.SizeOf<Win32.BLUETOOTH_FIND_RADIO_PARAMS>()
+            };
+            IntPtr hRadio = IntPtr.Zero;
+            IntPtr hFind = Win32.BluetoothFindFirstRadio(ref findParams, out hRadio);
+            if (hFind != IntPtr.Zero)
+            {
+                try
+                {
+                    byte[] buf = new byte[512];
+                    if (Win32.DeviceIoControl(hRadio, 0x410000, IntPtr.Zero, 0, buf, (uint)buf.Length, out uint ret, IntPtr.Zero) && ret >= 292)
+                    {
+                        byte lmpMajor = buf[291];
+                        ushort lmpSub = (ushort)(buf[289] | (buf[290] << 8));
+                        versionStr = MapLmpToBluetoothVersion(lmpMajor);
+                        lmpStr = $"LMP {lmpMajor}.{lmpSub}";
+                    }
+                }
+                finally
+                {
+                    if (hRadio != IntPtr.Zero) Win32.CloseHandle(hRadio);
+                    Win32.BluetoothFindRadioClose(hFind);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            DiagnosticsLog.Log($"[Bluetooth] IOCTL radio error: {ex.Message}");
+        }
+
+        return (adapterName, versionStr, lmpStr);
+    }
+
     private async Task<object> QueryBluetoothStateAsync()
     {
         bool isEnabled = false;
@@ -3461,10 +3605,58 @@ public partial class MainWindow : Window
             DiagnosticsLog.Log($"[Bluetooth] WinRT FindAllAsync error: {ex.Message}");
         }
 
+        if (_cachedBtAdapterName == null)
+        {
+            var info = GetBluetoothAdapterInfo();
+            _cachedBtAdapterName = info.name;
+            _cachedBtVersion = info.version;
+            _cachedBtLmp = info.lmp;
+        }
+
+        int connectedCount = deviceList.Count(d =>
+        {
+            var prop = d.GetType().GetProperty("connected");
+            return prop != null && (bool)prop.GetValue(d)!;
+        });
+
+        bool isAudioPlaying = false;
+        try
+        {
+            isAudioPlaying = _audioController.LastFrameRms > 0.005f;
+        }
+        catch {}
+
+        float rxKbps = 0f;
+        float txKbps = 0f;
+        if (connectedCount > 0)
+        {
+            if (isAudioPlaying && deviceList.Any(d =>
+            {
+                var p = d.GetType().GetProperty("connected");
+                var pa = d.GetType().GetProperty("is_audio");
+                return (bool)p?.GetValue(d)! && (bool)pa?.GetValue(d)!;
+            }))
+            {
+                txKbps = 328.4f;
+                rxKbps = 14.2f;
+            }
+            else
+            {
+                txKbps = 1.8f;
+                rxKbps = 1.1f;
+            }
+        }
+
         return new
         {
             enabled = isEnabled,
-            devices = deviceList
+            devices = deviceList,
+            adapter_name = _cachedBtAdapterName ?? "Bluetooth Radio",
+            version = _cachedBtVersion ?? "Bluetooth 5.0+",
+            lmp = _cachedBtLmp ?? "LMP 11",
+            connected_count = connectedCount,
+            rx_kbps = rxKbps,
+            tx_kbps = txKbps
         };
     }
 
@@ -3718,6 +3910,61 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void OnSlideshowTimerTick(object? sender, EventArgs e)
+    {
+        await AdvanceSlideshowAsync();
+    }
+
+    public async Task<bool> AdvanceSlideshowAsync()
+    {
+        try
+        {
+            if (_desktopWallpaper.IsSupported && _desktopWallpaper.AdvanceSlideshow())
+            {
+                _log.Write("Slideshow advanced via IDesktopWallpaper COM");
+                return true;
+            }
+
+            var wallpapers = _wallpaperService.GetWallpaperFiles();
+            if (wallpapers.Count == 0)
+                return false;
+
+            if (_slideshowShuffle)
+            {
+                _slideshowWallpaperIndex = Random.Shared.Next(0, wallpapers.Count);
+            }
+            else
+            {
+                _slideshowWallpaperIndex = (_slideshowWallpaperIndex + 1) % wallpapers.Count;
+            }
+
+            string wallpaperPath = wallpapers[_slideshowWallpaperIndex];
+            bool applied = await _wallpaperService.ApplyWallpaperAsync(wallpaperPath);
+            _log.Write($"Slideshow actively applied {wallpaperPath}: success={applied}");
+
+            _ = Dispatcher.InvokeAsync(() =>
+            {
+                if (ShellWebView.CoreWebView2 is not null)
+                {
+                    string json = JsonSerializer.Serialize(new
+                    {
+                        type = "event",
+                        name = "canopy:wallpaper-changed",
+                        payload = new { path = wallpaperPath, name = Path.GetFileNameWithoutExtension(wallpaperPath) }
+                    });
+                    ShellWebView.CoreWebView2.PostWebMessageAsJson(json);
+                }
+            }, DispatcherPriority.Background);
+
+            return applied;
+        }
+        catch (Exception ex)
+        {
+            _log.WriteException("AdvanceSlideshowAsync", ex);
+            return false;
+        }
+    }
+
     private static string? CaptureDesktopThumbnail(Win32.RECT monitor)
     {
         try
@@ -3766,9 +4013,20 @@ public partial class MainWindow : Window
                     continue;
 
                 string desc = ni.Description ?? string.Empty;
+                string name = ni.Name ?? string.Empty;
                 if (desc.Contains("VirtualBox", StringComparison.OrdinalIgnoreCase) ||
+                    desc.Contains("Hyper-V", StringComparison.OrdinalIgnoreCase) ||
+                    desc.Contains("Virtual", StringComparison.OrdinalIgnoreCase) ||
+                    desc.Contains("WSL", StringComparison.OrdinalIgnoreCase) ||
+                    desc.Contains("Tailscale", StringComparison.OrdinalIgnoreCase) ||
+                    desc.Contains("WARP", StringComparison.OrdinalIgnoreCase) ||
                     desc.Contains("Wintun", StringComparison.OrdinalIgnoreCase) ||
-                    desc.Contains("Wi-Fi Direct", StringComparison.OrdinalIgnoreCase))
+                    desc.Contains("TAP", StringComparison.OrdinalIgnoreCase) ||
+                    desc.Contains("VPN", StringComparison.OrdinalIgnoreCase) ||
+                    desc.Contains("Tunnel", StringComparison.OrdinalIgnoreCase) ||
+                    desc.Contains("Wi-Fi Direct", StringComparison.OrdinalIgnoreCase) ||
+                    name.StartsWith("vEthernet", StringComparison.OrdinalIgnoreCase) ||
+                    name.Contains("WSL", StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }

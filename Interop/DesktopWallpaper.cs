@@ -245,6 +245,26 @@ public sealed class DesktopWallpaperController : IDisposable
         }
     }
 
+    /// <summary>
+    /// Explicitly advances the wallpaper slideshow on one or all monitors.
+    /// </summary>
+    public bool AdvanceSlideshow(string? monitorId = null, int direction = 0)
+    {
+        IDesktopWallpaper? wallpaper = _desktopWallpaper;
+        if (wallpaper is null)
+            return false;
+
+        try
+        {
+            return wallpaper.AdvanceSlideshow(monitorId, direction) >= 0;
+        }
+        catch (Exception ex)
+        {
+            DiagnosticsLog.Log($"[DesktopWallpaper] AdvanceSlideshow error: {ex.Message}");
+            return false;
+        }
+    }
+
     /// <summary>Interval, in milliseconds, recorded for the current slideshow (0 when unknown).</summary>
     public uint GetSlideShowIntervalMs()
     {

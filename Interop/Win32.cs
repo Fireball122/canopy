@@ -21,6 +21,7 @@ public static class Win32
     public const long WS_EX_APPWINDOW = 0x00040000L;
     public const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
     public const uint KEYEVENTF_KEYUP = 0x0002;
+    public const int WM_ERASEBKGND = 0x0014;
     // DWM Attributes (Windows 11)
     public const int DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 = 19;
     public const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
@@ -616,9 +617,11 @@ public static class Win32
         if (hwnd == IntPtr.Zero)
             return;
 
+        int darkMode = 1;
+        _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref darkMode, sizeof(int));
+
         int ncPolicy = DWMNCRP_DISABLED;
         _ = DwmSetWindowAttribute(hwnd, DWMWA_NCRENDERING_POLICY, ref ncPolicy, sizeof(int));
-
         int borderNone = DWMWA_COLOR_NONE;
         _ = DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, ref borderNone, sizeof(int));
 
@@ -1026,6 +1029,35 @@ public static class Win32
     public const uint ES_SYSTEM_REQUIRED = 0x00000001;
     public const uint ES_DISPLAY_REQUIRED = 0x00000002;
     public const uint ES_CONTINUOUS = 0x80000000;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BLUETOOTH_FIND_RADIO_PARAMS
+    {
+        public uint dwSize;
+    }
+
+    [DllImport("bthprops.cpl", SetLastError = true)]
+    public static extern IntPtr BluetoothFindFirstRadio(ref BLUETOOTH_FIND_RADIO_PARAMS pbtfrp, out IntPtr phRadio);
+
+    [DllImport("bthprops.cpl", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool BluetoothFindRadioClose(IntPtr hFind);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool CloseHandle(IntPtr handle);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool DeviceIoControl(
+        IntPtr hDevice,
+        uint dwIoControlCode,
+        IntPtr lpInBuffer,
+        uint nInBufferSize,
+        [Out] byte[] lpOutBuffer,
+        uint nOutBufferSize,
+        out uint lpBytesReturned,
+        IntPtr lpOverlapped);
 
     public static bool IsSystemInDarkMode()
     {

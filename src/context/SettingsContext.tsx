@@ -40,6 +40,14 @@ export interface CanopySettings {
   activeWallpaperPath?: string;
   glassBlurStrength: number; // 16 to 32 (default 24)
   glassOpacity: number; // 0.70 to 0.95 (default 0.86)
+  customAccentColor?: string; // Optional custom accent hex (e.g. #52b788, #38bdf8)
+  trueOledMode?: boolean; // Forces pure #000000 pitch-black canvas in dark modes
+  showCalendarWidget: boolean; // toggles Calendar card on Dashboard
+  showWeatherWidget: boolean; // toggles Weather card on Dashboard
+  showQuickAppsDock: boolean; // toggles Quick Apps dock on Dashboard
+  showSystemSpecs: boolean; // toggles CPU/RAM/Uptime status strip on Dashboard
+  showVolumeSlider: boolean; // toggles master volume slider on Dashboard
+  visualizerSensitivity: number; // 0.5 to 2.5 multiplier for live audio reactive spectrum
 
   // Dashboard, Media & Navigation Customization
   enableBrightnessSlider: boolean; // default false (ideal for desktop PCs)
@@ -80,6 +88,7 @@ export interface CanopySettings {
   // Panel Placement
   panelMonitorMode: 'cursor' | 'primary'; // default 'cursor'
   triggerMonitorScope: 'all' | 'primary'; // default 'all'
+  panelAnchor: 'top-center' | 'top-left' | 'top-right'; // default 'top-center'
   showPanelOnLaunch: boolean; // default true
 
   // Performance
@@ -142,6 +151,14 @@ export const DEFAULT_SETTINGS: CanopySettings = {
   showPerformanceTab: true,
   showAppsTab: true,
   showWallpaperTab: true,
+  customAccentColor: '',
+  trueOledMode: false,
+  showCalendarWidget: true,
+  showWeatherWidget: true,
+  showQuickAppsDock: true,
+  showSystemSpecs: true,
+  showVolumeSlider: true,
+  visualizerSensitivity: 1.0,
   showWeatherTab: true,
   showPowerTab: true,
   showSettingsTab: true,
@@ -168,6 +185,7 @@ export const DEFAULT_SETTINGS: CanopySettings = {
   quietHoursEnd: '07:00',
   panelMonitorMode: 'cursor',
   triggerMonitorScope: 'all',
+  panelAnchor: 'top-center',
   showPanelOnLaunch: true,
   suspendWebViewWhenClosed: true,
   showMicSlider: true,
@@ -380,6 +398,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       quietHoursEnd: settings.quietHoursEnd,
       panelMonitorMode: settings.panelMonitorMode,
       triggerMonitorScope: settings.triggerMonitorScope,
+      panelAnchor: settings.panelAnchor,
       animationsEnabled: settings.animationsEnabled,
       animationDurationMs: settings.animationDurationMs,
       suspendWhenClosed: settings.suspendWebViewWhenClosed,
@@ -403,6 +422,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     settings.quietHoursEnd,
     settings.panelMonitorMode,
     settings.triggerMonitorScope,
+    settings.panelAnchor,
     settings.animationsEnabled,
     settings.animationDurationMs,
     settings.suspendWebViewWhenClosed,

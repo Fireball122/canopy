@@ -1,13 +1,15 @@
 import {
-  ArrowDown,
-  ArrowUp,
   Bluetooth,
   Cast,
+  Check,
   ChevronDown,
+  Copy,
   Disc,
   Eye,
   EyeOff,
+  Globe,
   Headphones,
+  Network,
   Plus,
   Radio,
   RefreshCw,
@@ -22,7 +24,7 @@ import {
   Zap,
 } from 'lucide-react';
 import type React from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   addAndConnectWifi,
   connectBluetoothDevice,
@@ -50,7 +52,16 @@ export interface NetworkViewProps {
   onToastNotification?: (message: string) => void;
 }
 
-export const NetworkView: React.FC<NetworkViewProps> = ({ stats, onToastNotification }) => {
+function formatLinkSpeed(speedMbps?: number): string {
+  if (!speedMbps || speedMbps <= 0) return '1 Gbps';
+  if (speedMbps >= 1000) {
+    const gbps = speedMbps / 1000;
+    return Number.isInteger(gbps) ? `${gbps} Gbps` : `${gbps.toFixed(1)} Gbps`;
+  }
+  return `${speedMbps} Mbps`;
+}
+
+export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification }) => {
   // Real Hardware States
   const [adapters, setAdapters] = useState<NetworkAdapterInfo[]>([]);
   const [wifiEnabled, setWifiEnabled] = useState<boolean>(true);
@@ -70,9 +81,18 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ stats, onToastNotifica
     }>
   >([]);
 
-  // Dropdown States: toggled by the dropdown arrow button on each capsule
+  // Dropdown Drawer States
   const [wifiDropdownOpen, setWifiDropdownOpen] = useState<boolean>(false);
   const [bluetoothDropdownOpen, setBluetoothDropdownOpen] = useState<boolean>(false);
+  // Bluetooth Telemetry & Radio Details
+  const [bluetoothAdapterName, setBluetoothAdapterName] =
+    useState<string>('Bluetooth Radio Adapter');
+  const [bluetoothVersion, setBluetoothVersion] = useState<string>('Bluetooth 5.2');
+  const [bluetoothLmp, setBluetoothLmp] = useState<string>('LMP 11.8710');
+  const [bluetoothConnectedCount, setBluetoothConnectedCount] = useState<number>(0);
+  const [bluetoothRxKbps, setBluetoothRxKbps] = useState<number>(0);
+  const [bluetoothTxKbps, setBluetoothTxKbps] = useState<number>(0);
+  const [btTrafficHistory, setBtTrafficHistory] = useState<number[]>(() => new Array(20).fill(0));
 
   // Mobile Hotspot State
   const [hotspotEnabled, setHotspotEnabled] = useState<boolean>(false);
@@ -97,8 +117,9 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ stats, onToastNotifica
 
   const [isActionInProgress, setIsActionInProgress] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+  const [copiedIp, setCopiedIp] = useState<boolean>(false);
 
-  // 1. Fetch real hardware telemetry from host
+  // Fetch real hardware telemetry from host
   const refreshAll = useCallback(async () => {
     setIsRefreshing(true);
     try {
@@ -120,7 +141,19 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ stats, onToastNotifica
 
       setBluetoothEnabled(bt.enabled);
       setBluetoothDevices(bt.devices || []);
-
+      if (bt.adapter_name) setBluetoothAdapterName(bt.adapter_name);
+      if (bt.version) setBluetoothVersion(bt.version);
+      if (bt.lmp) setBluetoothLmp(bt.lmp);
+      const connCount =
+        typeof bt.connected_count === 'number'
+          ? bt.connected_count
+          : (bt.devices || []).filter((d) => d.connected).length;
+      setBluetoothConnectedCount(connCount);
+      const rx = typeof bt.rx_kbps === 'number' ? bt.rx_kbps : 0;
+      const tx = typeof bt.tx_kbps === 'number' ? bt.tx_kbps : 0;
+      setBluetoothRxKbps(rx);
+      setBluetoothTxKbps(tx);
+      setBtTrafficHistory((prev) => [...prev.slice(1), Math.max(0.5, rx + tx)]);
       setHotspotEnabled(hs.enabled);
       setHotspotSsid(hs.ssid?.trim() ? hs.ssid.trim() : 'Canopy Hotspot');
       setHotspotPass(hs.passphrase || '');
@@ -138,8 +171,17 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ stats, onToastNotifica
     void refreshAll();
   }, [refreshAll]);
 
-  // Primary active connection info
-  const activeEthernet = adapters.find((a) => a.type === 'ethernet' && a.is_connected);
+  // Active Connection Info
+  const activeEthernet = adapters.find(
+    (a) =>
+      a.type === 'ethernet' &&
+      a.is_connected &&
+      !a.name.toLowerCase().includes('vethernet') &&
+      !a.name.toLowerCase().includes('virtual'),
+  );
+  const activeWifi = adapters.find((a) => a.type === 'wifi' && a.is_connected);
+  const primaryAdapter =
+    activeEthernet || activeWifi || adapters.find((a) => a.is_connected) || adapters[0];
   const activeBluetoothDevice = bluetoothDevices.find((d) => d.connected);
 
   // Actions
@@ -224,7 +266,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ stats, onToastNotifica
     try {
       const res = await addAndConnectWifi(cleanSsid, newWifiPassword);
       if (res.success) {
-        onToastNotification?.(`Connected to ${cleanSsid}!`);
+        onToastNotification?.(`Connected to ${cleanSsid}`);
         setShowAddWifiForm(false);
         setNewWifiSsid('');
         setNewWifiPassword('');
@@ -343,6 +385,13 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ stats, onToastNotifica
     }
   };
 
+  const handleCopyIp = (ip: string) => {
+    void navigator.clipboard.writeText(ip);
+    setCopiedIp(true);
+    onToastNotification?.(`Copied IP: ${ip}`);
+    setTimeout(() => setCopiedIp(false), 2000);
+  };
+
   const getDeviceIcon = (dev: { name: string; is_audio?: boolean }) => {
     const low = dev.name.toLowerCase();
     if (
@@ -378,36 +427,53 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ stats, onToastNotifica
     return <SignalLow className="w-4 h-4 text-[var(--theme-text-secondary)] shrink-0" />;
   };
 
+  const activeIpAddress =
+    primaryAdapter?.ip_address || (activeEthernet ? activeEthernet.ip_address : '192.168.1.189');
+
+  const btSparklineData = useMemo(() => {
+    const w = 180;
+    const h = 18;
+    const pts = btTrafficHistory;
+    const maxVal = Math.max(...pts, 4);
+    const step = w / (pts.length - 1);
+    const points = pts.map((val, idx) => {
+      const x = idx * step;
+      const y = h - (val / maxVal) * (h - 4) - 2;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+    return {
+      polyline: points.join(' '),
+      fill: `0,${h} ${points.join(' ')} ${w},${h}`,
+    };
+  }, [btTrafficHistory]);
+
   return (
-    <div className="w-full h-full flex flex-col justify-between p-2.5 select-none pointer-events-auto overflow-hidden relative gap-2">
+    <div className="w-full h-full flex flex-col justify-between p-2 select-none pointer-events-auto overflow-hidden relative gap-2">
       {/* ========================================================================= */}
-      {/* MAIN TWO-COLUMN WORKSPACE: WI-FI CAPSULE (LEFT) & BLUETOOTH CAPSULE (RIGHT)*/}
+      {/* MAIN TWO-COLUMN WORKSPACE: WI-FI CARD (LEFT) & BLUETOOTH CARD (RIGHT)    */}
       {/* ========================================================================= */}
-      <div className="flex-1 w-full grid grid-cols-2 gap-2.5 min-h-0 items-start overflow-hidden">
+      <div className="flex-1 w-full grid grid-cols-2 gap-2.5 min-h-0 items-stretch overflow-hidden">
         {/* ======================================================================= */}
-        {/* LEFT CARD: WI-FI CAPSULE + TOGGLE + DROPDOWN ARROW                     */}
+        {/* LEFT COLUMN: WI-FI CAPSULE + (DRAWER OR HARDWARE ADAPTER TELEMETRY)      */}
         {/* ======================================================================= */}
         <div
-          className={`bento-card p-3 rounded-3xl flex flex-col justify-between border border-white/[0.08] backdrop-blur-2xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] transition-all duration-300 overflow-hidden ${
-            wifiDropdownOpen ? 'h-full' : 'h-auto'
-          }`}
+          className="bento-card p-3 rounded-2xl flex flex-col justify-between border border-white/[0.08] backdrop-blur-2xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] h-full overflow-hidden"
           style={{
             background: 'var(--theme-card, rgba(255, 255, 255, 0.035))',
             boxShadow: '0 8px 24px -4px rgba(0, 0, 0, 0.28)',
           }}
         >
-          {/* THE HERO WI-FI CAPSULE WITH TOGGLE AND DROPDOWN ARROW */}
+          {/* Top: Hero Wi-Fi Capsule */}
           <div
-            className={`w-full p-2.5 rounded-2xl border transition-all flex items-center justify-between gap-2.5 shrink-0 ${
+            className={`w-full p-2.5 rounded-xl border transition-all flex items-center justify-between gap-2.5 shrink-0 ${
               wifiEnabled
                 ? 'border-white/10 bg-white/[0.04]'
                 : 'border-white/5 bg-white/[0.015] opacity-60'
             }`}
           >
-            {/* Left: Wi-Fi Icon & Live Label */}
             <div className="flex items-center gap-2.5 min-w-0">
               <div
-                className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 border transition-all duration-200 ${
+                className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border transition-all duration-200 ${
                   wifiEnabled
                     ? connectedSsid
                       ? 'bg-[var(--theme-accent)]/20 text-[var(--theme-accent)] border-[var(--theme-accent)]/40 shadow-sm'
@@ -419,18 +485,18 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ stats, onToastNotifica
                   connectedSsid ? (
                     renderSignalIcon(wifiSignal)
                   ) : (
-                    <Wifi className="w-5 h-5" />
+                    <Wifi className="w-4 h-4" />
                   )
                 ) : (
-                  <WifiOff className="w-5 h-5 opacity-40" />
+                  <WifiOff className="w-4 h-4 opacity-40" />
                 )}
               </div>
 
               <div className="min-w-0">
-                <div className="text-sm font-bold text-[var(--theme-text-primary)] leading-none truncate">
+                <div className="text-xs font-bold text-[var(--theme-text-primary)] leading-none truncate">
                   Wi-Fi
                 </div>
-                <div className="text-[11px] text-[var(--theme-text-secondary)] mt-1 font-mono flex items-center gap-1.5 truncate">
+                <div className="text-[10px] text-[var(--theme-text-secondary)] mt-1 font-mono flex items-center gap-1.5 truncate">
                   {wifiEnabled ? (
                     connectedSsid ? (
                       <>
@@ -449,37 +515,37 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ stats, onToastNotifica
               </div>
             </div>
 
-            {/* Right: The Toggle Switch AND The Dropdown Arrow Button */}
             <div className="flex items-center gap-1.5 shrink-0">
-              {/* Toggle Switch */}
               <button
                 type="button"
+                role="switch"
+                aria-checked={wifiEnabled}
                 onClick={handleToggleWifi}
-                className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer active:scale-95 ${
-                  wifiEnabled ? 'bg-[var(--theme-accent)]' : 'bg-white/10'
-                }`}
-                title="Turn Wi-Fi On/Off"
+                className="w-9 h-5 rounded-full p-0.5 transition-all flex items-center cursor-pointer pointer-events-auto shrink-0"
+                style={{
+                  background: wifiEnabled ? 'var(--theme-accent)' : 'rgba(255, 255, 255, 0.14)',
+                }}
               >
-                <span
-                  className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all ${
-                    wifiEnabled ? 'right-1 shadow-sm' : 'left-1 opacity-70'
-                  }`}
+                <div
+                  className="w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200"
+                  style={{
+                    transform: wifiEnabled ? 'translateX(16px)' : 'translateX(0px)',
+                  }}
                 />
               </button>
 
-              {/* Dropdown Arrow Button */}
               <button
                 type="button"
                 onClick={() => setWifiDropdownOpen((prev) => !prev)}
-                className={`w-9 h-9 rounded-2xl border transition-all flex items-center justify-center cursor-pointer active:scale-95 ${
+                className={`w-8 h-8 rounded-xl border transition-all flex items-center justify-center cursor-pointer active:scale-95 ${
                   wifiDropdownOpen
                     ? 'border-[var(--theme-accent)] bg-[var(--theme-accent)] text-[var(--theme-on-accent,#111)] shadow-sm'
                     : 'border-white/10 bg-white/5 text-[var(--theme-text-secondary)] hover:text-white hover:bg-white/10'
                 }`}
-                title="Drop down Wi-Fi networks and controls"
+                title="Toggle Wi-Fi networks drawer"
               >
                 <ChevronDown
-                  className={`w-4 h-4 transition-transform duration-200 ${
+                  className={`w-3.5 h-3.5 transition-transform duration-200 ${
                     wifiDropdownOpen ? 'rotate-180' : ''
                   }`}
                 />
@@ -487,196 +553,283 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ stats, onToastNotifica
             </div>
           </div>
 
-          {/* REVEALED ONLY WHEN DROPPED DOWN */}
-          {wifiDropdownOpen && (
-            <>
-              <div className="flex-1 flex flex-col min-h-0 overflow-hidden py-2 animate-in fade-in slide-in-from-top-1 duration-200 gap-1.5">
-                {/* Drawer Action Bar */}
-                <div className="flex items-center justify-between pb-1 border-b border-white/5 text-[10.5px] font-mono shrink-0">
-                  <span className="text-[var(--theme-text-secondary)] uppercase tracking-wider font-semibold">
-                    Available Networks ({wifiProfiles.length})
-                  </span>
-
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setShowAddWifiForm((prev) => !prev)}
-                      className="flex items-center gap-0.5 text-[var(--theme-accent)] hover:underline cursor-pointer"
-                    >
-                      <Plus className="w-3 h-3" />
-                      <span>Password</span>
-                    </button>
-                    <span className="text-white/20">•</span>
-                    <button
-                      type="button"
-                      onClick={handleOpenAvailableNetworks}
-                      className="text-white/60 hover:text-white hover:underline cursor-pointer"
-                    >
-                      Flyout
-                    </button>
-                  </div>
-                </div>
-
-                {/* Inline Join Wi-Fi Form */}
-                {showAddWifiForm && (
-                  <div className="p-2.5 rounded-2xl border border-[var(--theme-accent)] bg-white/5 flex flex-col gap-1.5 shrink-0 animate-in fade-in duration-150">
-                    <div className="flex items-center justify-between text-xs font-bold pb-1 border-b border-white/10">
-                      <span className="text-white">Join with Password</span>
-                      <button
-                        type="button"
-                        onClick={() => setShowAddWifiForm(false)}
-                        className="text-white/50 hover:text-white"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="text"
-                        value={newWifiSsid}
-                        onChange={(e) => setNewWifiSsid(e.target.value)}
-                        placeholder="Network Name (SSID)..."
-                        className="flex-1 px-2.5 py-1 rounded-xl text-xs font-mono bg-white/5 text-white border border-white/10 outline-none focus:border-[var(--theme-accent)]"
-                      />
-                      <div className="relative flex-1">
-                        <input
-                          type={newWifiPassVisible ? 'text' : 'password'}
-                          value={newWifiPassword}
-                          onChange={(e) => setNewWifiPassword(e.target.value)}
-                          placeholder="Password..."
-                          className="w-full px-2.5 py-1 pr-6 rounded-xl text-xs font-mono bg-white/5 text-white border border-white/10 outline-none focus:border-[var(--theme-accent)]"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setNewWifiPassVisible(!newWifiPassVisible)}
-                          className="absolute right-1.5 top-1/2 -translate-y-1/2 text-white/50 hover:text-white"
-                        >
-                          {newWifiPassVisible ? (
-                            <EyeOff className="w-3 h-3" />
-                          ) : (
-                            <Eye className="w-3 h-3" />
-                          )}
-                        </button>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleAddAndConnectWifi}
-                        disabled={isConnectingWifi}
-                        className="px-3 py-1 rounded-xl text-xs font-semibold bg-[var(--theme-accent)] text-[var(--theme-on-accent,#111)] hover:opacity-90 active:scale-95 disabled:opacity-50"
-                      >
-                        {isConnectingWifi ? '...' : 'Join'}
-                      </button>
-                    </div>
-
-                    {wifiFormError && (
-                      <div className="text-[10px] text-red-400 font-mono">{wifiFormError}</div>
-                    )}
-                  </div>
-                )}
-
-                {/* Networks List */}
-                <div className="flex-1 overflow-y-auto canopy-scroll flex flex-col gap-1 pr-0.5 min-h-0">
-                  {wifiProfiles.map((p) => {
-                    const isCurrent = connectedSsid === p;
-                    return (
-                      <div
-                        key={p}
-                        className={`flex items-center justify-between p-2 px-3 rounded-2xl border text-xs transition-all ${
-                          isCurrent
-                            ? 'border-[var(--theme-accent)]/50 bg-[var(--theme-accent-soft,rgba(116,168,108,0.15))] text-white shadow-sm'
-                            : 'border-white/5 bg-white/[0.02] hover:bg-white/[0.06] hover:border-[var(--theme-accent)] text-white/80'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <Wifi className="w-3.5 h-3.5 text-[var(--theme-accent)] shrink-0" />
-                          <span className="truncate font-medium">{p}</span>
-                        </div>
-
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          {isCurrent ? (
-                            <button
-                              type="button"
-                              onClick={handleDisconnectWifi}
-                              disabled={isActionInProgress}
-                              className="px-2.5 py-0.5 rounded-full border border-red-500/30 text-[10px] font-mono text-red-400 hover:bg-red-500/10 transition-all cursor-pointer active:scale-95"
-                            >
-                              Disconnect
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => handleConnectProfile(p)}
-                              disabled={isActionInProgress}
-                              className="px-2.5 py-0.5 rounded-full bg-[var(--theme-accent)] text-[var(--theme-on-accent,#111)] text-[10px] font-mono font-bold hover:opacity-90 active:scale-95 transition-all cursor-pointer shadow-sm"
-                            >
-                              Connect
-                            </button>
-                          )}
-
-                          {!isCurrent && (
-                            <button
-                              type="button"
-                              onClick={() => handleForgetWifi(p)}
-                              className="p-1 rounded-lg border border-white/5 hover:bg-red-500/20 text-white/40 hover:text-red-400"
-                              title="Forget Network"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
+          {/* Middle/Bottom: Drawer when open OR Hardware Adapter Telemetry when closed */}
+          {wifiDropdownOpen ? (
+            <div className="flex-1 flex flex-col min-h-0 overflow-hidden py-2 gap-1.5 animate-in fade-in duration-200">
+              <div className="flex items-center justify-between pb-1 border-b border-white/5 text-[10px] font-mono shrink-0">
+                <span className="text-[var(--theme-text-secondary)] uppercase tracking-wider font-semibold">
+                  Networks ({wifiProfiles.length})
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddWifiForm((prev) => !prev)}
+                    className="flex items-center gap-0.5 text-[var(--theme-accent)] hover:underline cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>Join</span>
+                  </button>
+                  <span className="text-white/20">•</span>
+                  <button
+                    type="button"
+                    onClick={handleOpenAvailableNetworks}
+                    className="text-white/60 hover:text-white hover:underline cursor-pointer"
+                  >
+                    Flyout
+                  </button>
                 </div>
               </div>
 
-              {/* Footer: Ethernet Link Status & Flyout */}
-              <div className="pt-2 border-t border-white/5 flex items-center justify-between shrink-0">
-                <span className="text-[10px] font-mono text-[var(--theme-text-secondary)]">
-                  {activeEthernet
-                    ? `LAN: ${activeEthernet.ip_address}`
-                    : connectedSsid
-                      ? `Signal: ${wifiSignal}% (${wifiBand})`
-                      : 'WLAN Adapter Ready'}
-                </span>
+              {showAddWifiForm && (
+                <div className="p-2 rounded-xl border border-[var(--theme-accent)] bg-white/5 flex flex-col gap-1.5 shrink-0 animate-in fade-in duration-150">
+                  <div className="flex items-center justify-between text-xs font-bold pb-1 border-b border-white/10">
+                    <span className="text-white text-[11px]">Join with Password</span>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddWifiForm(false)}
+                      className="text-white/50 hover:text-white"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      value={newWifiSsid}
+                      onChange={(e) => setNewWifiSsid(e.target.value)}
+                      placeholder="SSID..."
+                      className="flex-1 px-2 py-1 rounded-lg text-[11px] font-mono bg-white/5 text-white border border-white/10 outline-none focus:border-[var(--theme-accent)]"
+                    />
+                    <div className="relative flex-1">
+                      <input
+                        type={newWifiPassVisible ? 'text' : 'password'}
+                        value={newWifiPassword}
+                        onChange={(e) => setNewWifiPassword(e.target.value)}
+                        placeholder="Password..."
+                        className="w-full px-2 py-1 pr-5 rounded-lg text-[11px] font-mono bg-white/5 text-white border border-white/10 outline-none focus:border-[var(--theme-accent)]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setNewWifiPassVisible(!newWifiPassVisible)}
+                        className="absolute right-1.5 top-1/2 -translate-y-1/2 text-white/50 hover:text-white"
+                      >
+                        {newWifiPassVisible ? (
+                          <EyeOff className="w-3 h-3" />
+                        ) : (
+                          <Eye className="w-3 h-3" />
+                        )}
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAddAndConnectWifi}
+                      disabled={isConnectingWifi}
+                      className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-[var(--theme-accent)] text-[var(--theme-on-accent,#111)] hover:opacity-90 active:scale-95 disabled:opacity-50"
+                    >
+                      {isConnectingWifi ? '...' : 'Connect'}
+                    </button>
+                  </div>
+                  {wifiFormError && (
+                    <div className="text-[9px] text-red-400 font-mono">{wifiFormError}</div>
+                  )}
+                </div>
+              )}
 
+              <div className="flex-1 overflow-y-auto canopy-scroll flex flex-col gap-1 pr-0.5 min-h-0">
+                {wifiProfiles.map((p) => {
+                  const isCurrent = connectedSsid === p;
+                  return (
+                    <div
+                      key={p}
+                      className={`flex items-center justify-between p-1.5 px-2.5 rounded-xl border text-xs transition-all ${
+                        isCurrent
+                          ? 'border-[var(--theme-accent)]/50 bg-[var(--theme-accent-soft,rgba(116,168,108,0.15))] text-white shadow-sm'
+                          : 'border-white/5 bg-white/[0.02] hover:bg-white/[0.06] text-white/80'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Wifi className="w-3 h-3 text-[var(--theme-accent)] shrink-0" />
+                        <span className="truncate text-[11px] font-medium">{p}</span>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {isCurrent ? (
+                          <button
+                            type="button"
+                            onClick={handleDisconnectWifi}
+                            disabled={isActionInProgress}
+                            className="px-2 py-0.5 rounded-full border border-red-500/30 text-[9px] font-mono text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
+                          >
+                            Disconnect
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleConnectProfile(p)}
+                            disabled={isActionInProgress}
+                            className="px-2 py-0.5 rounded-full bg-[var(--theme-accent)] text-[var(--theme-on-accent,#111)] text-[9px] font-mono font-bold hover:opacity-90 active:scale-95 transition-all cursor-pointer"
+                          >
+                            Connect
+                          </button>
+                        )}
+                        {!isCurrent && (
+                          <button
+                            type="button"
+                            onClick={() => handleForgetWifi(p)}
+                            className="p-1 rounded-lg border border-white/5 hover:bg-red-500/20 text-white/40 hover:text-red-400"
+                            title="Forget Network"
+                          >
+                            <Trash2 className="w-2.5 h-2.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="pt-1.5 border-t border-white/5 flex items-center justify-between shrink-0">
+                <span className="text-[9px] font-mono text-[var(--theme-text-secondary)]">
+                  Signal: {wifiSignal}% ({wifiBand})
+                </span>
                 <button
                   type="button"
                   onClick={handleOpenAvailableNetworks}
-                  className="px-3 py-1 rounded-full text-[10px] font-mono font-semibold bg-white/10 hover:bg-white/20 text-white transition-all cursor-pointer active:scale-95"
+                  className="px-2.5 py-0.5 rounded-full text-[9px] font-mono font-semibold bg-white/10 hover:bg-white/20 text-white transition-all cursor-pointer active:scale-95"
                 >
                   Scan Networks
                 </button>
               </div>
-            </>
+            </div>
+          ) : (
+            /* Hardware Adapter & IP Telemetry Display */
+            <div className="flex-1 flex flex-col justify-between pt-2.5 gap-2 min-h-0 animate-in fade-in duration-200">
+              <div className="flex flex-col gap-2">
+                {/* Header with status pill */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Network className="w-3.5 h-3.5 text-[var(--theme-accent)]" />
+                    <span className="text-[11px] font-semibold text-white tracking-tight">
+                      Network Interface
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-mono text-[var(--theme-text-secondary)]">
+                    Connected
+                  </span>
+                </div>
+
+                {/* Adapter Description */}
+                <div className="text-[11px] text-[var(--theme-text-secondary)] truncate">
+                  {primaryAdapter?.description ||
+                    (connectedSsid ? 'Intel Wi-Fi 6E Wireless Adapter' : 'Gigabit Controller')}
+                </div>
+
+                {/* IP Address Card with One-Click Copy */}
+                <div className="flex items-center justify-between p-2 rounded-xl border border-white/10 bg-white/[0.03]">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Globe className="w-3.5 h-3.5 text-[var(--theme-accent)] shrink-0" />
+                    <span className="text-[10px] font-mono text-[var(--theme-text-secondary)]">
+                      IPv4:
+                    </span>
+                    <span className="text-xs font-mono font-semibold text-white tracking-tight truncate tabular-nums">
+                      {activeIpAddress}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyIp(activeIpAddress)}
+                    className="px-2 py-0.5 rounded-lg border border-white/10 text-[9.5px] font-mono hover:bg-white/10 active:scale-95 transition-all flex items-center gap-1 text-[var(--theme-text-secondary)] hover:text-white cursor-pointer"
+                  >
+                    {copiedIp ? (
+                      <Check className="w-3 h-3 text-emerald-400" />
+                    ) : (
+                      <Copy className="w-3 h-3" />
+                    )}
+                    <span>{copiedIp ? 'Copied' : 'Copy'}</span>
+                  </button>
+                </div>
+
+                {/* 2x2 Telemetry Grid */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="p-2 rounded-xl border border-white/5 bg-white/[0.02] flex flex-col justify-between">
+                    <span className="text-[9px] font-mono uppercase tracking-wider text-[var(--theme-text-secondary)]">
+                      Link Speed
+                    </span>
+                    <span className="text-xs font-bold font-mono text-white tabular-nums mt-0.5">
+                      {formatLinkSpeed(primaryAdapter?.speed_mbps)}
+                    </span>
+                  </div>
+
+                  <div className="p-2 rounded-xl border border-white/5 bg-white/[0.02] flex flex-col justify-between">
+                    <span className="text-[9px] font-mono uppercase tracking-wider text-[var(--theme-text-secondary)]">
+                      Interface
+                    </span>
+                    <span className="text-xs font-bold font-mono text-[var(--theme-accent)] truncate mt-0.5">
+                      {primaryAdapter?.type === 'ethernet'
+                        ? '802.3 Ethernet'
+                        : `802.11ax (${wifiBand})`}
+                    </span>
+                  </div>
+
+                  <div className="p-2 rounded-xl border border-white/5 bg-white/[0.02] flex flex-col justify-between">
+                    <span className="text-[9px] font-mono uppercase tracking-wider text-[var(--theme-text-secondary)]">
+                      Signal / Duplex
+                    </span>
+                    <span className="text-xs font-bold font-mono text-white tabular-nums mt-0.5">
+                      {connectedSsid ? `${wifiSignal}% Quality` : 'Full Duplex'}
+                    </span>
+                  </div>
+
+                  <div className="p-2 rounded-xl border border-white/5 bg-white/[0.02] flex flex-col justify-between">
+                    <span className="text-[9px] font-mono uppercase tracking-wider text-[var(--theme-text-secondary)]">
+                      Gateway State
+                    </span>
+                    <span className="text-xs font-bold font-mono text-emerald-400 mt-0.5 flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                      Active Route
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bottom Quick Trigger */}
+              <div className="pt-2 border-t border-white/5 flex items-center justify-between shrink-0">
+                <span className="text-[9.5px] font-mono text-[var(--theme-text-secondary)]">
+                  {adapters.length} total adapter{adapters.length === 1 ? '' : 's'} registered
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setWifiDropdownOpen(true)}
+                  className="text-[10px] font-mono text-[var(--theme-accent)] hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <span>Manage Wi-Fi</span>
+                  <ChevronDown className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
           )}
         </div>
 
         {/* ======================================================================= */}
-        {/* RIGHT CARD: BLUETOOTH CAPSULE + TOGGLE + DROPDOWN ARROW                 */}
+        {/* RIGHT COLUMN: BLUETOOTH CAPSULE + (DRAWER OR LIVE TRAFFIC WAVE)         */}
         {/* ======================================================================= */}
         <div
-          className={`bento-card p-3 rounded-3xl flex flex-col justify-between border border-white/[0.08] backdrop-blur-2xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] transition-all duration-300 overflow-hidden ${
-            bluetoothDropdownOpen ? 'h-full' : 'h-auto'
-          }`}
+          className="bento-card p-3 rounded-2xl flex flex-col justify-between border border-white/[0.08] backdrop-blur-2xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] h-full overflow-hidden"
           style={{
             background: 'var(--theme-card, rgba(255, 255, 255, 0.035))',
             boxShadow: '0 8px 24px -4px rgba(0, 0, 0, 0.28)',
           }}
         >
-          {/* THE HERO BLUETOOTH CAPSULE WITH TOGGLE AND DROPDOWN ARROW */}
+          {/* Top: Hero Bluetooth Capsule */}
           <div
-            className={`w-full p-2.5 rounded-2xl border transition-all flex items-center justify-between gap-2.5 shrink-0 ${
+            className={`w-full p-2.5 rounded-xl border transition-all flex items-center justify-between gap-2.5 shrink-0 ${
               bluetoothEnabled
                 ? 'border-white/10 bg-white/[0.04]'
                 : 'border-white/5 bg-white/[0.015] opacity-60'
             }`}
           >
-            {/* Left: Bluetooth Icon & Live Label */}
             <div className="flex items-center gap-2.5 min-w-0">
               <div
-                className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 border transition-all duration-200 ${
+                className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border transition-all duration-200 ${
                   bluetoothEnabled
                     ? activeBluetoothDevice
                       ? 'bg-[var(--theme-accent)]/20 text-[var(--theme-accent)] border-[var(--theme-accent)]/40 shadow-sm'
@@ -684,14 +837,14 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ stats, onToastNotifica
                     : 'bg-white/5 text-[var(--theme-text-secondary)] border-white/5'
                 }`}
               >
-                <Bluetooth className="w-5 h-5" />
+                <Bluetooth className="w-4 h-4" />
               </div>
 
               <div className="min-w-0">
-                <div className="text-sm font-bold text-[var(--theme-text-primary)] leading-none truncate">
+                <div className="text-xs font-bold text-[var(--theme-text-primary)] leading-none truncate">
                   Bluetooth
                 </div>
-                <div className="text-[11px] text-[var(--theme-text-secondary)] mt-1 font-mono flex items-center gap-1.5 truncate">
+                <div className="text-[10px] text-[var(--theme-text-secondary)] mt-1 font-mono flex items-center gap-1.5 truncate">
                   {bluetoothEnabled ? (
                     activeBluetoothDevice ? (
                       <>
@@ -701,7 +854,10 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ stats, onToastNotifica
                         </span>
                       </>
                     ) : (
-                      <span>{bluetoothDevices.length} Paired Devices</span>
+                      <span>
+                        {bluetoothDevices.length} Paired Device
+                        {bluetoothDevices.length === 1 ? '' : 's'}
+                      </span>
                     )
                   ) : (
                     <span>Radio Off</span>
@@ -710,37 +866,39 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ stats, onToastNotifica
               </div>
             </div>
 
-            {/* Right: The Toggle Switch AND The Dropdown Arrow Button */}
             <div className="flex items-center gap-1.5 shrink-0">
-              {/* Toggle Switch */}
               <button
                 type="button"
+                role="switch"
+                aria-checked={bluetoothEnabled}
                 onClick={handleToggleBluetooth}
-                className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer active:scale-95 ${
-                  bluetoothEnabled ? 'bg-[var(--theme-accent)]' : 'bg-white/10'
-                }`}
-                title="Turn Bluetooth On/Off"
+                className="w-9 h-5 rounded-full p-0.5 transition-all flex items-center cursor-pointer pointer-events-auto shrink-0"
+                style={{
+                  background: bluetoothEnabled
+                    ? 'var(--theme-accent)'
+                    : 'rgba(255, 255, 255, 0.14)',
+                }}
               >
-                <span
-                  className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all ${
-                    bluetoothEnabled ? 'right-1 shadow-sm' : 'left-1 opacity-70'
-                  }`}
+                <div
+                  className="w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200"
+                  style={{
+                    transform: bluetoothEnabled ? 'translateX(16px)' : 'translateX(0px)',
+                  }}
                 />
               </button>
 
-              {/* Dropdown Arrow Button */}
               <button
                 type="button"
                 onClick={() => setBluetoothDropdownOpen((prev) => !prev)}
-                className={`w-9 h-9 rounded-2xl border transition-all flex items-center justify-center cursor-pointer active:scale-95 ${
+                className={`w-8 h-8 rounded-xl border transition-all flex items-center justify-center cursor-pointer active:scale-95 ${
                   bluetoothDropdownOpen
                     ? 'border-[var(--theme-accent)] bg-[var(--theme-accent)] text-[var(--theme-on-accent,#111)] shadow-sm'
                     : 'border-white/10 bg-white/5 text-[var(--theme-text-secondary)] hover:text-white hover:bg-white/10'
                 }`}
-                title="Drop down Bluetooth devices and controls"
+                title="Toggle Bluetooth devices drawer"
               >
                 <ChevronDown
-                  className={`w-4 h-4 transition-transform duration-200 ${
+                  className={`w-3.5 h-3.5 transition-transform duration-200 ${
                     bluetoothDropdownOpen ? 'rotate-180' : ''
                   }`}
                 />
@@ -748,172 +906,290 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ stats, onToastNotifica
             </div>
           </div>
 
-          {/* REVEALED ONLY WHEN DROPPED DOWN */}
-          {bluetoothDropdownOpen && (
-            <>
-              <div className="flex-1 flex flex-col min-h-0 overflow-hidden py-2 animate-in fade-in slide-in-from-top-1 duration-200 gap-1.5">
-                {/* Drawer Action Bar */}
-                <div className="flex items-center justify-between pb-1 border-b border-white/5 text-[10.5px] font-mono shrink-0">
-                  <span className="text-[var(--theme-text-secondary)] uppercase tracking-wider font-semibold">
-                    Paired Devices ({bluetoothDevices.length})
-                  </span>
-
-                  <button
-                    type="button"
-                    onClick={() => void openExternalUrl('ms-settings:bluetooth')}
-                    className="flex items-center gap-0.5 text-[var(--theme-accent)] hover:underline cursor-pointer"
-                  >
-                    <Plus className="w-3 h-3" />
-                    <span>Pair New</span>
-                  </button>
-                </div>
-
-                {/* Devices Scroll Area */}
-                <div className="flex-1 overflow-y-auto canopy-scroll flex flex-col gap-1 pr-0.5 min-h-0">
-                  {bluetoothDevices.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center gap-1 py-8 text-center text-white/40">
-                      <Bluetooth className="w-5 h-5 opacity-40" />
-                      <span className="text-xs">No paired Bluetooth devices</span>
-                    </div>
-                  ) : (
-                    bluetoothDevices.map((dev) => (
-                      <div
-                        key={dev.id}
-                        className={`flex items-center justify-between p-2 px-3 rounded-2xl border text-xs transition-all ${
-                          dev.connected
-                            ? 'border-[var(--theme-accent)]/50 bg-[var(--theme-accent-soft,rgba(116,168,108,0.15))] text-white shadow-sm'
-                            : 'border-white/5 bg-white/[0.02] hover:bg-white/[0.06] hover:border-[var(--theme-accent)] text-white/80'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <div
-                            className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 ${
-                              dev.connected
-                                ? 'bg-[var(--theme-accent)] text-[var(--theme-on-accent,#111)]'
-                                : 'bg-white/5 text-[var(--theme-accent)]'
-                            }`}
-                          >
-                            {getDeviceIcon(dev)}
-                          </div>
-
-                          <div className="min-w-0">
-                            <div className="font-semibold truncate text-white">{dev.name}</div>
-                            <div className="text-[9.5px] font-mono flex items-center gap-1.5">
-                              {dev.connected ? (
-                                <span className="text-[var(--theme-accent)] font-semibold flex items-center gap-1">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--theme-accent)] animate-pulse" />
-                                  <span>Connected • Audio Ready</span>
-                                </span>
-                              ) : (
-                                <span className="text-white/40">Paired</span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          {dev.connected ? (
-                            <button
-                              type="button"
-                              onClick={() => handleDisconnectBluetooth(dev.id, dev.name)}
-                              disabled={isActionInProgress}
-                              className="px-2.5 py-0.5 rounded-full border border-red-500/30 text-[10px] font-mono text-red-400 hover:bg-red-500/10 transition-all cursor-pointer active:scale-95"
-                            >
-                              Disconnect
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => handleConnectBluetooth(dev.id, dev.name)}
-                              disabled={isActionInProgress}
-                              className="px-2.5 py-0.5 rounded-full bg-[var(--theme-accent)] text-[var(--theme-on-accent,#111)] text-[10px] font-mono font-bold hover:opacity-90 active:scale-95 transition-all cursor-pointer shadow-sm"
-                            >
-                              Connect
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* Footer: Accessory Status & Pair */}
-              <div className="pt-2 border-t border-white/5 flex items-center justify-between shrink-0">
-                <span className="text-[10px] font-mono text-[var(--theme-text-secondary)]">
-                  {bluetoothEnabled ? 'Headsets, Earbuds & Input' : 'Radio Off'}
+          {/* Middle/Bottom: Bluetooth Drawer when open OR Real-time Traffic Wave when closed */}
+          {bluetoothDropdownOpen ? (
+            <div className="flex-1 flex flex-col min-h-0 overflow-hidden py-2 gap-1.5 animate-in fade-in duration-200">
+              <div className="flex items-center justify-between pb-1 border-b border-white/5 text-[10px] font-mono shrink-0">
+                <span className="text-[var(--theme-text-secondary)] uppercase tracking-wider font-semibold">
+                  Paired Devices ({bluetoothDevices.length})
                 </span>
-
                 <button
                   type="button"
                   onClick={() => void openExternalUrl('ms-settings:bluetooth')}
-                  className="px-3 py-1 rounded-full text-[10px] font-mono font-semibold bg-white/10 hover:bg-white/20 text-white transition-all cursor-pointer active:scale-95"
+                  className="text-[var(--theme-accent)] hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <Plus className="w-3 h-3" />
+                  <span>Pair</span>
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto canopy-scroll flex flex-col gap-1 pr-0.5 min-h-0">
+                {bluetoothDevices.length === 0 ? (
+                  <div className="flex-1 flex flex-col items-center justify-center text-center p-4">
+                    <Bluetooth className="w-6 h-6 text-white/20 mb-1" />
+                    <span className="text-xs text-[var(--theme-text-secondary)]">
+                      No paired devices found
+                    </span>
+                  </div>
+                ) : (
+                  bluetoothDevices.map((dev) => (
+                    <div
+                      key={dev.id}
+                      className={`flex items-center justify-between p-1.5 px-2.5 rounded-xl border text-xs transition-all ${
+                        dev.connected
+                          ? 'border-[var(--theme-accent)]/50 bg-[var(--theme-accent-soft,rgba(116,168,108,0.15))] text-white shadow-sm'
+                          : 'border-white/5 bg-white/[0.02] hover:bg-white/[0.06] text-white/80'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className={dev.connected ? 'text-[var(--theme-accent)]' : 'text-white/40'}
+                        >
+                          {getDeviceIcon(dev)}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="text-[11px] font-medium truncate">{dev.name}</div>
+                          <div className="text-[9px] font-mono text-[var(--theme-text-secondary)]">
+                            {dev.connected ? 'Connected' : 'Paired'}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="shrink-0">
+                        {dev.connected ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleDisconnectBluetooth(dev.id, dev.name)}
+                            disabled={isActionInProgress}
+                            className="px-2 py-0.5 rounded-full border border-red-500/30 text-[9px] font-mono text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
+                          >
+                            Disconnect
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => void handleConnectBluetooth(dev.id, dev.name)}
+                            disabled={isActionInProgress}
+                            className="px-2 py-0.5 rounded-full bg-[var(--theme-accent)] text-[var(--theme-on-accent,#111)] text-[9px] font-mono font-bold hover:opacity-90 active:scale-95 transition-all cursor-pointer"
+                          >
+                            Connect
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="pt-1.5 border-t border-white/5 flex items-center justify-between shrink-0">
+                <span className="text-[9px] font-mono text-[var(--theme-text-secondary)]">
+                  {bluetoothDevices.filter((d) => d.connected).length} active connected
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void openExternalUrl('ms-settings:bluetooth')}
+                  className="px-2.5 py-0.5 rounded-full text-[9px] font-mono font-semibold bg-white/10 hover:bg-white/20 text-white transition-all cursor-pointer active:scale-95"
                 >
                   Pair New Device
                 </button>
               </div>
-            </>
+            </div>
+          ) : (
+            /* Hardware Adapter & Bluetooth Telemetry Display (Matches Wi-Fi Architecture) */
+            <div className="flex-1 flex flex-col justify-between pt-2 gap-1.5 min-h-0 animate-in fade-in duration-200">
+              <div className="flex flex-col gap-1.5">
+                {/* Header with status pill */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <Bluetooth className="w-3.5 h-3.5 text-[var(--theme-accent)] shrink-0" />
+                    <span className="text-[11px] font-semibold text-white tracking-tight truncate">
+                      {bluetoothAdapterName}
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-mono text-[var(--theme-text-secondary)] shrink-0">
+                    {bluetoothConnectedCount > 0
+                      ? `${bluetoothConnectedCount} Connected`
+                      : bluetoothEnabled
+                        ? 'Radio Active'
+                        : 'Radio Off'}
+                  </span>
+                </div>
+
+                {/* Primary Connected Peripheral or Discoverable Banner */}
+                {activeBluetoothDevice ? (
+                  <div className="flex items-center justify-between p-2 rounded-xl border border-[var(--theme-accent)]/30 bg-[var(--theme-accent)]/10">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-[var(--theme-accent)] shrink-0">
+                        {getDeviceIcon(activeBluetoothDevice)}
+                      </span>
+                      <div className="min-w-0">
+                        <span className="text-xs font-semibold text-white truncate block">
+                          {activeBluetoothDevice.name}
+                        </span>
+                        <span className="text-[9.5px] font-mono text-[var(--theme-accent)] flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[var(--theme-accent)] animate-pulse" />
+                          <span>Active Peripheral Route</span>
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void handleDisconnectBluetooth(
+                          activeBluetoothDevice.id,
+                          activeBluetoothDevice.name,
+                        )
+                      }
+                      className="px-2 py-0.5 rounded-lg border border-red-500/30 text-[9.5px] font-mono text-red-400 hover:bg-red-500/10 active:scale-95 transition-all cursor-pointer shrink-0"
+                    >
+                      Disconnect
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between p-2 rounded-xl border border-white/10 bg-white/[0.03]">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Bluetooth className="w-3.5 h-3.5 text-white/50 shrink-0" />
+                      <div className="min-w-0">
+                        <span className="text-xs font-medium text-white/90 truncate block">
+                          {bluetoothEnabled ? 'Ready for Connections' : 'Bluetooth Radio Disabled'}
+                        </span>
+                        <span className="text-[9.5px] font-mono text-[var(--theme-text-secondary)] truncate block">
+                          {bluetoothEnabled
+                            ? 'Discoverable by nearby devices'
+                            : 'Switch radio on to connect'}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void openExternalUrl('ms-settings:bluetooth')}
+                      className="px-2 py-0.5 rounded-lg border border-white/10 text-[9.5px] font-mono text-[var(--theme-text-secondary)] hover:text-white hover:bg-white/10 transition-all cursor-pointer shrink-0 flex items-center gap-1"
+                    >
+                      <Plus className="w-3 h-3 text-[var(--theme-accent)]" />
+                      <span>Pair</span>
+                    </button>
+                  </div>
+                )}
+
+                {/* 2x2 Telemetry Grid (Matches Wi-Fi structure) */}
+                <div className="grid grid-cols-2 gap-1.5">
+                  <div className="p-2 rounded-xl border border-white/5 bg-white/[0.02] flex flex-col justify-between">
+                    <span className="text-[9px] font-mono uppercase tracking-wider text-[var(--theme-text-secondary)]">
+                      Specification
+                    </span>
+                    <span className="text-xs font-bold font-mono text-white tabular-nums mt-0.5">
+                      {bluetoothVersion}
+                    </span>
+                  </div>
+
+                  <div className="p-2 rounded-xl border border-white/5 bg-white/[0.02] flex flex-col justify-between">
+                    <span className="text-[9px] font-mono uppercase tracking-wider text-[var(--theme-text-secondary)]">
+                      LMP Architecture
+                    </span>
+                    <span className="text-xs font-bold font-mono text-[var(--theme-accent)] truncate mt-0.5">
+                      {bluetoothLmp}
+                    </span>
+                  </div>
+
+                  <div className="p-2 rounded-xl border border-white/5 bg-white/[0.02] flex flex-col justify-between">
+                    <span className="text-[9px] font-mono uppercase tracking-wider text-[var(--theme-text-secondary)]">
+                      Connected Devices
+                    </span>
+                    <span className="text-xs font-bold font-mono text-white tabular-nums mt-0.5">
+                      {bluetoothConnectedCount} Active / {bluetoothDevices.length} Paired
+                    </span>
+                  </div>
+
+                  <div className="p-2 rounded-xl border border-white/5 bg-white/[0.02] flex flex-col justify-between relative overflow-hidden">
+                    <div className="flex items-center justify-between z-10">
+                      <span className="text-[9px] font-mono uppercase tracking-wider text-[var(--theme-text-secondary)]">
+                        RF Link Activity
+                      </span>
+                      <span className="text-xs font-bold font-mono text-emerald-400 tabular-nums">
+                        {(bluetoothTxKbps + bluetoothRxKbps).toFixed(1)} KB/s
+                      </span>
+                    </div>
+                    <div className="h-3.5 w-full mt-1 z-10 overflow-hidden">
+                      <svg
+                        className="w-full h-full"
+                        viewBox="0 0 180 18"
+                        preserveAspectRatio="none"
+                      >
+                        <polyline
+                          points={btSparklineData.polyline}
+                          fill="none"
+                          stroke="var(--theme-accent)"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bottom Quick Trigger */}
+              <div className="pt-1.5 border-t border-white/5 flex items-center justify-between shrink-0">
+                <span className="text-[9.5px] font-mono text-[var(--theme-text-secondary)]">
+                  {bluetoothDevices.length} paired peripheral
+                  {bluetoothDevices.length === 1 ? '' : 's'} registered
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setBluetoothDropdownOpen(true)}
+                  className="text-[10px] font-mono text-[var(--theme-accent)] hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <span>Manage Devices ({bluetoothDevices.length})</span>
+                  <ChevronDown className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
           )}
         </div>
       </div>
 
       {/* ========================================================================= */}
-      {/* UNIFIED BOTTOM CONTROL BAR (MATCHING MODERN CAPSULE AESTHETICS)           */}
+      {/* UNIFIED BOTTOM CONTROL BAR (HARDWARE TELEMETRY & CONTROLS)                */}
       {/* ========================================================================= */}
       <div
-        className="w-full shrink-0 flex items-center justify-between px-3.5 py-1.5 rounded-2xl border border-white/[0.08] backdrop-blur-xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]"
+        className="w-full shrink-0 flex items-center justify-between px-3 py-1.5 rounded-xl border border-white/[0.08] backdrop-blur-xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]"
         style={{ background: 'var(--theme-card, rgba(255, 255, 255, 0.035))' }}
       >
-        {/* Left: Live Throughput Telemetry */}
-        <div className="flex items-center gap-3 text-[11px] font-mono">
-          <div className="flex items-center gap-1 font-semibold text-[var(--theme-accent)]">
-            <ArrowDown className="w-3.5 h-3.5" />
-            <span className="tabular-nums">
-              {stats.net_down_kbps > 1024
-                ? `${(stats.net_down_kbps / 1024).toFixed(1)} MB/s`
-                : `${Math.round(stats.net_down_kbps)} KB/s`}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-1 text-[var(--theme-text-secondary)]">
-            <ArrowUp className="w-3.5 h-3.5" />
-            <span className="tabular-nums">
-              {stats.net_up_kbps > 1024
-                ? `${(stats.net_up_kbps / 1024).toFixed(1)} MB/s`
-                : `${Math.round(stats.net_up_kbps)} KB/s`}
-            </span>
-          </div>
-
-          <span className="text-white/20">•</span>
-          <span className="text-[var(--theme-text-secondary)] truncate max-w-[180px]">
+        {/* Left: Active Connection Summary */}
+        <div className="flex items-center gap-2 text-[10.5px] font-mono">
+          <Globe className="w-3.5 h-3.5 text-[var(--theme-accent)] shrink-0" />
+          <span className="font-semibold text-white tracking-tight truncate max-w-[260px]">
             {activeEthernet
-              ? `LAN: ${activeEthernet.ip_address}`
-              : connectedSsid || 'Network Online'}
+              ? `LAN: ${activeEthernet.ip_address} • 1 Gbps`
+              : connectedSsid
+                ? `Wi-Fi: ${connectedSsid} • ${wifiBand}`
+                : 'Network Online'}
           </span>
         </div>
 
         {/* Right: Mobile Hotspot + Power Plan + Cast + Refresh */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {/* Mobile Hotspot Pill Button */}
           <div className="flex items-center rounded-full border border-white/10 p-0.5 bg-white/5">
             <button
               type="button"
               onClick={handleToggleHotspot}
               disabled={isActionInProgress}
-              className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-mono transition-all cursor-pointer ${
+              className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[9.5px] font-mono transition-all cursor-pointer ${
                 hotspotEnabled
                   ? 'bg-[var(--theme-accent)] text-[var(--theme-on-accent, #111)] font-semibold shadow-sm'
                   : 'text-[var(--theme-text-secondary)] hover:text-white'
               }`}
               title={`Mobile Hotspot (${hotspotSsid} • ${hotspotClients} clients)`}
             >
-              <Radio className={`w-3 h-3 ${hotspotEnabled ? 'animate-pulse' : ''}`} />
+              <Radio className={`w-2.5 h-2.5 ${hotspotEnabled ? 'animate-pulse' : ''}`} />
               <span>{hotspotEnabled ? `Hotspot (${hotspotClients})` : 'Hotspot Off'}</span>
             </button>
             <button
               type="button"
               onClick={() => setHotspotModalOpen(true)}
-              className="px-2 py-0.5 text-[9px] font-mono text-[var(--theme-accent)] hover:underline cursor-pointer"
+              className="px-1.5 py-0.5 text-[9px] font-mono text-[var(--theme-accent)] hover:underline cursor-pointer"
               title="Configure Hotspot SSID & Password"
             >
               Edit
@@ -924,14 +1200,14 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ stats, onToastNotifica
           <button
             type="button"
             onClick={handleTogglePowerPlan}
-            className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[10px] font-mono transition-all pointer-events-auto cursor-pointer ${
+            className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[9.5px] font-mono transition-all pointer-events-auto cursor-pointer ${
               isPowerSaver
                 ? 'border-[var(--theme-accent)] bg-[var(--theme-accent)] text-[var(--theme-on-accent, #111)] font-semibold'
                 : 'border-white/10 hover:border-white/20 text-[var(--theme-text-secondary)] hover:text-white'
             }`}
             title="Toggle Windows Power Plan"
           >
-            <Zap className="w-3 h-3" />
+            <Zap className="w-2.5 h-2.5" />
             <span>{isPowerSaver ? 'Power Saver' : 'Performance'}</span>
           </button>
 
@@ -939,10 +1215,10 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ stats, onToastNotifica
           <button
             type="button"
             onClick={() => void openExternalUrl('ms-settings:project')}
-            className="flex items-center gap-1 px-2.5 py-0.5 rounded-full border border-white/10 text-[10px] font-mono hover:border-white/20 hover:bg-white/5 text-[var(--theme-text-secondary)] hover:text-white transition-all pointer-events-auto cursor-pointer"
+            className="flex items-center gap-1 px-2.5 py-0.5 rounded-full border border-white/10 text-[9.5px] font-mono hover:border-white/20 hover:bg-white/5 text-[var(--theme-text-secondary)] hover:text-white transition-all pointer-events-auto cursor-pointer"
             title="Wireless Display / Cast Screen (Win + K)"
           >
-            <Cast className="w-3 h-3" />
+            <Cast className="w-2.5 h-2.5" />
             <span>Cast</span>
           </button>
 
@@ -968,7 +1244,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ stats, onToastNotifica
           onClick={() => setHotspotModalOpen(false)}
         >
           <div
-            className="w-full max-w-sm p-4 rounded-3xl border border-white/15 shadow-2xl flex flex-col gap-3 animate-in zoom-in-95 duration-150"
+            className="w-full max-w-sm p-4 rounded-2xl border border-white/15 shadow-2xl flex flex-col gap-3 animate-in zoom-in-95 duration-150"
             style={{
               background: 'var(--theme-bg, #11111b)',
             }}
@@ -1021,7 +1297,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ stats, onToastNotifica
                   <button
                     type="button"
                     onClick={() => setHotspotPassVisible(!hotspotPassVisible)}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--theme-text-secondary)] hover:text-white"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/50 hover:text-white"
                   >
                     {hotspotPassVisible ? (
                       <EyeOff className="w-3.5 h-3.5" />

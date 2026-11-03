@@ -158,7 +158,7 @@ const ConcentricDualArcGauge: React.FC<ConcentricGaugeProps> = ({
           <div className="mb-1 opacity-80">{icon}</div>
           <div
             className="text-xl font-bold tracking-tight tabular-nums leading-none"
-            style={{ color: 'var(--theme-text-primary, #cdd6f4)' }}
+            style={{ color: 'var(--theme-text-primary)' }}
           >
             {centerValue}
           </div>
@@ -177,8 +177,8 @@ const ConcentricDualArcGauge: React.FC<ConcentricGaugeProps> = ({
         className="mt-1.5 px-3 py-0.5 rounded-full border text-[11px] font-mono font-semibold tabular-nums tracking-tight"
         style={{
           background: 'var(--theme-track, rgba(255, 255, 255, 0.06))',
-          borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.1))',
-          color: 'var(--theme-text-primary, #cdd6f4)',
+          borderColor: 'var(--theme-border)',
+          color: 'var(--theme-text-primary)',
         }}
       >
         {pillText}
@@ -365,8 +365,8 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initial
         <ConcentricDualArcGauge
           outerPercent={gpuUsage}
           innerPercent={gpuTempC !== null ? Math.min(100, (gpuTempC / 100) * 100) : 0}
-          outerColor="var(--theme-accent, #cba6f7)"
-          innerColor="#89dceb"
+          outerColor="var(--theme-accent)"
+          innerColor="var(--theme-accent-warm, var(--theme-accent))"
           centerValue={gpuTempC !== null ? `${gpuTempC}°C` : gpuAvailable ? `${gpuUsage}%` : 'N/A'}
           centerSublabel={
             stats.gpu_name ? formatShortGpuName(stats.gpu_name) : gpuAvailable ? 'GPU Core' : 'GPU'
@@ -376,21 +376,15 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initial
               ? `${gpuUsage}% Usage${gpuTempC !== null ? ` • ${gpuTempC}°C` : ''}`
               : 'No GPU data'
           }
-          icon={
-            <Activity
-              className="w-4 h-4"
-              style={{ color: 'var(--theme-accent, #cba6f7)' }}
-              strokeWidth={2}
-            />
-          }
+          icon={<Activity className="w-4 h-4" style={{ color: 'var(--theme-accent)' }} />}
         />
 
         {/* Gauge 2: CPU (Outer = CPU Usage %, Inner = CPU Temp %) */}
         <ConcentricDualArcGauge
           outerPercent={cpuUsage}
           innerPercent={cpuTempC !== null ? Math.min(100, (cpuTempC / 100) * 100) : 0}
-          outerColor="var(--theme-accent, #cba6f7)"
-          innerColor="#f9e2af"
+          outerColor="var(--theme-accent)"
+          innerColor="var(--theme-accent-warm, var(--theme-accent))"
           centerValue={cpuTempC !== null ? `${cpuTempC}°C` : `${cpuUsage}%`}
           centerSublabel={
             stats.cpu_name
@@ -400,31 +394,19 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initial
                 : 'CPU load'
           }
           pillText={`${cpuUsage}% Usage${cpuTempC !== null ? ` • ${cpuTempC}°C` : ''}`}
-          icon={
-            <Cpu
-              className="w-4 h-4"
-              style={{ color: 'var(--theme-accent, #cba6f7)' }}
-              strokeWidth={2}
-            />
-          }
+          icon={<Cpu className="w-4 h-4" style={{ color: 'var(--theme-accent)' }} />}
         />
 
         {/* Gauge 3: Memory & Storage (Inner = RAM Usage %, Outer = Primary Disk Usage %) */}
         <ConcentricDualArcGauge
           outerPercent={diskUsage}
           innerPercent={ramUsage}
-          outerColor="#a6e3a1"
-          innerColor="var(--theme-accent, #cba6f7)"
+          outerColor="var(--theme-accent)"
+          innerColor="var(--theme-accent-warm, var(--theme-accent))"
           centerValue={`${ramUsedGb.toFixed(1)}GiB`}
           centerSublabel={`of ${ramTotalGb.toFixed(0)}GiB RAM`}
           pillText={`${ramUsage}% RAM • ${diskUsage}% Disk`}
-          icon={
-            <MemoryStick
-              className="w-4 h-4"
-              style={{ color: 'var(--theme-accent, #cba6f7)' }}
-              strokeWidth={2}
-            />
-          }
+          icon={<MemoryStick className="w-4 h-4" style={{ color: 'var(--theme-accent)' }} />}
         />
       </div>
 
@@ -453,12 +435,7 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initial
           <span className="text-[10px] font-mono font-medium text-[var(--theme-text-secondary)]">
             CPU Activity
           </span>
-          <SparklineMini
-            data={cpuHistory}
-            color="var(--theme-accent, #cba6f7)"
-            width={96}
-            height={20}
-          />
+          <SparklineMini data={cpuHistory} color="var(--theme-accent)" height={20} />
         </div>
 
         <div
@@ -489,7 +466,7 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initial
             <Wifi className="w-3.5 h-3.5 text-[#89dceb]" strokeWidth={2.2} />
             <span
               className="text-[10.5px] font-mono uppercase tracking-wider font-semibold"
-              style={{ color: 'var(--theme-accent, #cba6f7)' }}
+              style={{ color: 'var(--theme-accent)' }}
             >
               Network
             </span>
@@ -533,15 +510,12 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initial
               <div className="flex items-center justify-between gap-2 text-[11px] font-mono tabular-nums">
                 <span
                   className="flex items-center gap-1 font-medium"
-                  style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))' }}
+                  style={{ color: 'var(--theme-text-secondary)' }}
                 >
-                  <ArrowDown className="w-3 h-3 text-[#89dceb]" strokeWidth={2.2} />
+                  <ArrowDown className="w-3 h-3 text-[var(--theme-accent)]" strokeWidth={2.2} />
                   <span>Down</span>
                 </span>
-                <span
-                  className="font-semibold"
-                  style={{ color: 'var(--theme-text-primary, #cdd6f4)' }}
-                >
+                <span className="font-semibold" style={{ color: 'var(--theme-text-primary)' }}>
                   {downFormatted}
                 </span>
               </div>
@@ -554,7 +528,7 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initial
                   style={{
                     width: `${downBarPercent}%`,
                     background:
-                      'linear-gradient(90deg, #89dceb 0%, var(--theme-accent, #cba6f7) 100%)',
+                      'linear-gradient(90deg, var(--theme-accent) 0%, var(--theme-accent-warm, var(--theme-accent)) 100%)',
                   }}
                 />
               </div>
@@ -570,15 +544,12 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initial
               <div className="flex items-center justify-between gap-2 text-[11px] font-mono tabular-nums">
                 <span
                   className="flex items-center gap-1 font-medium"
-                  style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))' }}
+                  style={{ color: 'var(--theme-text-secondary)' }}
                 >
-                  <ArrowUp className="w-3 h-3 text-[#a6e3a1]" strokeWidth={2.2} />
+                  <ArrowUp className="w-3 h-3 text-[var(--theme-accent)]" strokeWidth={2.2} />
                   <span>Up</span>
                 </span>
-                <span
-                  className="font-semibold"
-                  style={{ color: 'var(--theme-text-primary, #cdd6f4)' }}
-                >
+                <span className="font-semibold" style={{ color: 'var(--theme-text-primary)' }}>
                   {upFormatted}
                 </span>
               </div>
@@ -591,7 +562,7 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initial
                   style={{
                     width: `${upBarPercent}%`,
                     background:
-                      'linear-gradient(90deg, #a6e3a1 0%, var(--theme-accent, #cba6f7) 100%)',
+                      'linear-gradient(90deg, var(--theme-accent) 0%, var(--theme-accent-warm, var(--theme-accent)) 100%)',
                   }}
                 />
               </div>
@@ -616,7 +587,7 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initial
                 </span>
                 <span
                   className="font-semibold text-xs font-mono"
-                  style={{ color: 'var(--theme-text-primary, #cdd6f4)' }}
+                  style={{ color: 'var(--theme-text-primary)' }}
                 >
                   {downFormatted}
                 </span>
@@ -641,7 +612,7 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initial
                 </span>
                 <span
                   className="font-semibold text-xs font-mono"
-                  style={{ color: 'var(--theme-text-primary, #cdd6f4)' }}
+                  style={{ color: 'var(--theme-text-primary)' }}
                 >
                   {upFormatted}
                 </span>
@@ -660,28 +631,18 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initial
           className="px-4 py-1 rounded-full border text-xs font-mono font-medium flex items-center gap-1.5 transition-all hover:scale-[1.02] active:scale-95 pointer-events-auto cursor-pointer"
           style={{
             background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
-            borderColor: detailsOpen
-              ? 'var(--theme-accent, #cba6f7)'
-              : 'var(--theme-border, rgba(255, 255, 255, 0.1))',
-            color: 'var(--theme-text-primary, #cdd6f4)',
+            borderColor: detailsOpen ? 'var(--theme-accent)' : 'var(--theme-border)',
+            color: 'var(--theme-text-primary)',
           }}
         >
           {detailsOpen ? (
             <>
-              <ChevronUp
-                className="w-3.5 h-3.5"
-                style={{ color: 'var(--theme-accent, #cba6f7)' }}
-                strokeWidth={2}
-              />
+              <ChevronUp className="w-3.5 h-3.5" style={{ color: 'var(--theme-accent)' }} />
               <span>Hide Cores &amp; Details</span>
             </>
           ) : (
             <>
-              <ChevronDown
-                className="w-3.5 h-3.5"
-                style={{ color: 'var(--theme-accent, #cba6f7)' }}
-                strokeWidth={2}
-              />
+              <ChevronDown className="w-3.5 h-3.5" style={{ color: 'var(--theme-accent)' }} />
               <span>View Cores &amp; Details</span>
             </>
           )}

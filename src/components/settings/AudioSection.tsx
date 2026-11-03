@@ -43,6 +43,16 @@ export function AudioSection() {
       </SettingRow>
 
       <SliderRow
+        label="Visualizer Reactivity"
+        value={Math.round((settings.visualizerSensitivity || 1.0) * 100)}
+        min={50}
+        max={250}
+        step={10}
+        unit="%"
+        onChange={(val) => updateSettings({ visualizerSensitivity: val / 100 })}
+      />
+
+      <SliderRow
         label="Synced Lyrics Offset"
         value={settings.lyricOffsetMs}
         min={-2000}

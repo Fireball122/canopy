@@ -21,43 +21,19 @@
 }
 
 html[data-theme="light"] {
-  --theme-bg: rgba(248, 250, 248, 0.94);
-  --theme-card: rgba(255, 255, 255, 0.9);
-  --theme-border: rgba(45, 65, 50, 0.14);
-  --theme-accent: #3b7537;
+  --theme-bg: rgba(238, 242, 246, 0.98);
+  --theme-card: #ffffff;
+  --theme-border: rgba(15, 23, 42, 0.12);
+  --theme-accent: #16a34a;
   --theme-on-accent: #ffffff;
-  --theme-accent-soft: rgba(59, 117, 55, 0.14);
-  --theme-text-secondary: #4a6350;
-  --theme-track: rgba(45, 65, 50, 0.08);
-  --theme-surface-hover: rgba(0, 0, 0, 0.05);
-}
-
-/* Universal high-contrast semantic utility overrides */
-html[data-theme="light"] .canopy-shell .text-white,
-html[data-theme="light"] .canopy-shell .text-white\/90,
-html[data-theme="light"] .canopy-shell .text-white\/80,
-html[data-theme="light"] .canopy-shell .text-white\/70,
-html[data-theme="light"] .caelestia-shell .text-white,
-html[data-theme="light"] .caelestia-shell .text-white\/90,
-html[data-theme="light"] .caelestia-shell .text-white\/80,
-html[data-theme="light"] .caelestia-shell .text-white\/70 {
-  color: var(--theme-text-primary) !important;
-}
-
-html[data-theme="light"] .canopy-shell .text-white\/60,
-html[data-theme="light"] .canopy-shell .text-white\/50,
-html[data-theme="light"] .canopy-shell .text-white\/40,
-html[data-theme="light"] .caelestia-shell .text-white\/60,
-html[data-theme="light"] .caelestia-shell .text-white\/50,
-html[data-theme="light"] .caelestia-shell .text-white\/40 {
-  color: var(--theme-text-secondary) !important;
-}
-
-html[data-theme="light"] .canopy-shell .bg-white\/5,
-html[data-theme="light"] .canopy-shell .bg-white\/10,
-html[data-theme="light"] .caelestia-shell .bg-white\/5,
-html[data-theme="light"] .caelestia-shell .bg-white\/10 {
-  background-color: var(--theme-surface-hover) !important;
+  --theme-accent-soft: rgba(22, 163, 74, 0.12);
+  --theme-accent-warm: #ea580c;
+  --theme-text: #0f172a;
+  --theme-text-primary: #0f172a;
+  --theme-text-muted: #64748b;
+  --theme-text-secondary: #475569;
+  --theme-track: rgba(15, 23, 42, 0.06);
+  --theme-surface-hover: rgba(15, 23, 42, 0.04);
 }
 
 /* Colour transitions live only on the theme-coloured surfaces (glass shell, cards, pills).
@@ -159,60 +135,214 @@ input[type="range"].caelestia-slider {
   -webkit-app-region: no-drag;
 }
 
-/* Light wallpaper / Force Light adaptive text & surface overrides */
-html[data-theme="light"] {
-  --theme-bg: rgba(248, 250, 248, 0.94);
-  --theme-card: rgba(255, 255, 255, 0.85);
-  --theme-border: rgba(45, 65, 50, 0.14);
-  --theme-accent: #447a40;
-  --theme-accent-soft: rgba(68, 122, 64, 0.14);
-  --theme-accent-warm: #d9684c;
-  --theme-text: #1a261d;
-  --theme-text-primary: #1a261d;
-  --theme-text-muted: #4a6350;
-  --theme-text-secondary: #4a6350;
-  --theme-track: rgba(45, 65, 50, 0.1);
-}
+/* ============================================================
+   LIGHT MODE COMPREHENSIVE OVERRIDES
+   Remaps every dark-mode opacity utility class to ink-on-paper
+   equivalents. Must be kept in sync with classes used in JSX.
+   ============================================================ */
 
-html[data-theme="light"] .canopy-shell {
+/* Shell glass — crisp light card with distinct boundary and shadow */
+html[data-theme="light"] .canopy-shell,
+html[data-theme="light"] .caelestia-shell {
   background: var(--theme-bg);
+  border: 1.5px solid rgba(15, 23, 42, 0.14);
+  border-top: none;
   box-shadow:
-    0 20px 45px -10px rgba(0, 0, 0, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.8);
-  border-color: var(--theme-border);
+    0 0 0 1px rgba(15, 23, 42, 0.08),
+    0 24px 48px -12px rgba(15, 23, 42, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
+/* Bento cards — pure white surface, crisp 12% slate border, tactile elevation */
 html[data-theme="light"] .bento-card {
-  background: var(--theme-card);
-  border-color: var(--theme-border);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 4px 12px -2px rgba(15, 23, 42, 0.03);
 }
 
-html[data-theme="light"] .canopy-shell .text-white,
-html[data-theme="light"] .canopy-shell .text-zinc-100,
-html[data-theme="light"] .canopy-shell .text-zinc-200 {
+html[data-theme="light"] .bento-card-interactive:hover {
+  border-color: var(--theme-accent);
+  box-shadow:
+    0 0 0 1px var(--theme-accent),
+    0 6px 20px -4px rgba(15, 23, 42, 0.1);
+}
+
+/* Pills */
+html[data-theme="light"] .canopy-pill,
+html[data-theme="light"] .caelestia-pill {
+  background: #ffffff;
+  border-color: rgba(15, 23, 42, 0.12);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+}
+
+/* Top Navigation Bar: crisp white segmented control */
+html[data-theme="light"] .canopy-shell nav {
+  background: #ffffff !important;
+  border: 1px solid rgba(15, 23, 42, 0.12) !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04) !important;
+}
+
+/* Inactive tabs: high contrast and readable */
+html[data-theme="light"] .canopy-shell nav button:not([style*="var(--theme-accent)"]) {
+  color: #475569 !important;
+}
+
+html[data-theme="light"] .canopy-shell nav button:not([style*="var(--theme-accent)"]):hover {
+  color: #0f172a !important;
+  background-color: rgba(15, 23, 42, 0.04) !important;
+}
+
+/* ---------- Background fills & Nested Telemetry Surfaces ---------- */
+/* In dark mode, sub-cards use bg-white/[0.02..0.05].
+   In light mode, these nested readouts must have an off-white slate tint (#f8fafc) and crisp border! */
+html[data-theme="light"] .bg-white\/\[0\.015\],
+html[data-theme="light"] .bg-white\/\[0\.02\],
+html[data-theme="light"] .bg-white\/\[0\.03\],
+html[data-theme="light"] .bg-white\/\[0\.04\],
+html[data-theme="light"] .bg-white\/\[0\.05\],
+html[data-theme="light"] .bg-white\/5 {
+  background-color: #f8fafc !important;
+  border-color: rgba(15, 23, 42, 0.09) !important;
+}
+
+html[data-theme="light"] .bg-white\/\[0\.06\],
+html[data-theme="light"] .bg-white\/\[0\.07\],
+html[data-theme="light"] .bg-white\/\[0\.08\],
+html[data-theme="light"] .bg-white\/10 {
+  background-color: #f1f5f9 !important;
+  border-color: rgba(15, 23, 42, 0.11) !important;
+}
+
+html[data-theme="light"] .bg-white\/15,
+html[data-theme="light"] .bg-white\/20 {
+  background-color: #e2e8f0 !important;
+  border-color: rgba(15, 23, 42, 0.14) !important;
+}
+
+html[data-theme="light"] .bg-white\/30,
+html[data-theme="light"] .bg-white\/40,
+html[data-theme="light"] .bg-white\/50 {
+  background-color: #cbd5e1 !important;
+}
+
+/* Hover surfaces — triggered by JS className concat or Tailwind hover: */
+html[data-theme="light"] .hover\:bg-white\/5:hover,
+html[data-theme="light"] .hover\:bg-white\/10:hover,
+html[data-theme="light"] .hover\:bg-white\/\[0\.06\]:hover {
+  background-color: rgba(15, 23, 42, 0.06) !important;
+}
+
+html[data-theme="light"] .hover\:bg-white\/20:hover {
+  background-color: rgba(15, 23, 42, 0.09) !important;
+}
+
+/* ---------- Borders ---------- */
+html[data-theme="light"] .border-white\/\[0\.06\],
+html[data-theme="light"] .border-white\/\[0\.07\],
+html[data-theme="light"] .border-white\/\[0\.08\],
+html[data-theme="light"] .border-white\/5,
+html[data-theme="light"] .border-white\/10,
+html[data-theme="light"] .border-white\/15,
+html[data-theme="light"] .border-white\/20 {
+  border-color: rgba(15, 23, 42, 0.11) !important;
+}
+
+/* Dashed borders (empty dock slots, etc.) */
+html[data-theme="light"] .border-dashed.border-white\/20,
+html[data-theme="light"] .border-dashed.border-white\/15 {
+  border-color: rgba(15, 23, 42, 0.18) !important;
+}
+/* ---------- Typography ---------- */
+/* Primary: near-black for anything that was white or near-white */
+html[data-theme="light"] .text-white,
+html[data-theme="light"] .text-white\/90,
+html[data-theme="light"] .text-white\/80 {
   color: var(--theme-text-primary) !important;
 }
 
-html[data-theme="light"] .canopy-shell .text-zinc-300,
-html[data-theme="light"] .canopy-shell .text-zinc-400,
-html[data-theme="light"] .canopy-shell .text-zinc-500,
-html[data-theme="light"] .canopy-shell .text-white\/40,
-html[data-theme="light"] .canopy-shell .text-white\/50,
-html[data-theme="light"] .canopy-shell .text-white\/60 {
+/* Secondary: muted slate for mid-opacity whites */
+html[data-theme="light"] .text-white\/70,
+html[data-theme="light"] .text-white\/60,
+html[data-theme="light"] .text-white\/50 {
   color: var(--theme-text-secondary) !important;
 }
 
-html[data-theme="light"] .canopy-shell .border-white\/10,
-html[data-theme="light"] .canopy-shell .border-white\/15,
-html[data-theme="light"] .canopy-shell .border-white\/20 {
-  border-color: var(--theme-border) !important;
+/* Tertiary/disabled: light muted */
+html[data-theme="light"] .text-white\/40,
+html[data-theme="light"] .text-white\/30,
+html[data-theme="light"] .text-white\/20 {
+  color: rgba(0, 0, 0, 0.28) !important;
 }
 
-html[data-theme="light"] .canopy-shell .bg-white\/\[0\.04\],
-html[data-theme="light"] .canopy-shell .bg-white\/\[0\.06\],
-html[data-theme="light"] .canopy-shell .bg-white\/\[0\.08\] {
-  background: rgba(0, 0, 0, 0.04) !important;
+html[data-theme="light"] .text-zinc-100,
+html[data-theme="light"] .text-zinc-200 {
+  color: var(--theme-text-primary) !important;
+}
+
+html[data-theme="light"] .text-zinc-300,
+html[data-theme="light"] .text-zinc-400,
+html[data-theme="light"] .text-zinc-500 {
+  color: var(--theme-text-secondary) !important;
+}
+
+/* Hover text: map white to primary */
+html[data-theme="light"] .hover\:text-white:hover {
+  color: var(--theme-text-primary) !important;
+}
+
+html[data-theme="light"] .hover\:text-white\/70:hover {
+  color: var(--theme-text-secondary) !important;
+}
+
+/* ---------- Accent surfaces — keep white text on accent fills ---------- */
+/* Anything with a solid accent background must keep its white label */
+html[data-theme="light"] [class*="bg-[var(--theme-accent)]"],
+html[data-theme="light"] [style*="background-color: var(--theme-accent)"],
+html[data-theme="light"] [style*="backgroundColor: var(--theme-accent)"] {
+  color: var(--theme-on-accent) !important;
+}
+
+html[data-theme="light"] [class*="bg-[var(--theme-accent)]"] .text-white,
+html[data-theme="light"] [class*="bg-[var(--theme-accent)]"] * {
+  color: var(--theme-on-accent) !important;
+}
+
+/* Accent-soft badges should keep their accent text */
+html[data-theme="light"] [class*="bg-[var(--theme-accent-soft)]"],
+html[data-theme="light"] [class*="bg-\\[var\\(--theme-accent-soft"] {
+  background-color: var(--theme-accent-soft) !important;
+}
+
+/* ---------- Inputs ---------- */
+html[data-theme="light"] input.bg-white\/5,
+html[data-theme="light"] input[class*="bg-white"] {
+  background-color: rgba(0, 0, 0, 0.04) !important;
+  color: var(--theme-text-primary) !important;
+  border-color: rgba(0, 0, 0, 0.12) !important;
+}
+
+html[data-theme="light"] input::placeholder {
+  color: rgba(0, 0, 0, 0.3) !important;
+}
+
+/* ---------- Scrollbar ---------- */
+html[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+html[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: var(--theme-accent);
+}
+
+/* ---------- Slider track / thumb ---------- */
+html[data-theme="light"] input[type="range"].canopy-slider::-webkit-slider-thumb,
+html[data-theme="light"] input[type="range"].caelestia-slider::-webkit-slider-thumb {
+  background: var(--theme-accent);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.9),
+    0 0 6px var(--theme-accent);
 }
 /* Slide-down Dropdown Transition States */
 .canopy-dropdown,
@@ -305,18 +435,20 @@ html[data-theme="light"] .canopy-shell .bg-white\/\[0\.08\] {
   background: var(--theme-card);
   border: 1px solid var(--theme-border);
   border-radius: 14px;
-  box-shadow: inset 0 1px 0 0 var(--theme-border);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.06),
+    0 4px 16px -2px rgba(0, 0, 0, 0.25);
   transition:
-    background-color 350ms ease,
-    border-color 350ms ease,
-    transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
+    background-color 250ms ease,
+    border-color 250ms ease,
+    transform 150ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .bento-card-interactive:hover {
   border-color: var(--theme-accent);
   box-shadow:
-    0 8px 24px -6px rgba(0, 0, 0, 0.25),
-    inset 0 1px 0 0 var(--theme-border);
+    0 8px 24px -6px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
 }
 
 /* Sleek Status Pills */
@@ -324,8 +456,8 @@ html[data-theme="light"] .canopy-shell .bg-white\/\[0\.08\] {
 .caelestia-pill {
   background: var(--theme-card);
   border: 1px solid var(--theme-border);
-  border-radius: 12px;
-  box-shadow: inset 0 1px 0 0 var(--theme-border);
+  border-radius: 10px;
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
 }
 
 /* Custom Subtle Scrollbars */

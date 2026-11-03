@@ -614,32 +614,71 @@ const CanopyShellContent: React.FC = () => {
   const syncThemeWithActiveWallpaper = useCallback(
     async (entries: WallpaperEntry[], mode = settings.themeMode) => {
       if (mode === 'canopy') {
-        applyThemeModeFallback('canopy', settings.glassOpacity, settings.glassBlurStrength);
+        applyThemeModeFallback(
+          'canopy',
+          settings.glassOpacity,
+          settings.glassBlurStrength,
+          settings.customAccentColor,
+          settings.trueOledMode,
+        );
         return;
       }
       if (mode === 'dark' || (mode as string) === 'obsidian') {
-        applyThemeModeFallback('dark', settings.glassOpacity, settings.glassBlurStrength);
+        applyThemeModeFallback(
+          'dark',
+          settings.glassOpacity,
+          settings.glassBlurStrength,
+          settings.customAccentColor,
+          settings.trueOledMode,
+        );
         return;
       }
       if (mode === 'light' || (mode as string) === 'alabaster') {
-        applyThemeModeFallback('light', settings.glassOpacity, settings.glassBlurStrength);
+        applyThemeModeFallback(
+          'light',
+          settings.glassOpacity,
+          settings.glassBlurStrength,
+          settings.customAccentColor,
+          settings.trueOledMode,
+        );
         return;
       }
       if (mode === 'auto') {
-        // palette.ts resolves 'auto' against the OS preference, so light/dark lives in one place.
-        applyThemeModeFallback('auto', settings.glassOpacity, settings.glassBlurStrength);
+        applyThemeModeFallback(
+          'auto',
+          settings.glassOpacity,
+          settings.glassBlurStrength,
+          settings.customAccentColor,
+          settings.trueOledMode,
+        );
         return;
       }
       const activeEntry = entries.find((w) => w.active) || entries[0];
       if (activeEntry?.data_url) {
-        await applyThemeFromImageSrc(activeEntry.data_url, mode);
+        await applyThemeFromImageSrc(
+          activeEntry.data_url,
+          mode,
+          settings.customAccentColor,
+          settings.trueOledMode,
+        );
       } else {
-        applyThemeModeFallback('canopy', settings.glassOpacity, settings.glassBlurStrength);
+        applyThemeModeFallback(
+          'canopy',
+          settings.glassOpacity,
+          settings.glassBlurStrength,
+          settings.customAccentColor,
+          settings.trueOledMode,
+        );
       }
     },
-    [settings.themeMode, settings.glassOpacity, settings.glassBlurStrength],
+    [
+      settings.themeMode,
+      settings.glassOpacity,
+      settings.glassBlurStrength,
+      settings.customAccentColor,
+      settings.trueOledMode,
+    ],
   );
-
   useEffect(() => {
     syncThemeWithActiveWallpaper(wallpapers, settings.themeMode);
   }, [settings.themeMode, wallpapers, syncThemeWithActiveWallpaper]);
@@ -1164,9 +1203,19 @@ const CanopyShellContent: React.FC = () => {
     setWallpaperStatus(`Applying ${entry.name}...`);
 
     if (imgEl?.complete && imgEl.naturalWidth > 0) {
-      applyThemePalette(imgEl, settings.themeMode);
+      applyThemePalette(
+        imgEl,
+        settings.themeMode,
+        settings.customAccentColor,
+        settings.trueOledMode,
+      );
     } else if (entry.data_url) {
-      await applyThemeFromImageSrc(entry.data_url, settings.themeMode);
+      await applyThemeFromImageSrc(
+        entry.data_url,
+        settings.themeMode,
+        settings.customAccentColor,
+        settings.trueOledMode,
+      );
     }
 
     try {

@@ -147,10 +147,10 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
       fillStyle: {
         background:
           clampedVolume === 0
-            ? 'var(--theme-track, rgba(255, 255, 255, 0.12))'
-            : 'linear-gradient(to top, var(--theme-accent, #A29BFE) 0%, var(--theme-text-primary, #FFFFFF) 100%)',
+            ? 'var(--theme-track, rgba(15, 23, 42, 0.08))'
+            : 'linear-gradient(to top, var(--theme-accent, #3b82f6) 0%, var(--theme-accent-soft, rgba(255, 255, 255, 0.35)) 100%)',
       },
-      glowColor: 'var(--theme-accent, #A29BFE)',
+      glowColor: 'var(--theme-accent, #3b82f6)',
       muted: clampedVolume === 0,
     },
     ...(showBrightness
@@ -161,9 +161,9 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
             value: clampedBrightness,
             displayValue: `${clampedBrightness}%`,
             fillStyle: {
-              background: 'linear-gradient(to top, var(--theme-accent, #A29BFE) 0%, #FDE047 100%)',
+              background: 'linear-gradient(to top, var(--theme-accent, #f59e0b) 0%, #fbbf24 100%)',
             },
-            glowColor: 'var(--theme-accent, #A29BFE)',
+            glowColor: 'var(--theme-accent, #f59e0b)',
             muted: false,
           },
         ]
@@ -177,12 +177,12 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
             displayValue: effectiveMicMuted ? 'Muted' : `${clampedMic}%`,
             fillStyle: {
               background: effectiveMicMuted
-                ? 'rgba(239, 68, 68, 0.65)'
-                : 'linear-gradient(to top, var(--theme-accent, #A29BFE) 0%, #89DCEB 100%)',
+                ? 'rgba(239, 68, 68, 0.75)'
+                : 'linear-gradient(to top, var(--theme-accent, #3b82f6) 0%, #38bdf8 100%)',
             },
             glowColor: effectiveMicMuted
               ? 'rgba(239, 68, 68, 0.7)'
-              : 'var(--theme-accent, #A29BFE)',
+              : 'var(--theme-accent, #3b82f6)',
             muted: effectiveMicMuted,
           },
         ]
@@ -208,10 +208,10 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
               pointerEvents: 'auto',
               cursor: 'pointer',
               touchAction: 'none',
-              background: 'var(--theme-track, rgba(255, 255, 255, 0.06))',
+              background: 'var(--theme-track, rgba(15, 23, 42, 0.06))',
               borderColor: isDragging
-                ? 'var(--theme-accent, #A29BFE)'
-                : 'var(--theme-border, rgba(255, 255, 255, 0.08))',
+                ? 'var(--theme-accent, #3b82f6)'
+                : 'var(--theme-border, rgba(15, 23, 42, 0.12))',
             }}
             onPointerEnter={() => setHoveredSlider(slider.id)}
             onPointerLeave={() => setHoveredSlider((prev) => (prev === slider.id ? null : prev))}
@@ -289,7 +289,11 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
                 slider.muted ? 'text-rose-400 opacity-90' : 'text-current opacity-90'
               }`}
               style={{
-                color: slider.muted ? 'rgb(244, 63, 94)' : 'var(--theme-text-primary, #F1F2F6)',
+                color: slider.muted
+                  ? 'rgb(244, 63, 94)'
+                  : slider.value > 15
+                    ? 'var(--theme-on-accent, #ffffff)'
+                    : 'var(--theme-text-primary)',
               }}
             >
               {slider.id === 'volume' ? (

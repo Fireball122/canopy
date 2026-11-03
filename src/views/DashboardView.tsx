@@ -282,84 +282,93 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* ZONE 1: LEFT COLUMN (165px) — Weather Card (Top) + Clock Card (Bottom) */}
       <div className="w-[165px] shrink-0 flex flex-col gap-2 h-full">
         {/* Weather Card (Top) */}
-        <div
-          role={settings.showWeatherTab ? 'button' : undefined}
-          tabIndex={settings.showWeatherTab ? 0 : undefined}
-          onClick={settings.showWeatherTab ? () => onNavigateTab('weather') : undefined}
-          onKeyDown={
-            settings.showWeatherTab
-              ? (e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    onNavigateTab('weather');
+        {settings.showWeatherWidget !== false && (
+          <div
+            role={settings.showWeatherTab ? 'button' : undefined}
+            tabIndex={settings.showWeatherTab ? 0 : undefined}
+            onClick={settings.showWeatherTab ? () => onNavigateTab('weather') : undefined}
+            onKeyDown={
+              settings.showWeatherTab
+                ? (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onNavigateTab('weather');
+                    }
                   }
-                }
-              : undefined
-          }
-          className={`bento-card flex-1 p-3 flex flex-col justify-between text-left group relative overflow-hidden pointer-events-auto ${
-            settings.showWeatherTab ? 'bento-card-interactive cursor-pointer' : 'cursor-default'
-          }`}
-          title={settings.showWeatherTab ? 'Click to open Weather station' : 'Weather station'}
-        >
-          <div className="flex items-start justify-between w-full">
-            <div className="min-w-0">
-              <span
-                className="text-[9px] font-mono uppercase tracking-wider flex items-center gap-1"
-                style={{ color: 'var(--theme-text-secondary)' }}
-              >
-                <MapPin className="w-2.5 h-2.5 shrink-0" style={{ color: 'var(--theme-accent)' }} />
-                <span className="truncate">
-                  {weather.isLive ? weather.locationName.split(',')[0] : 'Weather offline'}
-                </span>
-              </span>
-              <div className="mt-1.5 flex items-baseline gap-1">
+                : undefined
+            }
+            className={`bento-card flex-1 p-3 flex flex-col justify-between text-left group relative overflow-hidden pointer-events-auto ${
+              settings.showWeatherTab ? 'bento-card-interactive cursor-pointer' : 'cursor-default'
+            }`}
+            title={settings.showWeatherTab ? 'Click to open Weather station' : 'Weather station'}
+          >
+            <div className="flex items-start justify-between w-full">
+              <div className="min-w-0">
                 <span
-                  className="text-2xl font-bold tracking-tight tabular-nums leading-none"
-                  style={{ color: 'var(--theme-text-primary)' }}
+                  className="text-[9px] font-mono uppercase tracking-wider flex items-center gap-1"
+                  style={{ color: 'var(--theme-text-secondary)' }}
                 >
-                  {weather.isLive ? `${weather.temp}${tempUnit}` : 'Offline'}
+                  <MapPin
+                    className="w-2.5 h-2.5 shrink-0"
+                    style={{ color: 'var(--theme-accent)' }}
+                  />
+                  <span className="truncate">
+                    {weather.isLive ? weather.locationName.split(',')[0] : 'Weather offline'}
+                  </span>
                 </span>
+                <div className="mt-1.5 flex items-baseline gap-1">
+                  <span
+                    className="text-2xl font-bold tracking-tight tabular-nums leading-none"
+                    style={{ color: 'var(--theme-text-primary)' }}
+                  >
+                    {weather.isLive ? `${weather.temp}${tempUnit}` : 'Offline'}
+                  </span>
+                </div>
+              </div>
+
+              <div
+                className="p-1.5 rounded-xl group-hover:scale-105 transition-transform shrink-0"
+                style={{
+                  background: 'var(--theme-track)',
+                  border: '1px solid var(--theme-border)',
+                }}
+              >
+                {weather.isLive ? (
+                  renderWeatherIcon(weather.code, weather.condition, 'w-5 h-5')
+                ) : (
+                  <CloudSun className="w-5 h-5" style={{ color: 'var(--theme-text-secondary)' }} />
+                )}
               </div>
             </div>
 
             <div
-              className="p-1.5 rounded-xl group-hover:scale-105 transition-transform shrink-0"
-              style={{
-                background: 'var(--theme-track)',
-                border: '1px solid var(--theme-border)',
-              }}
+              className="flex items-center justify-between pt-1.5 mt-auto text-[10px]"
+              style={{ borderTop: '1px solid var(--theme-border)' }}
             >
-              {weather.isLive ? (
-                renderWeatherIcon(weather.code, weather.condition, 'w-5 h-5')
-              ) : (
-                <CloudSun className="w-5 h-5" style={{ color: 'var(--theme-text-secondary)' }} />
+              <span
+                className="truncate font-medium capitalize"
+                style={{ color: 'var(--theme-text-secondary)' }}
+              >
+                {weather.isLive ? weather.condition : 'No station data'}
+              </span>
+              {weather.isLive && (
+                <span
+                  className="tabular-nums font-mono text-[9px] shrink-0"
+                  style={{ color: 'var(--theme-text-secondary)' }}
+                >
+                  {weather.low}°/{weather.high}°
+                </span>
               )}
             </div>
           </div>
-
-          <div
-            className="flex items-center justify-between pt-1.5 mt-auto text-[10px]"
-            style={{ borderTop: '1px solid var(--theme-border)' }}
-          >
-            <span
-              className="truncate font-medium capitalize"
-              style={{ color: 'var(--theme-text-secondary)' }}
-            >
-              {weather.isLive ? weather.condition : 'No station data'}
-            </span>
-            {weather.isLive && (
-              <span
-                className="tabular-nums font-mono text-[9px] shrink-0"
-                style={{ color: 'var(--theme-text-secondary)' }}
-              >
-                {weather.low}°/{weather.high}°
-              </span>
-            )}
-          </div>
-        </div>
+        )}
 
         {/* Clock Card (Bottom) */}
-        <div className="bento-card h-[164px] shrink-0 p-3 flex flex-col justify-between relative overflow-hidden">
+        <div
+          className={`bento-card ${
+            settings.showWeatherWidget !== false ? 'h-[164px] shrink-0' : 'flex-1 h-full'
+          } p-3 flex flex-col justify-between relative overflow-hidden`}
+        >
           <div className="flex items-center justify-between">
             <span
               className="text-[9px] font-mono uppercase tracking-widest flex items-center gap-1"
@@ -477,170 +486,176 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* ZONE 2: CENTER COLUMN (340px) — System Status Bar (Top) + Interactive Calendar (Bottom) */}
       <div className="w-[340px] shrink-0 flex flex-col gap-2 h-full">
         {/* System Status Bar (Top) */}
-        <div className="bento-card h-[44px] shrink-0 px-2.5 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <div
-              className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
-              style={{
-                background: 'var(--theme-track)',
-                border: '1px solid var(--theme-accent)',
-              }}
-              title={`Host: ${stats.hostname || 'Windows'}`}
-            >
-              <Monitor className="w-3.5 h-3.5" style={{ color: 'var(--theme-accent)' }} />
+        {settings.showSystemSpecs !== false && (
+          <div className="bento-card h-[44px] shrink-0 px-2.5 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <div
+                className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
+                style={{
+                  background: 'var(--theme-track)',
+                  border: '1px solid var(--theme-accent)',
+                }}
+                title={`Host: ${stats.hostname || 'Windows'}`}
+              >
+                <Monitor className="w-3.5 h-3.5" style={{ color: 'var(--theme-accent)' }} />
+              </div>
+              <span
+                className="text-xs font-semibold tracking-tight truncate"
+                style={{ color: 'var(--theme-text-primary)' }}
+                title={stats.hostname}
+              >
+                {stats.hostname || 'Windows 11'}
+              </span>
             </div>
-            <span
-              className="text-xs font-semibold tracking-tight truncate"
-              style={{ color: 'var(--theme-text-primary)' }}
-              title={stats.hostname}
-            >
-              {stats.hostname || 'Windows 11'}
-            </span>
-          </div>
 
-          {/* Dashboard Quick Utility Actions (Awake, DND, Snip) */}
-          <div className="flex items-center gap-1 shrink-0">
-            <button
-              type="button"
-              onClick={async () => {
-                const res = await toggleCaffeine();
-                setCaffeineActive(res.enabled);
-              }}
-              className="canopy-pill px-2 py-1 flex items-center gap-1 text-[10px] font-medium transition-all hover:scale-105 active:scale-95 cursor-pointer pointer-events-auto"
-              style={{
-                background: caffeineActive ? 'var(--theme-accent)' : 'var(--theme-track)',
-                color: caffeineActive
-                  ? 'var(--theme-on-accent, #111913)'
-                  : 'var(--theme-text-secondary)',
-                border: '1px solid var(--theme-border)',
-              }}
-              title={
-                caffeineActive
-                  ? 'Caffeine active: system will not sleep'
-                  : 'Caffeine: click to keep system awake'
-              }
-            >
-              <Coffee className="w-3 h-3" />
-              <span>Awake</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={async () => {
-                try {
-                  const res = await toggleDnd();
-                  setDndActive(res.enabled);
-                } catch {
-                  setDndActive((prev) => !prev);
+            {/* Dashboard Quick Utility Actions (Awake, DND, Snip) */}
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={async () => {
+                  const res = await toggleCaffeine();
+                  setCaffeineActive(res.enabled);
+                }}
+                className="canopy-pill px-2 py-1 flex items-center gap-1 text-[10px] font-medium transition-all hover:scale-105 active:scale-95 cursor-pointer pointer-events-auto"
+                style={{
+                  background: caffeineActive ? 'var(--theme-accent)' : 'var(--theme-track)',
+                  color: caffeineActive
+                    ? 'var(--theme-on-accent, #111913)'
+                    : 'var(--theme-text-secondary)',
+                  border: '1px solid var(--theme-border)',
+                }}
+                title={
+                  caffeineActive
+                    ? 'Caffeine active: system will not sleep'
+                    : 'Caffeine: click to keep system awake'
                 }
-              }}
-              className="canopy-pill px-2 py-1 flex items-center gap-1 text-[10px] font-medium transition-all hover:scale-105 active:scale-95 cursor-pointer pointer-events-auto"
-              style={{
-                background: dndActive ? 'var(--theme-accent)' : 'var(--theme-track)',
-                color: dndActive
-                  ? 'var(--theme-on-accent, #111913)'
-                  : 'var(--theme-text-secondary)',
-                border: '1px solid var(--theme-border)',
-              }}
-              title={
-                dndActive
-                  ? 'Do Not Disturb active: hover & notifications silenced'
-                  : 'Do Not Disturb: click to silence hover and alerts'
-              }
-            >
-              <BellOff className="w-3 h-3" />
-              <span>DND</span>
-            </button>
+              >
+                <Coffee className="w-3 h-3" />
+                <span>Awake</span>
+              </button>
 
-            <button
-              type="button"
-              onClick={() => void triggerScreenSnip()}
-              className="canopy-pill px-2 py-1 flex items-center gap-1 text-[10px] font-medium transition-all hover:scale-105 active:scale-95 cursor-pointer pointer-events-auto"
-              style={{
-                background: 'var(--theme-track)',
-                color: 'var(--theme-text-secondary)',
-                border: '1px solid var(--theme-border)',
-              }}
-              title="Screen Snipping Tool (Win+Shift+S)"
-            >
-              <Scissors className="w-3 h-3" />
-              <span>Snip</span>
-            </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const res = await toggleDnd();
+                    setDndActive(res.enabled);
+                  } catch {
+                    setDndActive((prev) => !prev);
+                  }
+                }}
+                className="canopy-pill px-2 py-1 flex items-center gap-1 text-[10px] font-medium transition-all hover:scale-105 active:scale-95 cursor-pointer pointer-events-auto"
+                style={{
+                  background: dndActive ? 'var(--theme-accent)' : 'var(--theme-track)',
+                  color: dndActive
+                    ? 'var(--theme-on-accent, #111913)'
+                    : 'var(--theme-text-secondary)',
+                  border: '1px solid var(--theme-border)',
+                }}
+                title={
+                  dndActive
+                    ? 'Do Not Disturb active: hover & notifications silenced'
+                    : 'Do Not Disturb: click to silence hover and alerts'
+                }
+              >
+                <BellOff className="w-3 h-3" />
+                <span>DND</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => void triggerScreenSnip()}
+                className="canopy-pill px-2 py-1 flex items-center gap-1 text-[10px] font-medium transition-all hover:scale-105 active:scale-95 cursor-pointer pointer-events-auto"
+                style={{
+                  background: 'var(--theme-track)',
+                  color: 'var(--theme-text-secondary)',
+                  border: '1px solid var(--theme-border)',
+                }}
+                title="Screen Snipping Tool (Win+Shift+S)"
+              >
+                <Scissors className="w-3 h-3" />
+                <span>Snip</span>
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Pinned Quick-Launch App Dock */}
-        <div
-          className="bento-card h-[34px] shrink-0 px-2.5 flex items-center justify-between gap-1"
-          style={{
-            background: 'var(--theme-card)',
-            border: '1px solid var(--theme-border)',
-          }}
-        >
-          <span
-            className="text-[9px] font-mono uppercase tracking-wider"
-            style={{ color: 'var(--theme-text-secondary)' }}
+        {settings.showQuickAppsDock !== false && (
+          <div
+            className="bento-card h-[34px] shrink-0 px-2.5 flex items-center justify-between gap-1"
+            style={{
+              background: 'var(--theme-card)',
+              border: '1px solid var(--theme-border)',
+            }}
           >
-            Quick Launch
-          </span>
-          <div className="flex items-center gap-1.5">
-            {Array.from({ length: 6 }).map((_, slotIdx) => {
-              const appId = (settings.pinnedApps || [
-                'terminal',
-                'explorer',
-                'taskmgr',
-                'msedge',
-                'code',
-              ])[slotIdx];
-              if (!appId || appId.trim().length === 0) {
+            <span
+              className="text-[9px] font-mono uppercase tracking-wider"
+              style={{ color: 'var(--theme-text-secondary)' }}
+            >
+              Quick Launch
+            </span>
+            <div className="flex items-center gap-1.5">
+              {Array.from({ length: 6 }).map((_, slotIdx) => {
+                const appId = (settings.pinnedApps || [
+                  'terminal',
+                  'explorer',
+                  'taskmgr',
+                  'msedge',
+                  'code',
+                ])[slotIdx];
+                if (!appId || appId.trim().length === 0) {
+                  return (
+                    <button
+                      key={`empty-${slotIdx}`}
+                      type="button"
+                      onClick={() => onNavigateTab('settings')}
+                      className="w-6 h-6 rounded-md border border-dashed border-white/20 flex items-center justify-center text-white/30 hover:text-white/70 hover:border-white/40 transition-all pointer-events-auto cursor-pointer"
+                      title={`Slot ${slotIdx + 1} Empty — Click to configure in Settings`}
+                    >
+                      <Plus className="w-2.5 h-2.5" />
+                    </button>
+                  );
+                }
+                const custom = settings.customApps?.[appId];
+                const app = QUICK_APP_CATALOGUE[appId] || {
+                  label: custom?.label || appId,
+                  icon: custom?.icon_data_url ? (
+                    <img
+                      src={custom.icon_data_url}
+                      alt={custom.label}
+                      className="w-3.5 h-3.5 object-contain"
+                    />
+                  ) : (
+                    <AppWindow className="w-3.5 h-3.5" />
+                  ),
+                  path: custom?.path || appId,
+                };
                 return (
                   <button
-                    key={`empty-${slotIdx}`}
+                    key={`${appId}-${slotIdx}`}
                     type="button"
-                    onClick={() => onNavigateTab('settings')}
-                    className="w-6 h-6 rounded-md border border-dashed border-white/20 flex items-center justify-center text-white/30 hover:text-white/70 hover:border-white/40 transition-all pointer-events-auto cursor-pointer"
-                    title={`Slot ${slotIdx + 1} Empty — Click to configure in Settings`}
+                    onClick={() => void launchApp(app.path)}
+                    className="w-6 h-6 rounded-md flex items-center justify-center transition-all duration-150 hover:scale-110 active:scale-95 pointer-events-auto cursor-pointer"
+                    style={{
+                      background: 'var(--theme-track)',
+                      border: '1px solid var(--theme-border)',
+                      color: 'var(--theme-text-primary)',
+                    }}
+                    title={`Launch ${app.label}`}
                   >
-                    <Plus className="w-2.5 h-2.5" />
+                    {app.icon}
                   </button>
                 );
-              }
-              const custom = settings.customApps?.[appId];
-              const app = QUICK_APP_CATALOGUE[appId] || {
-                label: custom?.label || appId,
-                icon: custom?.icon_data_url ? (
-                  <img
-                    src={custom.icon_data_url}
-                    alt={custom.label}
-                    className="w-3.5 h-3.5 object-contain"
-                  />
-                ) : (
-                  <AppWindow className="w-3.5 h-3.5" />
-                ),
-                path: custom?.path || appId,
-              };
-              return (
-                <button
-                  key={`${appId}-${slotIdx}`}
-                  type="button"
-                  onClick={() => void launchApp(app.path)}
-                  className="w-6 h-6 rounded-md flex items-center justify-center transition-all duration-150 hover:scale-110 active:scale-95 pointer-events-auto cursor-pointer"
-                  style={{
-                    background: 'var(--theme-track)',
-                    border: '1px solid var(--theme-border)',
-                    color: 'var(--theme-text-primary)',
-                  }}
-                  title={`Launch ${app.label}`}
-                >
-                  {app.icon}
-                </button>
-              );
-            })}
+              })}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Interactive Calendar with Reminders */}
-        <CalendarCard className="flex-1 min-h-0" onToastNotification={onToastNotification} />
+        {settings.showCalendarWidget !== false && (
+          <CalendarCard className="flex-1 min-h-0" onToastNotification={onToastNotification} />
+        )}
       </div>
 
       {/* ZONE 3: VERTICAL SLIDER DECK */}
@@ -798,11 +813,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           >
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none scale-125">
               <RadialGauge
-                bands={spectrumBands}
+                bands={spectrumBands.map((b) => b * (settings.visualizerSensitivity || 1.0))}
                 active={isMusicPlaying || spectrumBands.some((b) => b > 0.02)}
                 size={110}
                 accentColor="var(--theme-accent)"
-                secondaryColor="#89dceb"
+                secondaryColor="var(--theme-accent-warm, var(--theme-accent))"
               />
             </div>
 

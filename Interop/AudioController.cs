@@ -471,23 +471,31 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
     {
         lock (_syncLock)
         {
-            if (_endpointVolume is null)
-                InitializeEndpoint();
-
-            if (_endpointVolume is null)
-                return 0f;
-
             try
             {
-                return Math.Clamp(_endpointVolume.MasterVolumeLevelScalar * 100f, 0f, 100f);
+                if (_endpointVolume is null)
+                    InitializeEndpoint();
+
+                if (_endpointVolume is not null)
+                    return Math.Clamp(_endpointVolume.MasterVolumeLevelScalar * 100f, 0f, 100f);
             }
             catch
             {
-                InitializeEndpoint();
-                return _endpointVolume is not null
-                    ? Math.Clamp(_endpointVolume.MasterVolumeLevelScalar * 100f, 0f, 100f)
-                    : 0f;
             }
+
+            try
+            {
+                using var enumerator = new MMDeviceEnumerator();
+                if (enumerator.HasDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia))
+                {
+                    using var dev = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                    return Math.Clamp(dev.AudioEndpointVolume.MasterVolumeLevelScalar * 100f, 0f, 100f);
+                }
+            }
+            catch
+            {
+            }
+            return 0f;
         }
     }
 
@@ -496,22 +504,44 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
         float scalar = Math.Clamp(volumePercent / 100f, 0f, 1f);
         lock (_syncLock)
         {
-            if (_endpointVolume is null)
-                InitializeEndpoint();
-
-            if (_endpointVolume is null)
-                return;
-
             try
             {
-                _endpointVolume.MasterVolumeLevelScalar = scalar;
-                if (scalar > 0.001f && _endpointVolume.Mute)
+                if (_endpointVolume is null)
+                    InitializeEndpoint();
+
+                if (_endpointVolume is not null)
                 {
-                    _endpointVolume.Mute = false;
+                    _endpointVolume.MasterVolumeLevelScalar = scalar;
+                    if (scalar > 0.001f && _endpointVolume.Mute)
+                    {
+                        _endpointVolume.Mute = false;
+                    }
+                    return;
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                DiagnosticsLog.Log($"[AudioController] SetMasterVolume initial attempt warning: {ex.Message}");
+            }
+
+            // Fallback: query default device directly from fresh enumerator
+            try
+            {
+                using var enumerator = new MMDeviceEnumerator();
+                if (enumerator.HasDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia))
+                {
+                    using var dev = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                    dev.AudioEndpointVolume.MasterVolumeLevelScalar = scalar;
+                    if (scalar > 0.001f && dev.AudioEndpointVolume.Mute)
+                    {
+                        dev.AudioEndpointVolume.Mute = false;
+                    }
+                    InitializeEndpoint();
+                }
+            }
+            catch (Exception ex)
+            {
+                DiagnosticsLog.Log($"[AudioController] SetMasterVolume recovery error: {ex.Message}");
             }
         }
     }
@@ -534,15 +564,30 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
             if (_endpointVolume is null)
                 InitializeEndpoint();
 
-            if (_endpointVolume is not null)
+            try
             {
-                try
+                if (_endpointVolume is not null)
                 {
                     _endpointVolume.Mute = mute;
+                    return;
                 }
-                catch
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                using var enumerator = new MMDeviceEnumerator();
+                if (enumerator.HasDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia))
                 {
+                    using var dev = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                    dev.AudioEndpointVolume.Mute = mute;
+                    InitializeEndpoint();
                 }
+            }
+            catch
+            {
             }
         }
     }

@@ -14,7 +14,7 @@ export function SettingSection({
 }) {
   return (
     <div
-      className="p-4 rounded-2xl border backdrop-blur-md flex flex-col gap-3.5 transition-all"
+      className="bento-card p-4 rounded-2xl flex flex-col gap-3.5 transition-all"
       style={{
         background: 'var(--theme-card, rgba(255, 255, 255, 0.04))',
         borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
@@ -93,11 +93,12 @@ export function ToggleSwitch({
       aria-checked={checked}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className="w-10 h-5 rounded-full p-0.5 transition-all flex items-center pointer-events-auto cursor-pointer shrink-0 disabled:opacity-40"
+      className="w-10 h-5 rounded-full p-0.5 transition-all flex items-center pointer-events-auto cursor-pointer shrink-0 disabled:opacity-40 border"
       style={{
         background: checked
-          ? 'var(--theme-accent, #cba6f7)'
-          : 'var(--theme-track, rgba(255, 255, 255, 0.14))',
+          ? 'var(--theme-accent, #16a34a)'
+          : 'var(--theme-track, rgba(15, 23, 42, 0.08))',
+        borderColor: checked ? 'var(--theme-accent)' : 'var(--theme-border)',
       }}
     >
       <div
@@ -139,6 +140,7 @@ export function SegmentedChoice<T extends string>({
               background: selected ? 'var(--theme-accent)' : 'transparent',
               color: selected ? 'var(--theme-on-accent, #111913)' : 'var(--theme-text-secondary)',
               fontWeight: selected ? 600 : 400,
+              boxShadow: selected ? '0 1px 3px rgba(0,0,0,0.12)' : 'none',
             }}
           >
             {opt.icon}

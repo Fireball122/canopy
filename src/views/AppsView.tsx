@@ -297,15 +297,13 @@ export const AppsView: React.FC<AppsViewProps> = ({
           <div
             className="flex-1 flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all"
             style={{
-              background: 'var(--theme-track, rgba(255, 255, 255, 0.05))',
-              borderColor: searchQuery
-                ? 'var(--theme-accent, #cba6f7)'
-                : 'var(--theme-border, rgba(255, 255, 255, 0.08))',
+              background: 'var(--theme-track)',
+              borderColor: searchQuery ? 'var(--theme-accent)' : 'var(--theme-border)',
             }}
           >
             <Search
               className="w-3.5 h-3.5 shrink-0"
-              style={{ color: 'var(--theme-accent, #cba6f7)' }}
+              style={{ color: 'var(--theme-accent)' }}
               strokeWidth={2}
             />
             <input
@@ -314,14 +312,14 @@ export const AppsView: React.FC<AppsViewProps> = ({
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search installed Windows apps & tools..."
               className="w-full bg-transparent text-xs focus:outline-none pointer-events-auto"
-              style={{ color: 'var(--theme-text-primary, #cdd6f4)' }}
+              style={{ color: 'var(--theme-text-primary)' }}
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
                 className="p-0.5 rounded-md transition-all hover:opacity-80 pointer-events-auto cursor-pointer"
-                style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))' }}
+                style={{ color: 'var(--theme-text-secondary)' }}
                 title="Clear search"
               >
                 <X className="w-3.5 h-3.5" />
@@ -334,21 +332,21 @@ export const AppsView: React.FC<AppsViewProps> = ({
             <div
               className="px-2.5 py-1.5 rounded-xl border text-[11px] font-mono flex items-center gap-1.5 shrink-0"
               style={{
-                background: 'var(--theme-track, rgba(255, 255, 255, 0.06))',
-                borderColor: 'var(--theme-accent, #cba6f7)',
-                color: 'var(--theme-text-primary, #cdd6f4)',
+                background: 'var(--theme-track)',
+                borderColor: 'var(--theme-accent)',
+                color: 'var(--theme-text-primary)',
               }}
             >
-              <Sparkles className="w-3 h-3" style={{ color: 'var(--theme-accent, #cba6f7)' }} />
+              <Sparkles className="w-3 h-3" style={{ color: 'var(--theme-accent)' }} />
               <span>{statusMessage}</span>
             </div>
           ) : (
             <div
               className="px-2.5 py-1.5 rounded-xl border text-[11px] font-mono tabular-nums shrink-0"
               style={{
-                background: 'var(--theme-track, rgba(255, 255, 255, 0.04))',
-                borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
-                color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))',
+                background: 'var(--theme-track)',
+                borderColor: 'var(--theme-border)',
+                color: 'var(--theme-text-secondary)',
               }}
             >
               {filteredApps.length} {filteredApps.length === 1 ? 'app' : 'apps'}
@@ -361,9 +359,9 @@ export const AppsView: React.FC<AppsViewProps> = ({
             onClick={() => void loadApps(true)}
             className="p-1.5 rounded-xl border transition-all hover:scale-[1.03] active:scale-95 pointer-events-auto cursor-pointer"
             style={{
-              background: 'var(--theme-track, rgba(255, 255, 255, 0.05))',
-              borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
-              color: 'var(--theme-text-primary, #cdd6f4)',
+              background: 'var(--theme-track)',
+              borderColor: 'var(--theme-border)',
+              color: 'var(--theme-text-primary)',
             }}
             title="Rescan installed Windows applications"
           >
@@ -376,9 +374,9 @@ export const AppsView: React.FC<AppsViewProps> = ({
             onClick={handleBrowseAndLaunch}
             className="p-1.5 rounded-xl border transition-all hover:scale-[1.03] active:scale-95 pointer-events-auto cursor-pointer"
             style={{
-              background: 'var(--theme-track, rgba(255, 255, 255, 0.05))',
-              borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
-              color: 'var(--theme-text-primary, #cdd6f4)',
+              background: 'var(--theme-track)',
+              borderColor: 'var(--theme-border)',
+              color: 'var(--theme-text-primary)',
             }}
             title="Browse computer for an executable (.exe, .lnk) to add or run"
           >
@@ -397,15 +395,11 @@ export const AppsView: React.FC<AppsViewProps> = ({
                 onClick={() => setActiveCategory(category)}
                 className="px-2.5 py-1 rounded-lg border text-[11px] font-mono font-medium transition-all shrink-0 active:scale-95 pointer-events-auto cursor-pointer"
                 style={{
-                  background: isSelected
-                    ? 'var(--theme-accent, #cba6f7)'
-                    : 'var(--theme-track, rgba(255, 255, 255, 0.04))',
-                  borderColor: isSelected
-                    ? 'var(--theme-accent, #cba6f7)'
-                    : 'var(--theme-border, rgba(255, 255, 255, 0.08))',
+                  background: isSelected ? 'var(--theme-accent)' : 'var(--theme-track)',
+                  borderColor: isSelected ? 'var(--theme-accent)' : 'var(--theme-border)',
                   color: isSelected
-                    ? '#11111b'
-                    : 'var(--theme-text-secondary, rgba(205, 214, 244, 0.78))',
+                    ? 'var(--theme-on-accent, #111)'
+                    : 'var(--theme-text-secondary)',
                 }}
               >
                 {category}
@@ -419,9 +413,9 @@ export const AppsView: React.FC<AppsViewProps> = ({
         <div
           className="w-full px-3.5 py-2 rounded-xl border flex items-center justify-between gap-3 shrink-0 mb-1"
           style={{
-            background: 'var(--theme-track, rgba(255, 255, 255, 0.08))',
-            borderColor: 'var(--theme-accent, #cba6f7)',
-            boxShadow: '0 0 16px -4px var(--theme-accent, rgba(203, 166, 247, 0.35))',
+            background: 'var(--theme-track)',
+            borderColor: 'var(--theme-accent)',
+            boxShadow: '0 4px 16px rgba(0, 0, 0, 0.25)',
           }}
         >
           <div className="flex items-center gap-2">
@@ -460,14 +454,8 @@ export const AppsView: React.FC<AppsViewProps> = ({
               borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
             }}
           >
-            <AppWindow
-              className="w-7 h-7 opacity-60"
-              style={{ color: 'var(--theme-accent, #cba6f7)' }}
-            />
-            <div
-              className="text-xs font-semibold"
-              style={{ color: 'var(--theme-text-primary, #cdd6f4)' }}
-            >
+            <AppWindow className="w-7 h-7 opacity-60" style={{ color: 'var(--theme-accent)' }} />
+            <div className="text-xs font-semibold" style={{ color: 'var(--theme-text-primary)' }}>
               No matching Windows applications found
             </div>
             <div
@@ -485,9 +473,9 @@ export const AppsView: React.FC<AppsViewProps> = ({
                 }}
                 className="mt-1 px-3 py-1 rounded-lg border text-[11px] font-mono transition-all active:scale-95 pointer-events-auto cursor-pointer"
                 style={{
-                  background: 'var(--theme-track, rgba(255, 255, 255, 0.06))',
-                  borderColor: 'var(--theme-accent, #cba6f7)',
-                  color: 'var(--theme-text-primary, #cdd6f4)',
+                  background: 'var(--theme-track)',
+                  borderColor: 'var(--theme-accent)',
+                  color: 'var(--theme-text-primary)',
                 }}
               >
                 Reset Filters
@@ -519,14 +507,14 @@ export const AppsView: React.FC<AppsViewProps> = ({
                       ? 'var(--theme-track, rgba(255, 255, 255, 0.07))'
                       : 'var(--theme-card, rgba(255, 255, 255, 0.04))',
                     borderColor: isLaunched
-                      ? '#a6e3a1'
+                      ? 'var(--theme-accent)'
                       : isPickerMode
-                        ? 'var(--theme-accent, #cba6f7)'
+                        ? 'var(--theme-accent)'
                         : isLaunching
-                          ? 'var(--theme-accent, #cba6f7)'
+                          ? 'var(--theme-accent)'
                           : isFavorite
-                            ? 'var(--theme-accent, rgba(203, 166, 247, 0.4))'
-                            : 'var(--theme-border, rgba(255, 255, 255, 0.08))',
+                            ? 'var(--theme-accent)'
+                            : 'var(--theme-border)',
                   }}
                   title={
                     isPickerMode
@@ -539,13 +527,16 @@ export const AppsView: React.FC<AppsViewProps> = ({
                     <div
                       className="w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 transition-transform group-hover:scale-105"
                       style={{
-                        background: 'var(--theme-track, rgba(255, 255, 255, 0.06))',
-                        borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.1))',
-                        color: isLaunched ? '#a6e3a1' : 'var(--theme-accent, #cba6f7)',
+                        background: 'var(--theme-track)',
+                        borderColor: 'var(--theme-border)',
+                        color: isLaunched ? 'var(--theme-accent)' : 'var(--theme-accent)',
                       }}
                     >
                       {isLaunched ? (
-                        <CheckCircle2 className="w-4 h-4 text-[#a6e3a1]" strokeWidth={2} />
+                        <CheckCircle2
+                          className="w-4 h-4 text-[var(--theme-accent)]"
+                          strokeWidth={2}
+                        />
                       ) : app.icon_data_url &&
                         app.icon_data_url.trim().length > 0 &&
                         !failedIconIds[app.id] ? (
@@ -572,8 +563,8 @@ export const AppsView: React.FC<AppsViewProps> = ({
                         <span
                           className="px-1.5 py-0.5 rounded-md text-[9px] font-mono font-bold tracking-wider"
                           style={{
-                            background: 'var(--theme-accent, #cba6f7)',
-                            color: '#11111b',
+                            background: 'var(--theme-accent)',
+                            color: 'var(--theme-on-accent, #111)',
                           }}
                         >
                           + PIN
@@ -583,11 +574,11 @@ export const AppsView: React.FC<AppsViewProps> = ({
                           <span
                             className="px-1.5 py-0.5 rounded-md border text-[9px] font-mono uppercase tracking-wider flex items-center gap-1"
                             style={{
-                              background: 'var(--theme-track, rgba(255, 255, 255, 0.04))',
-                              borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
+                              background: 'var(--theme-track)',
+                              borderColor: 'var(--theme-border)',
                               color: isLaunched
-                                ? '#a6e3a1'
-                                : 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))',
+                                ? 'var(--theme-accent)'
+                                : 'var(--theme-text-secondary)',
                             }}
                           >
                             <span>
@@ -624,7 +615,7 @@ export const AppsView: React.FC<AppsViewProps> = ({
                   <div className="w-full min-w-0">
                     <div
                       className="text-xs font-semibold truncate"
-                      style={{ color: 'var(--theme-text-primary, #cdd6f4)' }}
+                      style={{ color: 'var(--theme-text-primary)' }}
                     >
                       {app.name}
                     </div>

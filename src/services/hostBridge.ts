@@ -72,6 +72,12 @@ export interface BluetoothDeviceInfo {
 export interface BluetoothState {
   enabled: boolean;
   devices: BluetoothDeviceInfo[];
+  adapter_name?: string;
+  version?: string;
+  lmp?: string;
+  connected_count?: number;
+  rx_kbps?: number;
+  tx_kbps?: number;
 }
 
 export interface AudioState {
@@ -589,6 +595,7 @@ export interface HostConfig {
   quietHoursEnd?: string;
   panelMonitorMode?: 'cursor' | 'primary';
   triggerMonitorScope?: 'all' | 'primary';
+  panelAnchor?: 'top-center' | 'top-left' | 'top-right';
   animationsEnabled?: boolean;
   animationDurationMs?: number;
   suspendWhenClosed?: boolean;
@@ -1279,6 +1286,12 @@ export async function getBluetoothState(): Promise<BluetoothState> {
       { id: 'bt-3', name: 'MX Master 3S', status: 'OK', connected: false },
       { id: 'bt-4', name: 'Pixel 8 Pro', status: 'OK', connected: false },
     ],
+    adapter_name: 'Bluetooth Radio Adapter',
+    version: 'Bluetooth 5.2',
+    lmp: 'LMP 11.8710',
+    connected_count: 2,
+    rx_kbps: 1.2,
+    tx_kbps: 3.4,
   }));
 }
 

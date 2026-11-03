@@ -96,85 +96,118 @@ export function hslToRgb(h: number, s: number, l: number): RGBTuple {
   return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
 }
 
+export function hexToRgba(hex: string, alpha: number): string {
+  const clean = hex.replace('#', '');
+  if (clean.length === 3) {
+    const r = parseInt(clean[0] + clean[0], 16);
+    const g = parseInt(clean[1] + clean[1], 16);
+    const b = parseInt(clean[2] + clean[2], 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+  if (clean.length === 6) {
+    const r = parseInt(clean.slice(0, 2), 16);
+    const g = parseInt(clean.slice(2, 4), 16);
+    const b = parseInt(clean.slice(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+  return `rgba(56, 189, 248, ${alpha})`;
+}
+
 // ---------------------------------------------------------------------------
 // Signature Preset Definitions
 // ---------------------------------------------------------------------------
 
 export const CANOPY_FOREST_THEME = {
-  bg: 'rgba(17, 25, 19, 0.92)',
-  card: 'rgba(26, 38, 29, 0.78)',
-  border: 'rgba(116, 168, 108, 0.22)',
-  accent: '#74a86c',
-  accentSoft: 'rgba(116, 168, 108, 0.18)',
+  bg: 'rgba(9, 14, 11, 0.95)',
+  card: 'rgba(18, 26, 21, 0.80)',
+  border: 'rgba(82, 183, 136, 0.18)',
+  accent: '#52b788',
+  accentSoft: 'rgba(82, 183, 136, 0.16)',
   accentWarm: '#e07a5f',
-  textPrimary: '#f5efe6',
-  textSecondary: '#9eb09a',
-  track: 'rgba(116, 168, 108, 0.12)',
+  textPrimary: '#f3f4f6',
+  textSecondary: '#9ca3af',
+  track: 'rgba(82, 183, 136, 0.10)',
   isLight: false,
 };
 
 export const OBSIDIAN_DARK_THEME = {
-  bg: 'rgba(18, 18, 24, 0.92)',
-  card: 'rgba(255, 255, 255, 0.04)',
-  border: 'rgba(162, 155, 254, 0.28)',
-  accent: '#a29bfe',
-  accentSoft: 'rgba(162, 155, 254, 0.18)',
-  accentWarm: '#fab387',
-  textPrimary: '#f1f2f6',
-  textSecondary: '#9e9ea7',
-  track: 'rgba(255, 255, 255, 0.08)',
+  bg: 'rgba(9, 9, 11, 0.96)',
+  card: 'rgba(18, 18, 22, 0.82)',
+  border: 'rgba(255, 255, 255, 0.08)',
+  accent: '#38bdf8',
+  accentSoft: 'rgba(56, 189, 248, 0.16)',
+  accentWarm: '#f59e0b',
+  textPrimary: '#f4f4f5',
+  textSecondary: '#a1a1aa',
+  track: 'rgba(255, 255, 255, 0.06)',
   isLight: false,
 };
 
 export const ALABASTER_LIGHT_THEME = {
-  bg: 'rgba(248, 250, 248, 0.94)',
-  card: 'rgba(255, 255, 255, 0.85)',
-  border: 'rgba(45, 65, 50, 0.14)',
-  accent: '#447a40',
-  accentSoft: 'rgba(68, 122, 64, 0.14)',
-  accentWarm: '#d9684c',
-  textPrimary: '#1a261d',
-  textSecondary: '#4a6350',
-  track: 'rgba(45, 65, 50, 0.10)',
+  bg: 'rgba(238, 242, 246, 0.98)',
+  card: '#ffffff',
+  border: 'rgba(15, 23, 42, 0.12)',
+  accent: '#16a34a',
+  accentSoft: 'rgba(22, 163, 74, 0.12)',
+  accentWarm: '#ea580c',
+  textPrimary: '#0f172a',
+  textSecondary: '#475569',
+  track: 'rgba(15, 23, 42, 0.06)',
   isLight: true,
 };
 
-function applyThemeVariables(vars: {
-  bg: string;
-  card: string;
-  border: string;
-  accent: string;
-  accentSoft: string;
-  accentWarm: string;
-  textPrimary: string;
-  textSecondary: string;
-  track: string;
-  isLight: boolean;
-}): void {
+function applyThemeVariables(
+  vars: {
+    bg: string;
+    card: string;
+    border: string;
+    accent: string;
+    accentSoft: string;
+    accentWarm: string;
+    textPrimary: string;
+    textSecondary: string;
+    track: string;
+    isLight: boolean;
+  },
+  customAccent?: string,
+  trueOled?: boolean,
+): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
   root.dataset.theme = vars.isLight ? 'light' : 'dark';
+  const activeVars = { ...vars };
+  if (customAccent && /^#[0-9a-f]{3,8}$/i.test(customAccent)) {
+    activeVars.accent = customAccent;
+    activeVars.accentSoft = hexToRgba(customAccent, activeVars.isLight ? 0.1 : 0.18);
+    if (!activeVars.isLight) {
+      activeVars.border = hexToRgba(customAccent, 0.22);
+    }
+  }
+  if (trueOled && !activeVars.isLight) {
+    activeVars.bg = 'rgba(0, 0, 0, 0.98)';
+    activeVars.card = 'rgba(12, 12, 15, 0.90)';
+  }
 
-  root.style.setProperty('--theme-bg', vars.bg);
-  root.style.setProperty('--theme-card', vars.card);
-  root.style.setProperty('--theme-border', vars.border);
-  root.style.setProperty('--theme-accent', vars.accent);
-  root.style.setProperty('--theme-accent-soft', vars.accentSoft);
-  root.style.setProperty('--theme-accent-warm', vars.accentWarm);
-  root.style.setProperty('--theme-text', vars.textPrimary);
-  root.style.setProperty('--theme-text-primary', vars.textPrimary);
-  root.style.setProperty('--theme-text-muted', vars.textSecondary);
-  root.style.setProperty('--theme-text-secondary', vars.textSecondary);
-  root.style.setProperty('--theme-track', vars.track);
+  root.style.setProperty('--theme-bg', activeVars.bg);
+  root.style.setProperty('--theme-card', activeVars.card);
+  root.style.setProperty('--theme-border', activeVars.border);
+  root.style.setProperty('--theme-accent', activeVars.accent);
+  root.style.setProperty('--theme-accent-soft', activeVars.accentSoft);
+  root.style.setProperty('--theme-accent-warm', activeVars.accentWarm);
+  root.style.setProperty('--theme-text', activeVars.textPrimary);
+  root.style.setProperty('--theme-text-primary', activeVars.textPrimary);
+  root.style.setProperty('--theme-text-muted', activeVars.textSecondary);
+  root.style.setProperty('--theme-text-secondary', activeVars.textSecondary);
+  root.style.setProperty('--theme-track', activeVars.track);
   root.style.setProperty(
     '--theme-surface-hover',
-    vars.isLight ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.08)',
+    activeVars.isLight ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.08)',
   );
 
   // Compute perceived luminance of the accent color to guarantee high-contrast text
   let onAccent = '#ffffff';
-  const rgbMatch = vars.accent.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
-  const hexMatch = vars.accent.match(/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i);
+  const rgbMatch = activeVars.accent.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+  const hexMatch = activeVars.accent.match(/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i);
   if (rgbMatch) {
     const lum =
       0.299 * Number(rgbMatch[1]) + 0.587 * Number(rgbMatch[2]) + 0.114 * Number(rgbMatch[3]);
@@ -189,7 +222,7 @@ function applyThemeVariables(vars: {
   root.style.setProperty('--theme-on-accent', onAccent);
 
   try {
-    setHostConfig({ themeAccent: vars.accent, themeBg: vars.bg }).catch(() => {});
+    setHostConfig({ themeAccent: activeVars.accent, themeBg: activeVars.bg }).catch(() => {});
   } catch {
     // Non-fatal if host bridge is not ready
   }
@@ -199,8 +232,9 @@ export function applyThemeModeFallback(
   themeMode: string = 'canopy',
   glassOpacity?: number,
   glassBlurStrength?: number,
+  customAccent?: string,
+  trueOled?: boolean,
 ): void {
-  if (typeof document === 'undefined') return;
   const root = document.documentElement;
 
   if (typeof glassOpacity === 'number' && Number.isFinite(glassOpacity)) {
@@ -214,12 +248,12 @@ export function applyThemeModeFallback(
   const prefersLight =
     typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: light)').matches;
   if (mode === 'light' || mode === 'alabaster' || (mode === 'auto' && prefersLight)) {
-    applyThemeVariables(ALABASTER_LIGHT_THEME);
+    applyThemeVariables(ALABASTER_LIGHT_THEME, customAccent, false);
   } else if (mode === 'dark' || mode === 'obsidian' || (mode === 'auto' && !prefersLight)) {
-    applyThemeVariables(OBSIDIAN_DARK_THEME);
+    applyThemeVariables(OBSIDIAN_DARK_THEME, customAccent, trueOled);
   } else {
     // Default signature: Canopy Forest
-    applyThemeVariables(CANOPY_FOREST_THEME);
+    applyThemeVariables(CANOPY_FOREST_THEME, customAccent, trueOled);
   }
 }
 
@@ -230,25 +264,24 @@ export function applyThemeModeFallback(
 export function applyThemePalette(
   imgElement: HTMLImageElement,
   themeMode: string = 'adaptive',
+  customAccent?: string,
+  trueOled?: boolean,
 ): void {
-  if (typeof document === 'undefined') return;
-
   const mode = themeMode.toLowerCase();
   if (mode === 'canopy') {
-    applyThemeVariables(CANOPY_FOREST_THEME);
+    applyThemeVariables(CANOPY_FOREST_THEME, customAccent, trueOled);
     return;
   }
   const prefersLight =
     typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: light)').matches;
   if (mode === 'dark' || mode === 'obsidian' || (mode === 'auto' && !prefersLight)) {
-    applyThemeVariables(OBSIDIAN_DARK_THEME);
+    applyThemeVariables(OBSIDIAN_DARK_THEME, customAccent, trueOled);
     return;
   }
   if (mode === 'light' || mode === 'alabaster' || (mode === 'auto' && prefersLight)) {
-    applyThemeVariables(ALABASTER_LIGHT_THEME);
+    applyThemeVariables(ALABASTER_LIGHT_THEME, customAccent, false);
     return;
   }
-
   try {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
@@ -436,9 +469,11 @@ export function applyThemePalette(
 export async function applyThemeFromImageSrc(
   imageSrc: string,
   themeMode: string = 'adaptive',
+  customAccent?: string,
+  trueOled?: boolean,
 ): Promise<void> {
   if (typeof window === 'undefined' || !imageSrc) {
-    applyThemeModeFallback(themeMode);
+    applyThemeModeFallback(themeMode, undefined, undefined, customAccent, trueOled);
     return;
   }
 
@@ -447,9 +482,9 @@ export async function applyThemeFromImageSrc(
     img.crossOrigin = 'anonymous';
     img.src = imageSrc;
     await img.decode();
-    applyThemePalette(img, themeMode);
+    applyThemePalette(img, themeMode, customAccent, trueOled);
   } catch {
-    applyThemeModeFallback(themeMode);
+    applyThemeModeFallback(themeMode, undefined, undefined, customAccent, trueOled);
   }
 }
 

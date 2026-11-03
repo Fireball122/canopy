@@ -32,34 +32,84 @@ export function AppearanceSection({
   );
 
   const handleThemeModeSelect = (mode: 'canopy' | 'adaptive' | 'dark' | 'light' | 'auto') => {
-    updateSettings({ themeMode: mode });
-    applyThemeModeFallback(mode, settings.glassOpacity, settings.glassBlurStrength);
+    const nextCustomAccent = mode === 'canopy' || mode === 'auto' ? '' : settings.customAccentColor;
+    updateSettings({ themeMode: mode, customAccentColor: nextCustomAccent });
+    applyThemeModeFallback(
+      mode,
+      settings.glassOpacity,
+      settings.glassBlurStrength,
+      nextCustomAccent,
+      settings.trueOledMode,
+    );
     onThemeChanged?.();
   };
 
   const handleBlurChange = (val: number) => {
     updateSettings({ glassBlurStrength: val });
-    applyThemeModeFallback(settings.themeMode, settings.glassOpacity, val);
+    applyThemeModeFallback(
+      settings.themeMode,
+      settings.glassOpacity,
+      val,
+      settings.customAccentColor,
+      settings.trueOledMode,
+    );
     onThemeChanged?.();
   };
 
   const handleOpacityChange = (val: number) => {
     const ratio = Number((val / 100).toFixed(2));
     updateSettings({ glassOpacity: ratio });
-    applyThemeModeFallback(settings.themeMode, ratio, settings.glassBlurStrength);
+    applyThemeModeFallback(
+      settings.themeMode,
+      ratio,
+      settings.glassBlurStrength,
+      settings.customAccentColor,
+      settings.trueOledMode,
+    );
     onThemeChanged?.();
   };
 
+  const handleAccentColorSelect = (hex: string) => {
+    updateSettings({ customAccentColor: hex });
+    applyThemeModeFallback(
+      settings.themeMode,
+      settings.glassOpacity,
+      settings.glassBlurStrength,
+      hex,
+      settings.trueOledMode,
+    );
+    onThemeChanged?.();
+  };
+
+  const handleToggleTrueOled = (val: boolean) => {
+    updateSettings({ trueOledMode: val });
+    applyThemeModeFallback(
+      settings.themeMode,
+      settings.glassOpacity,
+      settings.glassBlurStrength,
+      settings.customAccentColor,
+      val,
+    );
+    onThemeChanged?.();
+  };
   // The host owns the live slideshow (WallpaperView toggles the same state), so changes are
   // pushed through setDesktopWallpaperState rather than only stored in settings.
   const applySlideshowEnabled = (enabled: boolean) => {
     updateSettings({ wallpaperSlideshowEnabled: enabled });
-    void setDesktopWallpaperState({ slideshow_enabled: enabled }).catch(() => undefined);
+    void setDesktopWallpaperState({
+      slideshow_enabled: enabled,
+      slideshow_minutes: settings.wallpaperSlideshowMinutes,
+      shuffle: settings.wallpaperShuffle,
+    }).catch(() => undefined);
   };
 
   const applySlideshowMinutes = (minutes: number) => {
     updateSettings({ wallpaperSlideshowMinutes: minutes });
-    void setDesktopWallpaperState({ slideshow_minutes: minutes }).catch(() => undefined);
+    void setDesktopWallpaperState({
+      slideshow_enabled: settings.wallpaperSlideshowEnabled,
+      slideshow_minutes: minutes,
+      shuffle: settings.wallpaperShuffle,
+    }).catch(() => undefined);
   };
 
   const handleGifUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -164,6 +214,79 @@ export function AppearanceSection({
           </div>
         </div>
       </div>
+      {/* Accent Color Palette Customization (Visible only when in Dark, Light, or Adaptive themes) */}
+      {settings.themeMode !== 'canopy' && settings.themeMode !== 'auto' && (
+        <div className="flex flex-col gap-1.5 py-1 border-t border-[var(--theme-border)] animate-in fade-in duration-150">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xs font-medium" style={{ color: 'var(--theme-text-primary)' }}>
+                Accent Color
+              </div>
+              <div
+                className="text-[10px] leading-snug mt-0.5"
+                style={{ color: 'var(--theme-text-secondary)' }}
+              >
+                Interactive focus, rings, and hardware luminescence
+              </div>
+            </div>
+            {settings.customAccentColor && (
+              <button
+                type="button"
+                onClick={() => handleAccentColorSelect('')}
+                className="text-[10px] font-mono text-[var(--theme-text-secondary)] hover:text-[var(--theme-accent)] transition-colors cursor-pointer"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 pt-1 flex-wrap">
+            {[
+              { label: 'Theme Default', hex: '', bg: 'var(--theme-accent)' },
+              { label: 'Forest Emerald', hex: '#52b788', bg: '#52b788' },
+              { label: 'Obsidian Cyan', hex: '#38bdf8', bg: '#38bdf8' },
+              { label: 'Electric Indigo', hex: '#818cf8', bg: '#818cf8' },
+              { label: 'Sunset Amber', hex: '#f59e0b', bg: '#f59e0b' },
+              { label: 'Crimson Rose', hex: '#f43f5e', bg: '#f43f5e' },
+              { label: 'Titanium', hex: '#e4e4e7', bg: '#e4e4e7' },
+            ].map((c) => {
+              const isSelected = (settings.customAccentColor || '') === c.hex;
+              return (
+                <button
+                  key={c.label}
+                  type="button"
+                  onClick={() => handleAccentColorSelect(c.hex)}
+                  title={c.label}
+                  className="w-6 h-6 rounded-full border transition-all flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95"
+                  style={{
+                    background: c.bg,
+                    borderColor: isSelected
+                      ? 'var(--theme-text-primary)'
+                      : 'var(--theme-border, rgba(255, 255, 255, 0.15))',
+                    boxShadow: isSelected ? '0 0 8px var(--theme-accent)' : 'none',
+                  }}
+                >
+                  {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-white shadow-sm" />}
+                </button>
+              );
+            })}
+            <input
+              type="text"
+              placeholder="#hex"
+              value={settings.customAccentColor || ''}
+              onChange={(e) => handleAccentColorSelect(e.target.value)}
+              className="ml-auto px-2 py-0.5 rounded-lg text-[10px] font-mono border bg-[var(--theme-track)] text-[var(--theme-text-primary)] border-[var(--theme-border)] outline-none w-20 text-center"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* True OLED Pitch Black Mode */}
+      <SettingRow
+        title="True OLED Black Canvas"
+        description="Infinite contrast pure #000000 background for OLED / Mini-LED displays"
+      >
+        <ToggleSwitch checked={Boolean(settings.trueOledMode)} onChange={handleToggleTrueOled} />
+      </SettingRow>
 
       <SliderRow
         label="Glass Blur Strength"
@@ -228,6 +351,9 @@ export function AppearanceSection({
                 borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.15))',
               }}
             >
+              <option value={1} style={{ background: '#181825', color: '#ffffff' }}>
+                1 minute (Fast / Test)
+              </option>
               <option value={5} style={{ background: '#181825', color: '#ffffff' }}>
                 5 minutes
               </option>
@@ -256,6 +382,22 @@ export function AppearanceSection({
                 24 hours
               </option>
             </select>
+          </SettingRow>
+          <SettingRow
+            title="Shuffle Wallpapers"
+            description="Pick random wallpaper from directory on each rotation"
+          >
+            <ToggleSwitch
+              checked={Boolean(settings.wallpaperShuffle)}
+              onChange={(val) => {
+                updateSettings({ wallpaperShuffle: val });
+                void setDesktopWallpaperState({
+                  slideshow_enabled: settings.wallpaperSlideshowEnabled,
+                  slideshow_minutes: settings.wallpaperSlideshowMinutes,
+                  shuffle: val,
+                }).catch(() => undefined);
+              }}
+            />
           </SettingRow>
           <SettingRow
             title="Per-Monitor Wallpapers"

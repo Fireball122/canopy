@@ -820,16 +820,6 @@ export const MediaView: React.FC<MediaViewProps> = ({
         borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.08))',
       }}
     >
-      {/* Subtle Ambient Accent Glow */}
-      <div
-        className="absolute -left-10 -bottom-10 w-44 h-44 rounded-full blur-3xl pointer-events-none opacity-20"
-        style={{ background: 'var(--theme-accent, #cba6f7)' }}
-      />
-      <div
-        className="absolute -right-10 -top-10 w-44 h-44 rounded-full blur-3xl pointer-events-none opacity-15"
-        style={{ background: 'var(--theme-accent, #cba6f7)' }}
-      />
-
       {/* ========================================================================= */}
       {/* COLUMN 1 (Left w-[210px]): Circular Vinyl + 40-Spoke Radial Visualizer    */}
       {/* ========================================================================= */}
@@ -841,8 +831,8 @@ export const MediaView: React.FC<MediaViewProps> = ({
               bands={spectrumBands}
               active={isPlaying || spectrumBands.some((b) => b > 0.02)}
               size={190}
-              accentColor="var(--theme-accent, #cba6f7)"
-              secondaryColor="#89dceb"
+              accentColor="var(--theme-accent)"
+              secondaryColor="var(--theme-accent-warm, var(--theme-accent))"
             />
           </div>
 
@@ -853,8 +843,8 @@ export const MediaView: React.FC<MediaViewProps> = ({
               isPlaying ? 'animate-vinyl-spin' : ''
             }`}
             style={{
-              borderColor: 'var(--theme-accent, #cba6f7)',
-              background: 'linear-gradient(135deg, #181825 0%, #313244 50%, #11111b 100%)',
+              borderColor: 'var(--theme-accent)',
+              background: 'var(--theme-card)',
             }}
             title={isPlaying ? 'Click to pause' : 'Click to play'}
           >
@@ -868,7 +858,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
                 <div className="absolute w-5 h-5 rounded-full bg-[#11111b]/90 border border-white/25 shadow-inner flex items-center justify-center">
                   <div
                     className="w-2 h-2 rounded-full"
-                    style={{ background: 'var(--theme-accent, #cba6f7)' }}
+                    style={{ background: 'var(--theme-accent)' }}
                   />
                 </div>
               </>
@@ -882,7 +872,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
                   className="w-10 h-10 rounded-full flex items-center justify-center shadow-inner"
                   style={{
                     background:
-                      'linear-gradient(135deg, var(--theme-accent, #cba6f7) 0%, #89dceb 100%)',
+                      'linear-gradient(135deg, var(--theme-accent) 0%, var(--theme-accent-warm, var(--theme-accent)) 100%)',
                   }}
                 >
                   <Disc className="w-5 h-5 text-[#11111b]" strokeWidth={2.2} />
@@ -902,8 +892,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
           <div className="min-w-0 flex-1 text-left pl-1">
             <h2
               className="text-base font-bold tracking-tight truncate"
-              style={{ color: 'var(--theme-text-primary, #cdd6f4)' }}
-              title={trackTitle}
+              style={{ color: 'var(--theme-text-primary)' }}
             >
               {trackTitle}
             </h2>
@@ -930,15 +919,14 @@ export const MediaView: React.FC<MediaViewProps> = ({
               style={
                 showLyrics
                   ? {
-                      background: 'var(--theme-accent, #cba6f7)',
-                      borderColor: 'var(--theme-accent, #cba6f7)',
-                      color: '#11111b',
-                      boxShadow: '0 0 16px rgba(203, 166, 247, 0.38)',
+                      background: 'var(--theme-accent)',
+                      borderColor: 'var(--theme-accent)',
+                      color: 'var(--theme-on-accent, #111)',
                     }
                   : {
-                      background: 'var(--theme-track, rgba(255, 255, 255, 0.06))',
-                      borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.12))',
-                      color: 'var(--theme-text-primary, #cdd6f4)',
+                      background: 'var(--theme-track)',
+                      borderColor: 'var(--theme-border)',
+                      color: 'var(--theme-text-primary)',
                     }
               }
               title={showLyrics ? 'Return to transport controls' : 'Show time-synced lyrics'}
@@ -959,15 +947,14 @@ export const MediaView: React.FC<MediaViewProps> = ({
               style={
                 showMixer
                   ? {
-                      background: 'var(--theme-accent, #cba6f7)',
-                      borderColor: 'var(--theme-accent, #cba6f7)',
-                      color: '#11111b',
-                      boxShadow: '0 0 16px rgba(203, 166, 247, 0.38)',
+                      background: 'var(--theme-accent)',
+                      borderColor: 'var(--theme-accent)',
+                      color: 'var(--theme-on-accent, #111)',
                     }
                   : {
-                      background: 'var(--theme-track, rgba(255, 255, 255, 0.06))',
-                      borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.12))',
-                      color: 'var(--theme-text-primary, #cdd6f4)',
+                      background: 'var(--theme-track)',
+                      borderColor: 'var(--theme-border)',
+                      color: 'var(--theme-text-primary)',
                     }
               }
               title={showMixer ? 'Close volume mixer' : 'Open per-app volume mixer'}
@@ -1012,9 +999,9 @@ export const MediaView: React.FC<MediaViewProps> = ({
                 onClick={onPrev}
                 className="w-10 h-10 rounded-full flex items-center justify-center border transition-all hover:scale-105 active:scale-95 pointer-events-auto cursor-pointer"
                 style={{
-                  background: 'var(--theme-track, rgba(255, 255, 255, 0.06))',
-                  borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.1))',
-                  color: 'var(--theme-text-primary, #cdd6f4)',
+                  background: 'var(--theme-track)',
+                  borderColor: 'var(--theme-border)',
+                  color: 'var(--theme-text-primary)',
                 }}
                 title="Previous Track"
               >
@@ -1026,9 +1013,9 @@ export const MediaView: React.FC<MediaViewProps> = ({
                 onClick={onPlayPause}
                 className="w-13 h-13 p-3.5 rounded-full flex items-center justify-center shadow-lg transition-all hover:scale-105 hover:brightness-110 active:scale-95 pointer-events-auto cursor-pointer"
                 style={{
-                  background: 'var(--theme-accent, #cba6f7)',
-                  color: '#11111b',
-                  boxShadow: '0 0 22px rgba(203, 166, 247, 0.42)',
+                  background: 'var(--theme-accent)',
+                  color: 'var(--theme-on-accent, #111)',
+                  boxShadow: '0 4px 16px rgba(0, 0, 0, 0.35)',
                 }}
                 title={isPlaying ? 'Pause' : 'Play'}
               >
@@ -1044,9 +1031,9 @@ export const MediaView: React.FC<MediaViewProps> = ({
                 onClick={onNext}
                 className="w-10 h-10 rounded-full flex items-center justify-center border transition-all hover:scale-105 active:scale-95 pointer-events-auto cursor-pointer"
                 style={{
-                  background: 'var(--theme-track, rgba(255, 255, 255, 0.06))',
-                  borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.1))',
-                  color: 'var(--theme-text-primary, #cdd6f4)',
+                  background: 'var(--theme-track)',
+                  borderColor: 'var(--theme-border)',
+                  color: 'var(--theme-text-primary)',
                 }}
                 title="Next Track"
               >
@@ -1110,12 +1097,12 @@ export const MediaView: React.FC<MediaViewProps> = ({
                 }}
                 className="caelestia-slider flex-1 h-1.5 rounded-full pointer-events-auto cursor-pointer"
                 style={{
-                  background: `linear-gradient(to right, var(--theme-accent, #cba6f7) 0%, #89dceb ${progressPercent}%, var(--theme-track, rgba(255,255,255,0.14)) ${progressPercent}%, var(--theme-track, rgba(255,255,255,0.14)) 100%)`,
+                  background: `linear-gradient(to right, var(--theme-accent) 0%, var(--theme-accent-warm, var(--theme-accent)) ${progressPercent}%, var(--theme-track) ${progressPercent}%, var(--theme-track) 100%)`,
                 }}
               />
               <span
                 className="text-[11px] font-mono tabular-nums w-9 shrink-0"
-                style={{ color: 'var(--theme-text-secondary, rgba(205, 214, 244, 0.72))' }}
+                style={{ color: 'var(--theme-text-secondary)' }}
               >
                 {formatMediaTime(effectiveDuration)}
               </span>

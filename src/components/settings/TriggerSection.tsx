@@ -28,6 +28,23 @@ export function TriggerSection() {
           onChange={(newHotkey) => updateSettings({ globalHotkey: newHotkey })}
         />
       </SettingRow>
+      {/* Screen Anchor / Position */}
+      <SettingRow
+        title="Screen Position Anchor"
+        description="Monitor placement when expanding the panel"
+      >
+        <SegmentedChoice
+          options={[
+            { id: 'top-left', label: 'Top Left' },
+            { id: 'top-center', label: 'Top Center' },
+            { id: 'top-right', label: 'Top Right' },
+          ]}
+          value={settings.panelAnchor || 'top-center'}
+          onChange={(val) =>
+            updateSettings({ panelAnchor: val as 'top-center' | 'top-left' | 'top-right' })
+          }
+        />
+      </SettingRow>
 
       {/* Top Hover Trigger Toggle */}
       <SettingRow
@@ -50,7 +67,15 @@ export function TriggerSection() {
                 {settings.triggerWidth}px × {settings.triggerHeight}px
               </span>
             </div>
-            <div className="relative w-full h-12 rounded-md border border-[var(--theme-border)] bg-black/20 flex flex-col items-center overflow-hidden">
+            <div
+              className={`relative w-full h-12 rounded-md border border-[var(--theme-border)] bg-black/20 flex flex-col overflow-hidden ${
+                settings.panelAnchor === 'top-left'
+                  ? 'items-start pl-1'
+                  : settings.panelAnchor === 'top-right'
+                    ? 'items-end pr-1'
+                    : 'items-center'
+              }`}
+            >
               <div
                 className="h-2 rounded-b-md transition-all duration-150 shadow-[0_0_8px_var(--theme-accent)]"
                 style={{

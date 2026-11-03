@@ -692,6 +692,22 @@ public sealed class WallpaperService : IDisposable
         return "1920 × 1080";
     }
 
+
+    public List<string> GetWallpaperFiles()
+    {
+        try
+        {
+            EnsureDirectoryAndSeedSamples();
+            return Directory.EnumerateFiles(WallpapersDirectory)
+                .Where(f => SupportedExtensions.Contains(Path.GetExtension(f)))
+                .OrderBy(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch
+        {
+            return new List<string>();
+        }
+    }
     public Task<List<object>> GetWallpaperBridgeEntriesAsync()
     {
         return Task.Run(() =>
