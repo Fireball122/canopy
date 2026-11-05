@@ -1242,7 +1242,7 @@ public partial class MainWindow : Window
                                         using var sha = System.Security.Cryptography.SHA256.Create();
                                         await using var rfs = File.OpenRead(installerPath);
                                         byte[] actualBytes = await sha.ComputeHashAsync(rfs);
-                                        string actualHash = BitConverter.ToString(actualBytes).Replace("-", "").ToLowerInvariant();
+                                        string actualHash = Convert.ToHexString(actualBytes).ToLowerInvariant();
                                         if (!string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))
                                         {
                                             _log.Write($"[apply_update] SECURITY ALERT: SHA-256 mismatch for {fileName}. Expected {expectedHash}, got {actualHash}. Aborting execution.");
