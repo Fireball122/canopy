@@ -1,4 +1,6 @@
 import {
+  ArrowDown,
+  ArrowUp,
   Bluetooth,
   Cast,
   Check,
@@ -37,6 +39,7 @@ import {
   getNetworkAdapters,
   getPowerMode,
   getWifiState,
+  getWifiThroughput,
   type NetworkAdapterInfo,
   openExternalUrl,
   type SystemStats,
@@ -60,6 +63,29 @@ function formatLinkSpeed(speedMbps?: number): string {
     return Number.isInteger(gbps) ? `${gbps} Gbps` : `${gbps.toFixed(1)} Gbps`;
   }
   return `${speedMbps} Mbps`;
+}
+
+const SPARKLINE_WIDTH = 180;
+const SPARKLINE_HEIGHT = 32;
+
+function formatRate(kbps: number): string {
+  if (kbps >= 1024) return `${(kbps / 1024).toFixed(1)} MB/s`;
+  return `${kbps.toFixed(1)} KB/s`;
+}
+
+/** Polyline points for a traffic history; the vertical scale floors at 4 KB/s so idle lines stay visible. */
+function buildSparkline(pts: number[], w: number, h: number): { polyline: string; fill: string } {
+  const maxVal = Math.max(...pts, 4);
+  const step = w / (pts.length - 1);
+  const points = pts.map((val, idx) => {
+    const x = idx * step;
+    const y = h - (val / maxVal) * (h - 4) - 2;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  return {
+    polyline: points.join(' '),
+    fill: `0,${h} ${points.join(' ')} ${w},${h}`,
+  };
 }
 
 export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification }) => {
@@ -94,6 +120,13 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
   const [bluetoothRxKbps, setBluetoothRxKbps] = useState<number>(0);
   const [bluetoothTxKbps, setBluetoothTxKbps] = useState<number>(0);
   const [btTrafficHistory, setBtTrafficHistory] = useState<number[]>(() => new Array(20).fill(0));
+
+  // Wi-Fi Throughput (polled while connected)
+  const [wifiRxKbps, setWifiRxKbps] = useState<number>(0);
+  const [wifiTxKbps, setWifiTxKbps] = useState<number>(0);
+  const [wifiTrafficHistory, setWifiTrafficHistory] = useState<number[]>(() =>
+    new Array(30).fill(0),
+  );
 
   // Mobile Hotspot State
   const [hotspotEnabled, setHotspotEnabled] = useState<boolean>(false);
@@ -206,6 +239,29 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
   useEffect(() => {
     void refreshAll();
   }, [refreshAll]);
+
+  // Poll Wi-Fi throughput only while connected; the interval is cleared on disconnect or unmount.
+  useEffect(() => {
+    if (!connectedSsid) return;
+    let cancelled = false;
+    const pollThroughput = async () => {
+      try {
+        const t = await getWifiThroughput();
+        if (cancelled) return;
+        setWifiRxKbps(t.rx_kbps);
+        setWifiTxKbps(t.tx_kbps);
+        setWifiTrafficHistory((prev) => [...prev.slice(1), t.rx_kbps + t.tx_kbps]);
+      } catch (err) {
+        console.warn('Wi-Fi throughput poll failed:', err);
+      }
+    };
+    void pollThroughput();
+    const intervalId = window.setInterval(() => void pollThroughput(), 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [connectedSsid]);
 
   // Active Connection Info
   const activeEthernet = adapters.find(
@@ -493,26 +549,22 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
     return <SignalLow className="w-4 h-4 text-[var(--theme-text-secondary)] shrink-0" />;
   };
 
-  // Only a real address: a made-up fallback would be copied and trusted by the user.
-  const activeIpAddress = primaryAdapter?.ip_address || '';
   const primaryConnected = Boolean(primaryAdapter?.is_connected);
 
-  const btSparklineData = useMemo(() => {
-    const w = 180;
-    const h = 18;
-    const pts = btTrafficHistory;
-    const maxVal = Math.max(...pts, 4);
-    const step = w / (pts.length - 1);
-    const points = pts.map((val, idx) => {
-      const x = idx * step;
-      const y = h - (val / maxVal) * (h - 4) - 2;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    });
-    return {
-      polyline: points.join(' '),
-      fill: `0,${h} ${points.join(' ')} ${w},${h}`,
-    };
-  }, [btTrafficHistory]);
+  // The Wi-Fi card reports the Wi-Fi adapter: primaryAdapter prefers Ethernet when both are up.
+  const wifiAdapter = activeWifi || adapters.find((a) => a.type === 'wifi');
+  const wifiIpAddress = wifiAdapter?.ip_address || '';
+  const wifiLinkUp = Boolean(wifiAdapter?.is_connected);
+
+  const btSparklineData = useMemo(
+    () => buildSparkline(btTrafficHistory, SPARKLINE_WIDTH, SPARKLINE_HEIGHT),
+    [btTrafficHistory],
+  );
+
+  const wifiSparklineData = useMemo(
+    () => buildSparkline(wifiTrafficHistory, SPARKLINE_WIDTH, SPARKLINE_HEIGHT),
+    [wifiTrafficHistory],
+  );
 
   return (
     <div className="w-full h-full flex flex-col justify-between p-2 select-none pointer-events-auto overflow-hidden relative gap-2">
@@ -780,7 +832,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
             </div>
           ) : (
             /* Hardware Adapter & IP Telemetry Display */
-            <div className="flex-1 flex flex-col justify-between pt-2.5 gap-2 min-h-0 animate-in fade-in duration-200">
+            <div className="flex-1 flex flex-col justify-between pt-2.5 gap-2 min-h-0 overflow-y-auto canopy-scroll animate-in fade-in duration-200">
               <div className="flex flex-col gap-2">
                 {/* Header with status pill */}
                 <div className="flex items-center justify-between">
@@ -791,13 +843,13 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
                     </span>
                   </div>
                   <span className="text-[10px] font-mono text-[var(--theme-text-secondary)]">
-                    {primaryConnected ? 'Connected' : 'Disconnected'}
+                    {wifiLinkUp ? 'Connected' : 'Disconnected'}
                   </span>
                 </div>
 
                 {/* Adapter Description */}
                 <div className="text-[11px] text-[var(--theme-text-secondary)] truncate">
-                  {primaryAdapter?.description || 'No network adapter detected'}
+                  {wifiAdapter?.description || 'No Wi-Fi adapter detected'}
                 </div>
 
                 {/* IP Address Card with One-Click Copy */}
@@ -808,13 +860,13 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
                       IPv4:
                     </span>
                     <span className="text-xs font-mono font-semibold text-white tracking-tight truncate tabular-nums">
-                      {activeIpAddress || 'Not assigned'}
+                      {wifiIpAddress || 'Not assigned'}
                     </span>
                   </div>
                   <button
                     type="button"
-                    onClick={() => handleCopyIp(activeIpAddress)}
-                    disabled={!activeIpAddress}
+                    onClick={() => handleCopyIp(wifiIpAddress)}
+                    disabled={!wifiIpAddress}
                     className="px-2 py-0.5 rounded-lg border border-white/10 text-[9.5px] font-mono hover:bg-white/10 active:scale-95 transition-all flex items-center gap-1 text-[var(--theme-text-secondary)] hover:text-white cursor-pointer disabled:opacity-40 disabled:cursor-default"
                   >
                     {copiedIp ? (
@@ -833,7 +885,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
                       Link Speed
                     </span>
                     <span className="text-xs font-bold font-mono text-white tabular-nums mt-0.5">
-                      {formatLinkSpeed(primaryAdapter?.speed_mbps)}
+                      {formatLinkSpeed(wifiAdapter?.speed_mbps)}
                     </span>
                   </div>
 
@@ -842,24 +894,16 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
                       Interface
                     </span>
                     <span className="text-xs font-bold font-mono text-[var(--theme-accent)] truncate mt-0.5">
-                      {primaryAdapter?.type === 'ethernet'
-                        ? '802.3 Ethernet'
-                        : primaryAdapter?.type === 'wifi'
-                          ? `802.11${wifiBand ? ` (${wifiBand})` : ''}`
-                          : '—'}
+                      {wifiAdapter ? `802.11${wifiBand ? ` (${wifiBand})` : ''}` : '—'}
                     </span>
                   </div>
 
                   <div className="p-2 rounded-xl border border-white/5 bg-white/[0.02] flex flex-col justify-between">
                     <span className="text-[9px] font-mono uppercase tracking-wider text-[var(--theme-text-secondary)]">
-                      Signal / Duplex
+                      Signal
                     </span>
                     <span className="text-xs font-bold font-mono text-white tabular-nums mt-0.5">
-                      {connectedSsid
-                        ? `${wifiSignal}% Quality`
-                        : primaryConnected
-                          ? 'Full Duplex'
-                          : '—'}
+                      {connectedSsid ? `${wifiSignal}% Quality` : '—'}
                     </span>
                   </div>
 
@@ -870,12 +914,43 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
                     <span
                       className="text-xs font-bold font-mono mt-0.5 flex items-center gap-1.5"
                       style={{
-                        color: primaryConnected ? '#34d399' : 'var(--theme-text-secondary)',
+                        color: wifiLinkUp ? '#34d399' : 'var(--theme-text-secondary)',
                       }}
                     >
                       <span className="w-1.5 h-1.5 rounded-full bg-current" />
-                      {primaryConnected ? 'Active Route' : 'No Route'}
+                      {wifiLinkUp ? 'Active Route' : 'No Route'}
                     </span>
+                  </div>
+                </div>
+
+                {/* Live Wi-Fi throughput: receive/transmit readout with history graph */}
+                <div className="p-2 rounded-xl border border-white/5 bg-white/[0.02] flex flex-col gap-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-mono uppercase tracking-wider text-[var(--theme-text-secondary)]">
+                      Throughput
+                    </span>
+                    <span className="flex items-center gap-2 text-[10px] font-mono font-semibold tabular-nums">
+                      <span className="flex items-center gap-0.5 text-emerald-400">
+                        <ArrowDown className="w-2.5 h-2.5" />
+                        {wifiLinkUp ? formatRate(wifiRxKbps) : '—'}
+                      </span>
+                      <span className="flex items-center gap-0.5 text-[var(--theme-accent)]">
+                        <ArrowUp className="w-2.5 h-2.5" />
+                        {wifiLinkUp ? formatRate(wifiTxKbps) : '—'}
+                      </span>
+                    </span>
+                  </div>
+                  <div className="h-7 w-full overflow-hidden">
+                    <svg className="w-full h-full" viewBox="0 0 180 32" preserveAspectRatio="none">
+                      <polyline
+                        points={wifiSparklineData.polyline}
+                        fill="none"
+                        stroke="var(--theme-accent)"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
                   </div>
                 </div>
               </div>
@@ -1085,7 +1160,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
             </div>
           ) : (
             /* Hardware Adapter & Bluetooth Telemetry Display (Matches Wi-Fi Architecture) */
-            <div className="flex-1 flex flex-col justify-between pt-2 gap-1.5 min-h-0 animate-in fade-in duration-200">
+            <div className="flex-1 flex flex-col justify-between pt-2 gap-1.5 min-h-0 overflow-y-auto canopy-scroll animate-in fade-in duration-200">
               <div className="flex flex-col gap-1.5">
                 {/* Header with status pill */}
                 <div className="flex items-center justify-between">
@@ -1198,10 +1273,10 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
                         {(bluetoothTxKbps + bluetoothRxKbps).toFixed(1)} KB/s
                       </span>
                     </div>
-                    <div className="h-3.5 w-full mt-1 z-10 overflow-hidden">
+                    <div className="h-7 w-full mt-1 z-10 overflow-hidden">
                       <svg
                         className="w-full h-full"
-                        viewBox="0 0 180 18"
+                        viewBox="0 0 180 32"
                         preserveAspectRatio="none"
                       >
                         <polyline

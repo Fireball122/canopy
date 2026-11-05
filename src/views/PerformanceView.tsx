@@ -389,7 +389,7 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initial
           <span className="text-[10px] font-mono font-medium text-[var(--theme-text-secondary)]">
             GPU Activity
           </span>
-          <SparklineMini data={gpuHistory} color="#89dceb" width={96} height={20} />
+          <SparklineMini data={gpuHistory} color="#89dceb" width={96} height={28} />
         </div>
 
         <div
@@ -402,7 +402,7 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initial
           <span className="text-[10px] font-mono font-medium text-[var(--theme-text-secondary)]">
             CPU Activity
           </span>
-          <SparklineMini data={cpuHistory} color="var(--theme-accent)" height={20} />
+          <SparklineMini data={cpuHistory} color="var(--theme-accent)" height={28} />
         </div>
 
         <div
@@ -415,7 +415,7 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initial
           <span className="text-[10px] font-mono font-medium text-[var(--theme-text-secondary)]">
             Memory Load
           </span>
-          <SparklineMini data={ramHistory} color="#a6e3a1" width={96} height={20} />
+          <SparklineMini data={ramHistory} color="#a6e3a1" width={96} height={28} />
         </div>
       </div>
 

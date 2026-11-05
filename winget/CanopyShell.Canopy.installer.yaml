@@ -16,7 +16,7 @@ UpgradeBehavior: install
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/Fireball122/canopy/releases/download/v1.0.8/Canopy-v1.0.8-x64.msi
-    InstallerSha256: 13759C480F9304107B1E7E42D309639738A466406F2715B5CDB987924AE70239
-    ProductCode: '{A3788550-A9AB-424A-A1BE-3A167650678D}'
+    InstallerSha256: 2980EF8FC2F433048BBC9D1A1C8122E7DFB9829AB673A5F91E2526285AD1A2A6
+    ProductCode: '{288EA08F-AD37-4F04-B9BE-04B749D52078}'
 ManifestType: installer
 ManifestVersion: 1.6.0

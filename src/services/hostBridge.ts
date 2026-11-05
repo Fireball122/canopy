@@ -1299,6 +1299,26 @@ export async function getBluetoothState(): Promise<BluetoothState> {
   }));
 }
 
+export interface WifiThroughputState {
+  available: boolean;
+  adapter_id: string;
+  rx_kbps: number;
+  tx_kbps: number;
+}
+
+/** Wi-Fi receive/transmit rates; the first call after a gap returns zeros (no baseline). */
+export async function getWifiThroughput(): Promise<WifiThroughputState> {
+  return invokeBridge<WifiThroughputState>('get_wifi_throughput', undefined, () => {
+    const t = Date.now() / 1000;
+    return {
+      available: true,
+      adapter_id: 'wifi-mock',
+      rx_kbps: 180 + 140 * Math.sin(t / 3),
+      tx_kbps: 24 + 16 * Math.sin(t / 2),
+    };
+  });
+}
+
 export async function setBluetoothEnabled(enabled: boolean): Promise<boolean> {
   fallbackBluetoothEnabled = enabled;
   return invokeBridge<boolean>('set_bluetooth_enabled', { enabled }, () => true);
@@ -1418,6 +1438,16 @@ export async function getNetworkAdapters(): Promise<NetworkAdapterInfo[]> {
       status: 'up',
       speed_mbps: 1000,
       ip_address: '192.168.1.189',
+      is_connected: true,
+    },
+    {
+      id: 'wifi-1',
+      name: 'Wi-Fi',
+      description: 'Intel Wi-Fi 6E AX211',
+      type: 'wifi',
+      status: 'up',
+      speed_mbps: 1201,
+      ip_address: '192.168.1.42',
       is_connected: true,
     },
   ]);

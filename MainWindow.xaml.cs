@@ -1638,6 +1638,9 @@ public partial class MainWindow : Window
             case "get_network_adapters":
                 return QueryNetworkAdapters();
 
+            case "get_wifi_throughput":
+                return WifiThroughputSampler.Sample();
+
             default:
                 return null;
         }
