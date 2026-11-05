@@ -100,7 +100,7 @@ export function AppearanceSection({
       slideshow_enabled: enabled,
       slideshow_minutes: settings.wallpaperSlideshowMinutes,
       shuffle: settings.wallpaperShuffle,
-    }).catch(() => undefined);
+    }).catch((err) => console.warn('Failed to update slideshow state:', err));
   };
 
   const applySlideshowMinutes = (minutes: number) => {
@@ -109,7 +109,7 @@ export function AppearanceSection({
       slideshow_enabled: settings.wallpaperSlideshowEnabled,
       slideshow_minutes: minutes,
       shuffle: settings.wallpaperShuffle,
-    }).catch(() => undefined);
+    }).catch((err) => console.warn('Failed to update slideshow interval:', err));
   };
 
   const handleGifUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -148,7 +148,7 @@ export function AppearanceSection({
           wallpaperSlideshowMinutes: state.slideshow_minutes,
         });
       })
-      .catch(() => undefined);
+      .catch((err) => console.warn('Failed to load wallpaper state:', err));
     return () => {
       active = false;
     };
@@ -395,7 +395,7 @@ export function AppearanceSection({
                   slideshow_enabled: settings.wallpaperSlideshowEnabled,
                   slideshow_minutes: settings.wallpaperSlideshowMinutes,
                   shuffle: val,
-                }).catch(() => undefined);
+                }).catch((err) => console.warn('Failed to update wallpaper shuffle:', err));
               }}
             />
           </SettingRow>

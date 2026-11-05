@@ -1,7 +1,6 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
 # InstallerSha256 and ProductCode change with every MSI build (Canopy.wxs uses ProductCode="*").
 # Refresh both from the published Canopy-v<version>-x64.msi before submitting; see RELEASE_GUIDE.md.
-# The values below were carried over from v1.0.7 and are stale until the v1.0.8 MSI is built.
 PackageIdentifier: CanopyShell.Canopy
 PackageVersion: 1.0.8
 InstallerLocale: en-US
@@ -17,7 +16,7 @@ UpgradeBehavior: install
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/Fireball122/canopy/releases/download/v1.0.8/Canopy-v1.0.8-x64.msi
-    InstallerSha256: 48D9928A893F8A48878E25EA980F7B4511A25B62A38743FA5D8F26D30CE93CB9
-    ProductCode: '{4C6D518F-72E6-407F-8BC1-B071536E489E}'
+    InstallerSha256: 13759C480F9304107B1E7E42D309639738A466406F2715B5CDB987924AE70239
+    ProductCode: '{A3788550-A9AB-424A-A1BE-3A167650678D}'
 ManifestType: installer
 ManifestVersion: 1.6.0

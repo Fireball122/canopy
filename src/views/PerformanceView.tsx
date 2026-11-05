@@ -245,7 +245,9 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initial
       try {
         const stored = window.localStorage.getItem('canopy_network_view_mode');
         if (stored === 'graph' || stored === 'bars') return stored;
-      } catch {}
+      } catch (err) {
+        console.warn('Could not read network view mode from localStorage:', err);
+      }
     }
     return 'bars';
   });
@@ -290,7 +292,9 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initial
       if (typeof window !== 'undefined') {
         window.localStorage.setItem('canopy_network_view_mode', mode);
       }
-    } catch {}
+    } catch (err) {
+      console.warn('Could not save network view mode to localStorage:', err);
+    }
   };
 
   const downFormatted =

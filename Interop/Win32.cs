@@ -241,21 +241,31 @@ public static class Win32
         {
             _ = EnumWindows((hWnd, lParam) =>
             {
-                GetWindowThreadProcessId(hWnd, out uint pid);
-                if (pid != processId)
-                    return true;
+                try
+                {
+                    GetWindowThreadProcessId(hWnd, out uint pid);
+                    if (pid != processId)
+                        return true;
 
-                var title = new StringBuilder(256);
-                _ = GetWindowTextW(hWnd, title, title.Capacity);
-                if (!string.Equals(title.ToString(), expectedTitle, StringComparison.Ordinal))
-                    return true;
+                    var title = new StringBuilder(256);
+                    _ = GetWindowTextW(hWnd, title, title.Capacity);
+                    if (!string.Equals(title.ToString(), expectedTitle, StringComparison.Ordinal))
+                        return true;
 
-                found = hWnd;
-                return false;
+                    found = hWnd;
+                    return false;
+                }
+                catch (Exception ex)
+                {
+                    // An exception must not unwind through the native EnumWindows frame.
+                    DiagnosticsLog.LogException("[Win32] FindTopLevelWindow callback failed", ex);
+                    return false;
+                }
             }, IntPtr.Zero);
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.LogException("[Win32] FindTopLevelWindow failed", ex);
         }
 
         return found;
@@ -356,20 +366,30 @@ public static class Win32
         {
             EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr hMon, IntPtr hdc, ref RECT rc, IntPtr data) =>
             {
-                var mi = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
-                if (GetMonitorInfo(hMon, ref mi))
+                try
                 {
-                    list.Add(mi.rcMonitor);
+                    var mi = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+                    if (GetMonitorInfo(hMon, ref mi))
+                    {
+                        list.Add(mi.rcMonitor);
+                    }
+                    else
+                    {
+                        list.Add(rc);
+                    }
+                    return true;
                 }
-                else
+                catch (Exception ex)
                 {
-                    list.Add(rc);
+                    // An exception must not unwind through the native EnumDisplayMonitors frame.
+                    DiagnosticsLog.LogException("[Win32] GetAllMonitors callback failed", ex);
+                    return true;
                 }
-                return true;
             }, IntPtr.Zero);
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.LogException("[Win32] GetAllMonitors failed", ex);
         }
 
         if (list.Count == 0)
@@ -601,8 +621,9 @@ public static class Win32
             if (sent == inputs.Length)
                 return;
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.LogException("[Win32] SendMediaKey SendInput failed; using keybd_event", ex);
         }
 
         keybd_event(vk, 0, KEYEVENTF_EXTENDEDKEY, UIntPtr.Zero);
@@ -693,7 +714,11 @@ public static class Win32
             // A round rect starting at top = -cornerRadius to height clips the bottom corners with exactly cornerRadius,
             // while leaving the top edge perfectly flat and flush to the screen bezel.
             IntPtr rgn = CreateRoundRectRgn(0, -cornerRadius, width + 1, height + 1, cornerRadius * 2, cornerRadius * 2);
-            SetWindowRgn(hwnd, rgn, true);
+            if (SetWindowRgn(hwnd, rgn, true) == 0 && rgn != IntPtr.Zero)
+            {
+                // Ownership passes to the window only on success; otherwise the region must be freed here.
+                _ = DeleteObject(rgn);
+            }
         }
         catch (Exception ex)
         {
@@ -719,8 +744,9 @@ public static class Win32
             else
                 SetClassLong32(hwnd, GCLP_HBRBACKGROUND, 0);
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.LogException("[Win32] DisableWindowClassBackgroundBrush failed", ex);
         }
     }
 
@@ -1070,8 +1096,9 @@ public static class Win32
                 return val == 0;
             }
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.LogException("[Win32] IsSystemInDarkMode failed", ex);
         }
         return true;
     }

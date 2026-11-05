@@ -143,6 +143,17 @@ public partial class NotificationWindow : Window
         });
     }
 
+    protected override void OnClosed(EventArgs e)
+    {
+        _autoDismissTimer.Stop();
+        _countdownStoryboard?.Stop(this);
+        if (ReferenceEquals(s_current, this))
+        {
+            s_current = null;
+        }
+        base.OnClosed(e);
+    }
+
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);

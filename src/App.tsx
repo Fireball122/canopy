@@ -241,7 +241,7 @@ const CanopyShellContent: React.FC = () => {
       .then((apps) => {
         if (mounted && Array.isArray(apps)) setInstalledApps(apps);
       })
-      .catch(() => {});
+      .catch((error: unknown) => console.warn('Installed apps failed to load:', error));
     return () => {
       mounted = false;
     };
@@ -264,7 +264,8 @@ const CanopyShellContent: React.FC = () => {
           // 25 Hz re-render while nothing is playing.
           setSpectrumBands((prev) => (samePayload(prev, bands) ? prev : bands));
         }
-      } catch {
+      } catch (error) {
+        console.warn('Spectrum poll failed:', error);
       } finally {
         spectrumInFlightRef.current = false;
       }
@@ -287,10 +288,10 @@ const CanopyShellContent: React.FC = () => {
   useEffect(() => {
     void getCaffeineStatus()
       .then((s) => setCaffeineActive(s.enabled))
-      .catch(() => undefined);
+      .catch((error: unknown) => console.warn('Caffeine status failed to load:', error));
     void getDndStatus()
       .then((s) => setDndActive(s.enabled))
-      .catch(() => undefined);
+      .catch((error: unknown) => console.warn('DND status failed to load:', error));
   }, []);
 
   // Theme changes pushed by the host (`canopy:theme-changed`) are owned by SettingsProvider.
@@ -462,7 +463,7 @@ const CanopyShellContent: React.FC = () => {
           );
         }
       })
-      .catch(() => undefined);
+      .catch((error: unknown) => console.warn('Desktop thumbnail failed to load:', error));
     return () => {
       active = false;
     };
@@ -484,7 +485,7 @@ const CanopyShellContent: React.FC = () => {
     const w = Math.round(850 * scale);
     const h = Math.round(430 * scale);
     if (w !== 850 || h !== 430) {
-      setWindowSize(w, h).catch(() => {});
+      setWindowSize(w, h).catch((error: unknown) => console.warn('Window resize failed:', error));
     }
   }, [settings.appScale]);
 
@@ -523,7 +524,9 @@ const CanopyShellContent: React.FC = () => {
 
   // Sync topHoverTrigger setting to native host
   useEffect(() => {
-    setTopHoverTrigger(settings.topHoverTrigger).catch(() => {});
+    setTopHoverTrigger(settings.topHoverTrigger).catch((error: unknown) =>
+      console.warn('Top hover trigger sync failed:', error),
+    );
   }, [settings.topHoverTrigger]);
 
   // 1s clock ticker — runs only while the panel is expanded and the document is visible.
@@ -799,8 +802,8 @@ const CanopyShellContent: React.FC = () => {
         if (!active) return;
         setMicVolume(Math.max(0, Math.min(100, Math.round(state.volume))));
         setMicMuted(Boolean(state.muted));
-      } catch {
-        // Keep current microphone snapshot
+      } catch (error) {
+        console.warn('Microphone state failed to load:', error);
       }
     })();
     return () => {
@@ -814,20 +817,29 @@ const CanopyShellContent: React.FC = () => {
       setMicVolume(clamped);
       if (clamped > 0 && micMuted) {
         setMicMuted(false);
-        writeMicMute(false).catch(() => {});
+        writeMicMute(false).catch((error: unknown) => {
+          console.warn('Microphone unmute failed:', error);
+          handleToastNotification("Canopy couldn't unmute the microphone.");
+        });
       }
-      writeMicVolume(clamped).catch(() => {});
+      writeMicVolume(clamped).catch((error: unknown) => {
+        console.warn('Microphone volume failed:', error);
+        handleToastNotification("Canopy couldn't set the microphone volume.");
+      });
     },
-    [micMuted],
+    [micMuted, handleToastNotification],
   );
 
   const handleMicMuteToggle = useCallback(() => {
     setMicMuted((prev) => {
       const next = !prev;
-      writeMicMute(next).catch(() => {});
+      writeMicMute(next).catch((error: unknown) => {
+        console.warn('Microphone mute failed:', error);
+        handleToastNotification("Canopy couldn't change the microphone mute.");
+      });
       return next;
     });
-  }, []);
+  }, [handleToastNotification]);
 
   // Host-pushed volume / microphone changes keep the sliders in sync without polling.
   useEffect(() => {
@@ -916,8 +928,8 @@ const CanopyShellContent: React.FC = () => {
         const status = await getBatteryStatus();
         if (!active) return;
         setBattery((prev) => (samePayload(prev, status) ? prev : status));
-      } catch {
-        // Keep current battery snapshot
+      } catch (error) {
+        console.warn('Battery status failed to load:', error);
       }
     })();
 
@@ -987,7 +999,10 @@ const CanopyShellContent: React.FC = () => {
                 void refreshWallpapersList();
               }
             })
-            .catch(() => {});
+            .catch((error: unknown) => {
+              console.warn('Wallpaper folder pick failed:', error);
+              handleToastNotification("Canopy couldn't open the wallpaper folder picker.");
+            });
         },
       },
       {
@@ -1027,7 +1042,7 @@ const CanopyShellContent: React.FC = () => {
         },
       })),
     ];
-  }, [visibleTabs, installedApps, refreshWallpapersList]);
+  }, [visibleTabs, installedApps, refreshWallpapersList, handleToastNotification]);
 
   // Master Volume handler
   const handleVolumeChange = useCallback(async (newVol: number) => {
@@ -1613,6 +1628,7 @@ const CanopyShellContent: React.FC = () => {
                   }
                 }}
                 statusText={wallpaperStatus}
+                onToastNotification={handleToastNotification}
               />
             </ErrorBoundary>
           )}

@@ -19,7 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import type React from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSettings } from '../context/SettingsContext';
 import {
   getInstalledApps,
@@ -138,6 +138,24 @@ export const AppsView: React.FC<AppsViewProps> = ({
   const [launchedId, setLaunchedId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [failedIconIds, setFailedIconIds] = useState<Record<string, boolean>>({});
+  // Launch-feedback timers, tracked so they are cleared when the view unmounts.
+  const pendingTimersRef = useRef<Set<number>>(new Set());
+  const scheduleTimer = (callback: () => void, delayMs: number) => {
+    const id = window.setTimeout(() => {
+      pendingTimersRef.current.delete(id);
+      callback();
+    }, delayMs);
+    pendingTimersRef.current.add(id);
+  };
+  useEffect(() => {
+    const pending = pendingTimersRef.current;
+    return () => {
+      for (const id of pending) {
+        window.clearTimeout(id);
+      }
+      pending.clear();
+    };
+  }, []);
   const loadApps = async (force = true) => {
     setLoading(true);
     try {
@@ -241,19 +259,19 @@ export const AppsView: React.FC<AppsViewProps> = ({
         setLaunchedId(app.id);
         setStatusMessage(`Launched ${app.name}`);
         onAppLaunched?.();
-        window.setTimeout(() => {
+        scheduleTimer(() => {
           setLaunchedId((prev) => (prev === app.id ? null : prev));
         }, 1800);
-        window.setTimeout(() => {
+        scheduleTimer(() => {
           setStatusMessage((prev) => (prev === `Launched ${app.name}` ? null : prev));
         }, 2800);
       } else {
         setStatusMessage(`Could not launch ${app.name}`);
-        window.setTimeout(() => setStatusMessage(null), 3000);
+        scheduleTimer(() => setStatusMessage(null), 3000);
       }
     } catch {
       setStatusMessage(`Failed to start ${app.name}`);
-      window.setTimeout(() => setStatusMessage(null), 3000);
+      scheduleTimer(() => setStatusMessage(null), 3000);
     } finally {
       setLaunchingId(null);
     }

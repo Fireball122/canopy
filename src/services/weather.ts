@@ -228,7 +228,9 @@ async function resolveIpGeolocation(): Promise<CachedGeoLocation | null> {
         };
         try {
           window.localStorage.setItem('canopy_last_known_geo', JSON.stringify(cachedIpGeo));
-        } catch {}
+        } catch (error) {
+          console.warn('[weather] failed to persist canopy_last_known_geo (primary):', error);
+        }
         return cachedIpGeo;
       }
     }
@@ -272,7 +274,9 @@ async function resolveIpGeolocation(): Promise<CachedGeoLocation | null> {
         };
         try {
           window.localStorage.setItem('canopy_last_known_geo', JSON.stringify(cachedIpGeo));
-        } catch {}
+        } catch (error) {
+          console.warn('[weather] failed to persist canopy_last_known_geo (fallback):', error);
+        }
         return cachedIpGeo;
       }
     }

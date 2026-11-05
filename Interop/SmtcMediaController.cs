@@ -40,6 +40,26 @@ public sealed class SmtcMediaController : IDisposable
         _manager = null;
     }
 
+    private static readonly TimeSpan PollFailureLogInterval = TimeSpan.FromMinutes(1);
+    private static readonly Dictionary<string, DateTime> s_pollFailureLastLoggedUtc = new();
+
+    // Poll-path failures repeat every poll (~1 s) while a session stays bad; log each message at most once per interval.
+    private static void LogPollFailure(string message, Exception ex)
+    {
+        DateTime now = DateTime.UtcNow;
+        lock (s_pollFailureLastLoggedUtc)
+        {
+            if (s_pollFailureLastLoggedUtc.TryGetValue(message, out DateTime last) && now - last < PollFailureLogInterval)
+            {
+                return;
+            }
+
+            s_pollFailureLastLoggedUtc[message] = now;
+        }
+
+        DiagnosticsLog.LogException(message, ex);
+    }
+
     private GlobalSystemMediaTransportControlsSessionManager? _manager;
     private string? _selectedSessionId;
     private string? _lastArtworkKey;
@@ -60,8 +80,9 @@ public sealed class SmtcMediaController : IDisposable
             _manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
             return _manager;
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.LogException("[SmtcMediaController] RequestAsync failed", ex);
             return null;
         }
     }
@@ -157,13 +178,15 @@ public sealed class SmtcMediaController : IDisposable
                         is_playing: playing,
                         is_current: isSelected));
                 }
-                catch
+                catch (Exception ex)
                 {
+                    LogPollFailure("[SmtcMediaController] GetSessionsAsync: session skipped", ex);
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
+            LogPollFailure("[SmtcMediaController] GetSessionsAsync failed", ex);
         }
 
         return list;
@@ -214,8 +237,9 @@ public sealed class SmtcMediaController : IDisposable
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
+            LogPollFailure("[SmtcMediaController] ResolveTargetSession failed", ex);
         }
 
         return null;
@@ -261,8 +285,9 @@ public sealed class SmtcMediaController : IDisposable
                     anchorAgeSecs = ResolveAnchorAgeSecs(timeline.LastUpdatedTime, isPlaying, DateTimeOffset.UtcNow);
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                LogPollFailure("[SmtcMediaController] timeline read failed", ex);
             }
 
             double playbackRate = playback?.PlaybackRate ?? 1.0;
@@ -281,8 +306,9 @@ public sealed class SmtcMediaController : IDisposable
 
             return new SmtcMediaSnapshot(title, artist, album, isPlaying, positionSecs, durationSecs, artworkUrl, sourceApp, sessions, isShuffle, repeatMode, anchorAgeSecs, playbackRate);
         }
-        catch
+        catch (Exception ex)
         {
+            LogPollFailure("[SmtcMediaController] GetMediaInfoAsync failed", ex);
             return new SmtcMediaSnapshot("No media", "Idle", string.Empty, false, 0.0, 1.0, null, "System Audio", [], false, 0);
         }
     }
@@ -352,8 +378,9 @@ public sealed class SmtcMediaController : IDisposable
                 return await task.ConfigureAwait(false);
             }
         }
-        catch
+        catch (Exception ex)
         {
+            LogPollFailure("[SmtcMediaController] media properties read failed", ex);
         }
         return null;
     }
@@ -368,7 +395,13 @@ public sealed class SmtcMediaController : IDisposable
             var openTask = thumbRef.OpenReadAsync().AsTask();
             var completed = await Task.WhenAny(openTask, Task.Delay(500)).ConfigureAwait(false);
             if (completed != openTask)
+            {
+                // The open is still in flight; dispose the stream when it lands so it is not leaked.
+                _ = openTask.ContinueWith(
+                    static t => { if (t.Status == TaskStatus.RanToCompletion) t.Result.Dispose(); },
+                    CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
                 return null;
+            }
 
             using IRandomAccessStreamWithContentType stream = await openTask.ConfigureAwait(false);
             if (stream.Size == 0 || stream.Size > 2_000_000)
@@ -388,8 +421,9 @@ public sealed class SmtcMediaController : IDisposable
             string mime = string.IsNullOrWhiteSpace(stream.ContentType) ? "image/png" : stream.ContentType;
             return $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
         }
-        catch
+        catch (Exception ex)
         {
+            LogPollFailure("[SmtcMediaController] thumbnail read failed", ex);
             return null;
         }
     }
@@ -432,8 +466,9 @@ public sealed class SmtcMediaController : IDisposable
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                DiagnosticsLog.LogException("[SmtcMediaController] PlayPause failed", ex);
             }
 
             // Fallback to native Windows virtual media key VK_MEDIA_PLAY_PAUSE (0xB3)
@@ -473,8 +508,9 @@ public sealed class SmtcMediaController : IDisposable
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                DiagnosticsLog.LogException("[SmtcMediaController] Next failed", ex);
             }
 
             // Fallback to native Windows virtual media key VK_MEDIA_NEXT_TRACK (0xB0)
@@ -514,8 +550,9 @@ public sealed class SmtcMediaController : IDisposable
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                DiagnosticsLog.LogException("[SmtcMediaController] Previous failed", ex);
             }
 
             // Fallback to native Windows virtual media key VK_MEDIA_PREV_TRACK (0xB1)
@@ -533,12 +570,15 @@ public sealed class SmtcMediaController : IDisposable
                 var session = manager is not null ? ResolveTargetSession(manager) : null;
                 if (session is not null)
                 {
-                    long ticks = TimeSpan.FromSeconds(Math.Max(0.0, positionSeconds)).Ticks;
+                    if (!double.IsFinite(positionSeconds))
+                        return;
+                    long ticks = TimeSpan.FromSeconds(Math.Clamp(positionSeconds, 0.0, long.MaxValue / TimeSpan.TicksPerSecond)).Ticks;
                     _ = await session.TryChangePlaybackPositionAsync(ticks);
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                DiagnosticsLog.LogException("[SmtcMediaController] Seek failed", ex);
             }
         });
     }
@@ -557,8 +597,9 @@ public sealed class SmtcMediaController : IDisposable
                 if (ok) return next;
             }
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticsLog.LogException("[SmtcMediaController] ToggleShuffle failed", ex);
         }
         return null;
     }

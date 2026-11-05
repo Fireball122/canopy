@@ -132,34 +132,20 @@ public sealed class SystemMonitorService : IDisposable
 
     private void InitializePerformanceCounters()
     {
+        PerformanceCounter? cpu = null;
+        var cores = new List<PerformanceCounter>();
         try
         {
-            var cpu = new PerformanceCounter("Processor", "% Processor Time", "_Total", true);
+            cpu = new PerformanceCounter("Processor", "% Processor Time", "_Total", true);
             _ = cpu.NextValue();
 
             int coreCount = Math.Max(1, Environment.ProcessorCount);
-            var cores = new List<PerformanceCounter>(coreCount);
             for (int i = 0; i < coreCount; i++)
             {
-                try
-                {
-                    var coreCounter = new PerformanceCounter("Processor", "% Processor Time", i.ToString(), true);
-                    _ = coreCounter.NextValue();
-                    cores.Add(coreCounter);
-                }
-                catch
-                {
-                    try
-                    {
-                        var coreCounter = new PerformanceCounter("Processor Information", "% Processor Time", $"0,{i}", true);
-                        _ = coreCounter.NextValue();
-                        cores.Add(coreCounter);
-                    }
-                    catch
-                    {
-                        break;
-                    }
-                }
+                PerformanceCounter? core = TryOpenCoreCounter(i);
+                if (core is null)
+                    break;
+                cores.Add(core);
             }
 
             lock (_sampleGate)
@@ -181,6 +167,43 @@ public sealed class SystemMonitorService : IDisposable
         {
             Log.WriteException(nameof(InitializePerformanceCounters), ex);
             _countersReady = false;
+            // Only reached before the counters are published under the gate, so nothing else owns them.
+            cpu?.Dispose();
+            foreach (var c in cores) c.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Opens one per-core counter, trying the Processor instance name then the Processor Information
+    /// name. Each failed attempt disposes its own counter; returns null when neither opens.
+    /// </summary>
+    private static PerformanceCounter? TryOpenCoreCounter(int index)
+    {
+        PerformanceCounter? counter = null;
+        try
+        {
+            counter = new PerformanceCounter("Processor", "% Processor Time", index.ToString(), true);
+            _ = counter.NextValue();
+            return counter;
+        }
+        catch (Exception ex)
+        {
+            Log.WriteException(nameof(TryOpenCoreCounter), ex);
+            counter?.Dispose();
+        }
+
+        PerformanceCounter? fallback = null;
+        try
+        {
+            fallback = new PerformanceCounter("Processor Information", "% Processor Time", $"0,{index}", true);
+            _ = fallback.NextValue();
+            return fallback;
+        }
+        catch (Exception ex)
+        {
+            Log.WriteException(nameof(TryOpenCoreCounter), ex);
+            fallback?.Dispose();
+            return null;
         }
     }
 
@@ -422,8 +445,9 @@ public sealed class SystemMonitorService : IDisposable
                         }
                         _processCpuHistory[p.Id] = (totalTime, nowTick);
                     }
-                    catch
+                    catch (Exception ex)
                     {
+                        Log.WriteException("ProcessCpuTime", ex);
                         cpuPercent = 0.0;
                     }
 
@@ -445,11 +469,12 @@ public sealed class SystemMonitorService : IDisposable
                 foreach (var pid in stale) _processCpuHistory.Remove(pid);
             }
 
-            _cachedTopProcesses = top
+            var topProcesses = top
                 .OrderByDescending(x => x.cpu_usage)
                 .ThenByDescending(x => x.memory_mb)
                 .Take(5)
                 .ToList();
+            lock (_sampleGate) _cachedTopProcesses = topProcesses;
         }
         catch (Exception ex)
         {
@@ -471,7 +496,7 @@ public sealed class SystemMonitorService : IDisposable
                         double celsius = (kelvinTenths / 10.0) - 273.15;
                         if (celsius is > 15.0 and < 115.0)
                         {
-                            _cachedCpuTempC = celsius;
+                            lock (_sampleGate) _cachedCpuTempC = celsius;
                             foundTemp = true;
                             _wmiThermalFailures = 0;
                             break;
@@ -481,7 +506,7 @@ public sealed class SystemMonitorService : IDisposable
                 if (!foundTemp)
                 {
                     _wmiThermalFailures++;
-                    _cachedCpuTempC = null;
+                    lock (_sampleGate) _cachedCpuTempC = null;
                 }
             }
             catch (Exception ex)
@@ -489,7 +514,7 @@ public sealed class SystemMonitorService : IDisposable
                 // Usually access denied (the class needs elevation); gives up after three attempts.
                 Log.WriteException("ThermalZoneQuery", ex);
                 _wmiThermalFailures++;
-                _cachedCpuTempC = null;
+                lock (_sampleGate) _cachedCpuTempC = null;
             }
         }
         RefreshGpuTelemetry();
@@ -512,12 +537,13 @@ public sealed class SystemMonitorService : IDisposable
         EnsureHardwareNames();
 
         // NVML is the only non-spawning source of GPU temperature; null when no NVIDIA driver is present.
-        _cachedGpuTempC = NvmlGpu.TryReadTemperatureCelsius();
+        double? gpuTemp = NvmlGpu.TryReadTemperatureCelsius();
+        lock (_sampleGate) _cachedGpuTempC = gpuTemp;
 
         double? nvmlUsage = NvmlGpu.TryReadUtilizationPercent();
         if (nvmlUsage.HasValue)
         {
-            _cachedGpuUsage = Math.Clamp(Math.Round(nvmlUsage.Value, 1), 0.0, 100.0);
+            lock (_sampleGate) _cachedGpuUsage = Math.Clamp(Math.Round(nvmlUsage.Value, 1), 0.0, 100.0);
             return;
         }
 
@@ -547,7 +573,7 @@ public sealed class SystemMonitorService : IDisposable
             }
             if (count > 0)
             {
-                _cachedGpuUsage = Math.Clamp(Math.Round(sum, 1), 0.0, 100.0);
+                lock (_sampleGate) _cachedGpuUsage = Math.Clamp(Math.Round(sum, 1), 0.0, 100.0);
                 _gpuWmiFailures = 0;
             }
             else
@@ -609,7 +635,7 @@ public sealed class SystemMonitorService : IDisposable
             _gpuPerfFailures = 0;
             if (hasBaseline)
             {
-                _cachedGpuUsage = Math.Clamp(Math.Round(total, 1), 0.0, 100.0);
+                lock (_sampleGate) _cachedGpuUsage = Math.Clamp(Math.Round(total, 1), 0.0, 100.0);
             }
             return true;
         }
@@ -690,8 +716,9 @@ public sealed class SystemMonitorService : IDisposable
                 @"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice");
             return key?.GetValue("ProgId")?.ToString() ?? string.Empty;
         }
-        catch
+        catch (Exception ex)
         {
+            Log.WriteException(nameof(GetDefaultBrowserProgId), ex);
             return string.Empty;
         }
     }
@@ -949,8 +976,9 @@ public sealed class SystemMonitorService : IDisposable
             encoder.Save(ms);
             return $"data:image/png;base64,{Convert.ToBase64String(ms.ToArray())}";
         }
-        catch
+        catch (Exception ex)
         {
+            Log.WriteException(nameof(TryExtractIconDataUrl), ex);
             return null;
         }
         finally
@@ -976,8 +1004,9 @@ public sealed class SystemMonitorService : IDisposable
             });
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            Log.WriteException(nameof(LaunchApp), ex);
             return false;
         }
     }
@@ -1077,7 +1106,7 @@ public sealed class SystemMonitorService : IDisposable
                 return _staticCpuName;
             }
         }
-        catch (Exception ex) { _ = ex; /* CPU name registry read failed; fallback string used */ }
+        catch (Exception ex) { Log.WriteException(nameof(GetFastCpuName), ex); }
         return "AMD/Intel x64 Processor";
     }
 
@@ -1114,7 +1143,7 @@ public sealed class SystemMonitorService : IDisposable
                     }
                 }
             }
-            catch (Exception ex) { _ = ex; /* nvidia-smi GPU name query failed; fall through to WMI registry */ }
+            catch (Exception ex) { Log.WriteException(nameof(GetFastGpuName), ex); }
         }
 
         try
@@ -1139,7 +1168,7 @@ public sealed class SystemMonitorService : IDisposable
                 }
             }
         }
-        catch (Exception ex) { _ = ex; /* WMI registry GPU name walk failed; fallback string used */ }
+        catch (Exception ex) { Log.WriteException(nameof(GetFastGpuName), ex); }
 
         return "DirectX 3D Video Controller";
     }

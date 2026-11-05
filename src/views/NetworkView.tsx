@@ -24,7 +24,7 @@ import {
   Zap,
 } from 'lucide-react';
 import type React from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   addAndConnectWifi,
   connectBluetoothDevice,
@@ -184,6 +184,25 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
     }
   }, []);
 
+  // Timers scheduled from handlers; cleared on unmount so no callback fires after teardown.
+  const timersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  const scheduleTimeout = useCallback((fn: () => void, ms: number) => {
+    const id = setTimeout(() => {
+      timersRef.current.delete(id);
+      fn();
+    }, ms);
+    timersRef.current.add(id);
+  }, []);
+  useEffect(() => {
+    const timers = timersRef.current;
+    return () => {
+      timers.forEach((id) => {
+        clearTimeout(id);
+      });
+      timers.clear();
+    };
+  }, []);
+
   useEffect(() => {
     void refreshAll();
   }, [refreshAll]);
@@ -212,7 +231,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
         onToastNotification?.(`Could not turn Wi-Fi ${next ? 'on' : 'off'}`);
         return;
       }
-      setTimeout(() => void refreshAll(), 1000);
+      scheduleTimeout(() => void refreshAll(), 1000);
       onToastNotification?.(next ? 'Wi-Fi radio enabled' : 'Wi-Fi radio disabled');
     } catch {
       setWifiEnabled(!next);
@@ -229,7 +248,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
         onToastNotification?.(`Could not turn Bluetooth ${next ? 'on' : 'off'}`);
         return;
       }
-      setTimeout(() => void refreshAll(), 1000);
+      scheduleTimeout(() => void refreshAll(), 1000);
       onToastNotification?.(next ? 'Bluetooth radio enabled' : 'Bluetooth radio disabled');
     } catch {
       setBluetoothEnabled(!next);
@@ -242,7 +261,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
     try {
       await disconnectWifi();
       onToastNotification?.('Disconnected from Wi-Fi network');
-      setTimeout(() => {
+      scheduleTimeout(() => {
         void refreshAll();
         setIsActionInProgress(false);
       }, 1200);
@@ -262,7 +281,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
         onToastNotification?.(`Could not connect to ${ssid}`);
         return;
       }
-      setTimeout(() => {
+      scheduleTimeout(() => {
         // Report what Windows actually did instead of assuming the join succeeded.
         void refreshAll()
           .then((wf) => {
@@ -309,7 +328,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
         setShowAddWifiForm(false);
         setNewWifiSsid('');
         setNewWifiPassword('');
-        setTimeout(() => void refreshAll(), 1500);
+        scheduleTimeout(() => void refreshAll(), 1500);
       } else {
         setWifiFormError(res.message || 'Connection failed');
       }
@@ -330,9 +349,11 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
       onToastNotification?.(
         res.enabled ? `Mobile Hotspot active (${name})` : 'Mobile Hotspot stopped',
       );
-      setTimeout(() => void refreshAll(), 1500);
-    } catch {
-      // Ignore
+      scheduleTimeout(() => void refreshAll(), 1500);
+    } catch (err) {
+      onToastNotification?.(
+        `Hotspot toggle failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       setIsActionInProgress(false);
     }
@@ -355,7 +376,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
       if (res.success) {
         setHotspotMsg('Saved successfully!');
         onToastNotification?.(`Hotspot renamed to "${cleanSsid}"`);
-        setTimeout(() => {
+        scheduleTimeout(() => {
           setHotspotModalOpen(false);
           setHotspotMsg(null);
           void refreshAll();
@@ -381,9 +402,11 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
           ? 'Switched to Windows Power Saver plan'
           : 'Restored Windows High Performance plan',
       );
-      setTimeout(() => void refreshAll(), 1000);
-    } catch {
-      // Ignore
+      scheduleTimeout(() => void refreshAll(), 1000);
+    } catch (err) {
+      onToastNotification?.(
+        `Power plan change failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       setIsActionInProgress(false);
     }
@@ -400,7 +423,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
     onToastNotification?.(`Connecting to ${name}...`);
     try {
       await connectBluetoothDevice(id);
-      setTimeout(() => {
+      scheduleTimeout(() => {
         void refreshAll();
         setIsActionInProgress(false);
       }, 1500);
@@ -415,7 +438,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
     onToastNotification?.(`Disconnecting ${name}...`);
     try {
       await disconnectBluetoothDevice(id);
-      setTimeout(() => {
+      scheduleTimeout(() => {
         void refreshAll();
         setIsActionInProgress(false);
       }, 1200);
@@ -430,7 +453,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
       .then(() => {
         setCopiedIp(true);
         onToastNotification?.(`Copied IP: ${ip}`);
-        setTimeout(() => setCopiedIp(false), 2000);
+        scheduleTimeout(() => setCopiedIp(false), 2000);
       })
       .catch(() => onToastNotification?.('Could not copy IP address'));
   };

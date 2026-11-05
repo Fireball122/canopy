@@ -262,9 +262,12 @@ function applyThemeVariables(
   root.style.setProperty('--theme-on-accent', onAccent);
 
   try {
-    setHostConfig({ themeAccent: activeVars.accent, themeBg: activeVars.bg }).catch(() => {});
-  } catch {
+    setHostConfig({ themeAccent: activeVars.accent, themeBg: activeVars.bg }).catch((error) => {
+      console.warn('[palette] setHostConfig failed:', error);
+    });
+  } catch (error) {
     // Non-fatal if host bridge is not ready
+    console.warn('[palette] setHostConfig threw synchronously:', error);
   }
 }
 

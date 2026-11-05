@@ -430,11 +430,11 @@ export async function getSystemStats(): Promise<SystemStats> {
   return {
     cpu_usage: finiteOr(raw.cpu_usage, 0),
     cpu_temp_c: typeof raw.cpu_temp_c === 'number' && raw.cpu_temp_c > 0 ? raw.cpu_temp_c : null,
-    cpu_name: raw.cpu_name ?? 'CPU',
+    cpu_name: stringOr(raw.cpu_name, 'CPU'),
     gpu_usage: gpuUsage,
     gpu_temp_c:
       typeof raw.gpu_temp_c === 'number' && Number.isFinite(raw.gpu_temp_c) ? raw.gpu_temp_c : null,
-    gpu_name: raw.gpu_name ?? (gpuUsage !== null ? 'GPU' : null),
+    gpu_name: typeof raw.gpu_name === 'string' ? raw.gpu_name : gpuUsage !== null ? 'GPU' : null,
     core_usages: Array.isArray(raw.core_usages) ? raw.core_usages : [],
     top_processes: Array.isArray(raw.top_processes) ? raw.top_processes : [],
     net_down_kbps: finiteOr(raw.net_down_kbps, 0),
@@ -514,17 +514,14 @@ export async function selectMediaSession(sessionId: string): Promise<void> {
       t.id.toLowerCase() === sessionId.toLowerCase() ||
       t.source_app.toLowerCase() === sessionId.toLowerCase(),
   );
-  if (idx >= 0) {
-    fallbackTrackIndex = idx;
-    fallbackIsPlaying = true;
-    fallbackPausedElapsedSecs = 0;
-    fallbackTrackStartMs = Date.now();
-  }
-  await invokeBridge<unknown>(
-    'select_media_session',
-    { sessionId, session_id: sessionId },
-    () => undefined,
-  );
+  await invokeBridge<unknown>('select_media_session', { sessionId, session_id: sessionId }, () => {
+    if (idx >= 0) {
+      fallbackTrackIndex = idx;
+      fallbackIsPlaying = true;
+      fallbackPausedElapsedSecs = 0;
+      fallbackTrackStartMs = Date.now();
+    }
+  });
 }
 
 export async function mediaPlayPause(): Promise<void> {
@@ -558,9 +555,10 @@ export async function mediaPrev(): Promise<void> {
 }
 export async function mediaSeek(seconds: number): Promise<void> {
   const clamped = Math.max(0, Math.round(seconds));
-  fallbackPausedElapsedSecs = clamped;
-  fallbackTrackStartMs = Date.now() - clamped * 1000;
-  await invokeBridge<unknown>('media_seek', { seconds: clamped }, () => undefined);
+  await invokeBridge<unknown>('media_seek', { seconds: clamped }, () => {
+    fallbackPausedElapsedSecs = clamped;
+    fallbackTrackStartMs = Date.now() - clamped * 1000;
+  });
 }
 
 export async function mediaToggleShuffle(): Promise<boolean | null> {
@@ -1043,18 +1041,39 @@ export interface UpdateCheckResult {
   releaseNotes?: string;
 }
 
+interface GitHubReleaseAsset {
+  name?: unknown;
+  browser_download_url?: unknown;
+}
+
+interface GitHubReleaseResponse {
+  tag_name?: unknown;
+  assets?: unknown;
+  html_url?: unknown;
+  body?: unknown;
+}
+
+const UPDATE_CHECK_TIMEOUT_MS = 10_000;
+
 export async function checkForUpdates(
   currentVersion: string = CANOPY_VERSION,
 ): Promise<UpdateCheckResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), UPDATE_CHECK_TIMEOUT_MS);
   try {
     const res = await fetch('https://api.github.com/repos/Fireball122/canopy/releases/latest', {
       headers: {
         Accept: 'application/vnd.github.v3+json',
       },
+      signal: controller.signal,
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    const tagName = (data.tag_name || '').replace(/^v/i, '').trim();
+    const payload: unknown = await res.json();
+    if (typeof payload !== 'object' || payload === null) {
+      throw new Error('Unexpected release payload');
+    }
+    const data = payload as GitHubReleaseResponse;
+    const tagName = stringOr(data.tag_name, '').replace(/^v/i, '').trim();
     const cleanCurrent = currentVersion.replace(/^v/i, '').trim();
 
     // Semantic version compare: latest > current
@@ -1076,13 +1095,13 @@ export async function checkForUpdates(
 
     let downloadUrl: string | undefined;
     if (Array.isArray(data.assets)) {
-      const exeAsset = data.assets.find(
-        (a: { name?: string; browser_download_url?: string }) =>
+      const exeAsset = (data.assets as GitHubReleaseAsset[]).find(
+        (a) =>
           typeof a.name === 'string' &&
           a.name.endsWith('.exe') &&
           !a.name.toLowerCase().includes('portable'),
       );
-      if (exeAsset) {
+      if (exeAsset && typeof exeAsset.browser_download_url === 'string') {
         downloadUrl = exeAsset.browser_download_url;
       }
     }
@@ -1092,15 +1111,18 @@ export async function checkForUpdates(
       latestVersion: tagName,
       updateAvailable: isNewer,
       downloadUrl,
-      releaseUrl: data.html_url,
-      releaseNotes: data.body,
+      releaseUrl: typeof data.html_url === 'string' ? data.html_url : undefined,
+      releaseNotes: typeof data.body === 'string' ? data.body : undefined,
     };
-  } catch {
+  } catch (error) {
+    console.warn('[hostBridge] Update check failed; reporting no update:', error);
     return {
       currentVersion,
       latestVersion: currentVersion,
       updateAvailable: false,
     };
+  } finally {
+    clearTimeout(timer);
   }
 }
 

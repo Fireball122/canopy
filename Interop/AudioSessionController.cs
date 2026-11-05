@@ -94,6 +94,7 @@ public sealed class AudioSessionController : IDisposable
 
         lock (_lock)
         {
+            LastError = null;
             IAudioSessionManager2? manager = null;
             IAudioSessionEnumerator? enumerator = null;
             try
@@ -182,12 +183,12 @@ public sealed class AudioSessionController : IDisposable
             }
             finally
             {
+                LastSessionCount = results.Count;
                 ReleaseCom(enumerator);
                 ReleaseCom(manager);
             }
         }
 
-        LastSessionCount = results.Count;
         results.Sort((a, b) => string.CompareOrdinal(a.Name, b.Name));
         return results;
     }
@@ -534,6 +535,11 @@ public sealed class AudioSessionController : IDisposable
                 s_iconCache[exePath] = dataUrl;
             }
             return dataUrl;
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 5)
+        {
+            // ERROR_ACCESS_DENIED: protected or elevated process. Hit on every poll, so not logged.
+            return null;
         }
         catch (Exception ex)
         {

@@ -196,7 +196,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       .then((devs) => {
         if (Array.isArray(devs)) setAudioOutputs(devs);
       })
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        console.warn('Failed to list audio output devices:', error);
+      });
   }, [sessionDropdownOpen]);
 
   const handleSelectAudioDevice = async (dev: AudioDeviceInfo) => {

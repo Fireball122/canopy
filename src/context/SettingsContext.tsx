@@ -222,8 +222,8 @@ function clearPersistentActiveTabState(): void {
     for (const key of LEGACY_TAB_KEYS) {
       window.localStorage.removeItem(key);
     }
-  } catch {
-    // Ignore storage errors
+  } catch (error) {
+    console.warn('Failed to clear legacy active-tab keys:', error);
   }
 }
 
@@ -330,9 +330,15 @@ function loadStoredSettings(): CanopySettings {
       ...DEFAULT_SETTINGS,
       ...sanitizeSettings(JSON.parse(raw)),
     };
-  } catch {
+  } catch (error) {
+    console.warn('Stored settings are corrupt; using defaults:', error);
     return { ...DEFAULT_SETTINGS };
   }
+}
+
+/** Failed settings.json writes already raise a `canopy:bridge-error` toast; this logs them too. */
+function logSettingsSaveFailure(error: unknown): void {
+  console.error('Failed to save settings.json:', error);
 }
 
 const SettingsContext = createContext<SettingsContextValue>({
@@ -367,8 +373,8 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           // The settings effect below persists the merged result once hydration flips.
           setSettings((prev) => ({ ...prev, ...hostSettings, ...pending }));
         }
-      } catch {
-        // Unreadable host file (first run, permissions): keep the localStorage copy.
+      } catch (error) {
+        console.warn('Failed to read host settings.json; keeping localStorage copy:', error);
       } finally {
         if (active) setHydratedFromHost(true);
       }
@@ -439,14 +445,16 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (typeof window !== 'undefined') {
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
       }
-    } catch {
-      // Ignore storage quota errors
+    } catch (error) {
+      console.warn('Failed to persist settings to localStorage:', error);
     }
     if (!hydratedFromHost) return;
     pendingSaveRef.current = settings;
     const timer = window.setTimeout(() => {
       pendingSaveRef.current = null;
-      void saveSettingsJson(settings as unknown as Record<string, unknown>).catch(() => undefined);
+      void saveSettingsJson(settings as unknown as Record<string, unknown>).catch(
+        logSettingsSaveFailure,
+      );
     }, 250);
     return () => window.clearTimeout(timer);
   }, [settings, hydratedFromHost]);
@@ -458,7 +466,9 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const pending = pendingSaveRef.current;
       if (!pending) return;
       pendingSaveRef.current = null;
-      void saveSettingsJson(pending as unknown as Record<string, unknown>).catch(() => undefined);
+      void saveSettingsJson(pending as unknown as Record<string, unknown>).catch(
+        logSettingsSaveFailure,
+      );
     };
     window.addEventListener('pagehide', flushPendingSave);
     return () => window.removeEventListener('pagehide', flushPendingSave);
@@ -489,7 +499,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       showPanelOnLaunch: settings.showPanelOnLaunch,
       hotkey: settings.globalHotkey,
       diagnosticLogging: settings.diagnosticLogging,
-    }).catch(() => undefined);
+    }).catch((error: unknown) => console.error('Failed to push host config:', error));
   }, [
     settings.triggerWidth,
     settings.triggerHeight,
@@ -534,14 +544,6 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         } else if (partial.searchPosition) {
           next.batteryPosition = partial.searchPosition === 'left' ? 'right' : 'left';
         }
-        applyGlassCssVariables(next.glassBlurStrength, next.glassOpacity);
-        try {
-          if (typeof window !== 'undefined') {
-            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-          }
-        } catch {
-          // Ignore storage errors
-        }
         return next;
       });
     },
@@ -557,11 +559,11 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         clearPersistentActiveTabState();
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(fresh));
       }
-    } catch {
-      // Ignore storage errors
+    } catch (error) {
+      console.warn('Failed to store reset settings in localStorage:', error);
     }
     void saveSettingsJson(DEFAULT_SETTINGS as unknown as Record<string, unknown>).catch(
-      () => undefined,
+      logSettingsSaveFailure,
     );
   }, []);
 

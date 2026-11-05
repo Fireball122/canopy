@@ -93,7 +93,6 @@ public partial class App : Application
         mainWindow.Show();
 
         StartExpandSignalListener(mainWindow);
-
         // Open/close requests are already folded into startExpanded. Replaying them would race the
         // first expand (`--toggle` collapsed the panel it had just opened), and tab/theme/notify
         // events posted before the bundle has loaded were silently dropped, so wait for the UI.

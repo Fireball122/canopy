@@ -331,6 +331,25 @@ public sealed class WallpaperService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Recreates Canopy's own default folder if it was removed. Unlike <see cref="EnsureDirectoryAndSeedSamples"/>
+    /// it never seeds, so it is safe on the thread pool (seeding renders WPF visuals).
+    /// </summary>
+    private void EnsureDefaultDirectoryExists(string directory)
+    {
+        if (!IsSameDirectory(directory, _defaultWallpapersDirectory))
+            return;
+
+        try
+        {
+            Directory.CreateDirectory(directory);
+        }
+        catch (Exception ex)
+        {
+            DiagnosticsLog.Log($"[WallpaperService] EnsureDefaultDirectoryExists error: {ex.Message}");
+        }
+    }
+
     private static bool IsSameDirectory(string first, string second)
     {
         if (string.IsNullOrWhiteSpace(first) || string.IsNullOrWhiteSpace(second))
@@ -838,7 +857,7 @@ public sealed class WallpaperService : IDisposable
         {
             try
             {
-                EnsureDirectoryAndSeedSamples(directory);
+                EnsureDefaultDirectoryExists(directory);
                 return Directory.EnumerateFiles(directory)
                     .Where(f => SupportedExtensions.Contains(Path.GetExtension(f)))
                     .OrderBy(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase)
@@ -852,12 +871,13 @@ public sealed class WallpaperService : IDisposable
         });
     }
 
-    public Task<List<object>> GetWallpaperBridgeEntriesAsync()
+    public async Task<List<object>> GetWallpaperBridgeEntriesAsync()
     {
         string directory = WallpapersDirectory;
-        return Task.Run(() =>
+        // Seeding renders WPF visuals and must stay on the UI thread. Enumeration runs on the pool.
+        await Application.Current.Dispatcher.InvokeAsync(() => EnsureDirectoryAndSeedSamples(directory));
+        return await Task.Run(() =>
         {
-            EnsureDirectoryAndSeedSamples(directory);
             string current = Win32.GetCurrentDesktopWallpaper();
             var list = new List<object>();
 

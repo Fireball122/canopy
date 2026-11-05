@@ -29,7 +29,7 @@ function Write-Header {
     Write-Host @"
    ______                                    
   / ____/___ _____  ____  ____  __  __
- / /   / __ `/ __ \/ __ \/ __ \/ / / /
+ / /   / __ ``/ __ \/ __ \/ __ \/ / / /
 / /___/ /_/ / / / / /_/ / /_/ / /_/ / 
 \____/\__,_/_/ /_/\____/ .___/\__, /  
                       /_/    /____/   
@@ -139,9 +139,7 @@ if ($Uninstall -or $env:CANOPY_UNINSTALL -eq "1" -or $env:CANOPY_UNINSTALL -eq "
     if (Test-Path $desktop) { Remove-Item $desktop -Force }
 
     # Remove Startup key if registered
-    try {
-        Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "Canopy" -ErrorAction SilentlyContinue
-    } catch {}
+    Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "Canopy" -ErrorAction SilentlyContinue
 
     # Remove install folder
     if (Test-Path $InstallDir) {
@@ -285,7 +283,7 @@ Write-Host @"
   ==============================================================
     Canopy is installed and running!
     - Summon: Move mouse to the TOP CENTER of your screen
-    - Hotkey: Press Win + `
+    - Hotkey: Press Win + ``
     - Settings: Right-click the Canopy icon in the taskbar tray
   ==============================================================
 

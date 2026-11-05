@@ -91,7 +91,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ stats }) => {
           ]);
         }
       })
-      .catch(() => {});
+      .catch((error: unknown) => {
+        console.warn('Failed to run fastfetch on terminal start:', error);
+      });
     return () => {
       active = false;
     };

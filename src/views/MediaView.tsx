@@ -352,17 +352,31 @@ export const MediaView: React.FC<MediaViewProps> = ({
   }, [media.is_shuffle, media.auto_repeat]);
 
   const handleToggleShuffle = async () => {
-    const next = !isShuffle;
-    setIsShuffle(next);
-    await mediaToggleShuffle();
+    const previous = isShuffle;
+    setIsShuffle(!previous);
+    try {
+      // The host answers with its authoritative state; null (fallback/no host) keeps the optimistic value.
+      const hostShuffle = await mediaToggleShuffle();
+      if (typeof hostShuffle === 'boolean') {
+        setIsShuffle(hostShuffle);
+      }
+    } catch (error: unknown) {
+      setIsShuffle(previous);
+      console.error('Failed to toggle shuffle:', error);
+    }
   };
 
   const handleCycleRepeat = async () => {
-    const next = (repeatMode + 1) % 3;
-    setRepeatMode(next);
-    const hostMode = await mediaCycleRepeat();
-    if (typeof hostMode === 'number') {
-      setRepeatMode(hostMode);
+    const previous = repeatMode;
+    setRepeatMode((previous + 1) % 3);
+    try {
+      const hostMode = await mediaCycleRepeat();
+      if (typeof hostMode === 'number') {
+        setRepeatMode(hostMode);
+      }
+    } catch (error: unknown) {
+      setRepeatMode(previous);
+      console.error('Failed to cycle repeat mode:', error);
     }
   };
   const lyricsCacheRef = useRef<
@@ -400,7 +414,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
   // panel is expanded. A poll is skipped while the previous one is still in flight, so the
   // host is never queued with more than one outstanding get_audio_spectrum request.
   useEffect(() => {
-    if (!panelOpen) {
+    if (!panelOpen || !isPlaying) {
       setSpectrumBands(new Array(40).fill(0));
       return;
     }
@@ -429,7 +443,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
       active = false;
       window.clearInterval(timer);
     };
-  }, [panelOpen]);
+  }, [panelOpen, isPlaying]);
 
   // Harmonic wave ticker for the synthetic 'wave' visualizer: only ticks while that wave is on
   // screen, otherwise it would re-render this entire view ~22 times per second for nothing.
@@ -508,7 +522,9 @@ export const MediaView: React.FC<MediaViewProps> = ({
     }
     const timerId = window.setTimeout(() => {
       mixerVolumeDebounceRef.current.delete(id);
-      void setAudioSessionVolume(id, clamped).catch(() => {});
+      void setAudioSessionVolume(id, clamped).catch((error: unknown) => {
+        console.error('Failed to set session volume:', error);
+      });
     }, 25);
     mixerVolumeDebounceRef.current.set(id, timerId);
   };
@@ -521,7 +537,9 @@ export const MediaView: React.FC<MediaViewProps> = ({
       timestamp: Date.now(),
     });
     setMixerSessions((prev) => prev.map((s) => (s.id === id ? { ...s, muted } : s)));
-    void setAudioSessionMute(id, muted).catch(() => {});
+    void setAudioSessionMute(id, muted).catch((error: unknown) => {
+      console.error('Failed to set session mute:', error);
+    });
   };
   // Load available SMTC sessions when popover opens or media updates
   useEffect(() => {
@@ -560,7 +578,9 @@ export const MediaView: React.FC<MediaViewProps> = ({
     if (!panelOpen) return;
     void listAudioDevices()
       .then(setAudioDevices)
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        console.warn('Failed to list audio devices:', error);
+      });
   }, [panelOpen]);
 
   useEffect(() => {

@@ -621,7 +621,7 @@ public partial class MainWindow : Window
         {
             case "get_system_stats":
             {
-                SystemTelemetrySnapshot snap = _systemMonitorService.Sample();
+                SystemTelemetrySnapshot snap = await Task.Run(() => _systemMonitorService.Sample());
                 return new
                 {
                     cpu_usage = (float)Math.Round(snap.CpuUsagePercent, 1),
@@ -781,8 +781,18 @@ public partial class MainWindow : Window
                 if (File.Exists(SettingsJsonPath))
                 {
                     string text = await File.ReadAllTextAsync(SettingsJsonPath);
-                    using var doc = JsonDocument.Parse(text);
-                    return doc.RootElement.Clone();
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(text);
+                        return doc.RootElement.Clone();
+                    }
+                    catch (JsonException ex)
+                    {
+                        // Move the unreadable file aside so the next save does not destroy it.
+                        _log.WriteException("settings.json parse", ex);
+                        File.Move(SettingsJsonPath, SettingsJsonPath + ".corrupt", overwrite: true);
+                        throw;
+                    }
                 }
                 return null;
             }
@@ -1480,20 +1490,27 @@ public partial class MainWindow : Window
                 {
                     ssid = sEl.GetString() ?? string.Empty;
                 }
-                if (!string.IsNullOrWhiteSpace(ssid))
+                if (IsValidWifiSsid(ssid))
                 {
                     try
                     {
-                        using var p = Process.Start(new ProcessStartInfo("netsh", $"wlan connect name=\"{ssid}\"")
+                        using var p = Process.Start(NetshStartInfo("wlan", "connect", $"name={ssid}"));
+                        if (p == null)
                         {
-                            CreateNoWindow = true,
-                            UseShellExecute = false
-                        });
-                        if (p != null) await p.WaitForExitAsync();
+                            _log.Write("connect_wifi: netsh failed to start");
+                            return false;
+                        }
+                        await p.WaitForExitAsync();
+                        if (p.ExitCode != 0)
+                        {
+                            _log.Write($"connect_wifi: netsh exited {p.ExitCode} for ssid '{ssid}'");
+                            return false;
+                        }
                         return true;
                     }
-                    catch
+                    catch (Exception ex)
                     {
+                        _log.Write($"connect_wifi failed: {ex.Message}");
                         return false;
                     }
                 }
@@ -1516,11 +1533,7 @@ public partial class MainWindow : Window
             {
                 try
                 {
-                    using var p = Process.Start(new ProcessStartInfo("netsh", "wlan disconnect")
-                    {
-                        CreateNoWindow = true,
-                        UseShellExecute = false
-                    });
+                    using var p = Process.Start(NetshStartInfo("wlan", "disconnect"));
                     if (p != null) await p.WaitForExitAsync();
                     return true;
                 }
@@ -1537,21 +1550,18 @@ public partial class MainWindow : Window
                 {
                     profileName = nEl.GetString() ?? string.Empty;
                 }
-                if (!string.IsNullOrWhiteSpace(profileName))
+                if (IsValidWifiSsid(profileName))
                 {
                     try
                     {
-                        using var p = Process.Start(new ProcessStartInfo("netsh", $"wlan delete profile name=\"{profileName}\"")
-                        {
-                            CreateNoWindow = true,
-                            UseShellExecute = false
-                        });
+                        using var p = Process.Start(NetshStartInfo("wlan", "delete", "profile", $"name={profileName}"));
                         if (p != null) await p.WaitForExitAsync();
                         s_lastWifiProfilesTicks = 0;
                         return true;
                     }
-                    catch
+                    catch (Exception ex)
                     {
+                        _log.Write($"delete_wifi_profile failed: {ex.Message}");
                         return false;
                     }
                 }
@@ -3989,30 +3999,29 @@ public partial class MainWindow : Window
 
     private static string? CaptureDesktopThumbnail(Win32.RECT monitor)
     {
+        IntPtr hDesktop = IntPtr.Zero;
+        IntPtr hdcSrc = IntPtr.Zero;
+        IntPtr hdcDest = IntPtr.Zero;
+        IntPtr hBitmap = IntPtr.Zero;
+        IntPtr hOld = IntPtr.Zero;
         try
         {
-            IntPtr hDesktop = Win32.GetDesktopWindow();
-            IntPtr hdcSrc = Win32.GetDC(hDesktop);
+            hDesktop = Win32.GetDesktopWindow();
+            hdcSrc = Win32.GetDC(hDesktop);
             if (hdcSrc == IntPtr.Zero) return null;
 
-            IntPtr hdcDest = Win32.CreateCompatibleDC(hdcSrc);
+            hdcDest = Win32.CreateCompatibleDC(hdcSrc);
             int targetW = 64;
             int targetH = 36;
-            IntPtr hBitmap = Win32.CreateCompatibleBitmap(hdcSrc, targetW, targetH);
-            IntPtr hOld = Win32.SelectObject(hdcDest, hBitmap);
+            hBitmap = Win32.CreateCompatibleBitmap(hdcSrc, targetW, targetH);
+            hOld = Win32.SelectObject(hdcDest, hBitmap);
 
             Win32.SetStretchBltMode(hdcDest, 4); // HALFTONE
             int monW = monitor.Width > 0 ? monitor.Width : 1920;
             int monH = monitor.Height > 0 ? monitor.Height : 1080;
             Win32.StretchBlt(hdcDest, 0, 0, targetW, targetH, hdcSrc, monitor.Left, monitor.Top, monW, monH, 0x00CC0020);
 
-            Win32.SelectObject(hdcDest, hOld);
-            Win32.DeleteDC(hdcDest);
-            Win32.ReleaseDC(hDesktop, hdcSrc);
-
             using var bmp = System.Drawing.Image.FromHbitmap(hBitmap);
-            Win32.DeleteObject(hBitmap);
-
             using var ms = new System.IO.MemoryStream();
             bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
             return "data:image/png;base64," + Convert.ToBase64String(ms.ToArray());
@@ -4021,6 +4030,17 @@ public partial class MainWindow : Window
         {
             DiagnosticsLog.Log($"[DesktopCapture] Error: {ex.Message}");
             return null;
+        }
+        finally
+        {
+            // Every handle is freed on every path, including when FromHbitmap or Save throws.
+            if (hdcDest != IntPtr.Zero)
+            {
+                if (hOld != IntPtr.Zero) Win32.SelectObject(hdcDest, hOld);
+                Win32.DeleteDC(hdcDest);
+            }
+            if (hBitmap != IntPtr.Zero) Win32.DeleteObject(hBitmap);
+            if (hdcSrc != IntPtr.Zero) Win32.ReleaseDC(hDesktop, hdcSrc);
         }
     }
 
@@ -4095,18 +4115,32 @@ public partial class MainWindow : Window
         return list;
     }
 
+    private static bool IsValidWifiSsid(string? ssid) =>
+        !string.IsNullOrWhiteSpace(ssid) && ssid.Length <= 32 && ssid.IndexOf('"') < 0
+        && !System.Linq.Enumerable.Any(ssid, char.IsControl);
+
+    private static ProcessStartInfo NetshStartInfo(params string[] args)
+    {
+        var psi = new ProcessStartInfo("netsh") { CreateNoWindow = true, UseShellExecute = false };
+        foreach (string arg in args) psi.ArgumentList.Add(arg);
+        return psi;
+    }
+
     private static async Task<object> AddAndConnectWifiAsync(string ssid, string password)
     {
         try
         {
             if (string.IsNullOrWhiteSpace(ssid)) return new { success = false, message = "SSID is required" };
+            if (!IsValidWifiSsid(ssid)) return new { success = false, message = "SSID is invalid" };
+            string xmlSsid = System.Security.SecurityElement.Escape(ssid) ?? string.Empty;
+            string xmlPassword = System.Security.SecurityElement.Escape(password) ?? string.Empty;
 
             string profileXml = string.IsNullOrEmpty(password) ? $@"<?xml version=""1.0""?>
 <WLANProfile xmlns=""http://www.microsoft.com/networking/WLAN/profile/v1"">
-    <name>{ssid}</name>
+    <name>{xmlSsid}</name>
     <SSIDConfig>
         <SSID>
-            <name>{ssid}</name>
+            <name>{xmlSsid}</name>
         </SSID>
     </SSIDConfig>
     <connectionType>ESS</connectionType>
@@ -4122,10 +4156,10 @@ public partial class MainWindow : Window
     </MSM>
 </WLANProfile>" : $@"<?xml version=""1.0""?>
 <WLANProfile xmlns=""http://www.microsoft.com/networking/WLAN/profile/v1"">
-    <name>{ssid}</name>
+    <name>{xmlSsid}</name>
     <SSIDConfig>
         <SSID>
-            <name>{ssid}</name>
+            <name>{xmlSsid}</name>
         </SSID>
     </SSIDConfig>
     <connectionType>ESS</connectionType>
@@ -4140,7 +4174,7 @@ public partial class MainWindow : Window
             <sharedKey>
                 <keyType>passPhrase</keyType>
                 <protected>false</protected>
-                <keyMaterial>{password}</keyMaterial>
+                <keyMaterial>{xmlPassword}</keyMaterial>
             </sharedKey>
         </security>
     </MSM>
@@ -4150,18 +4184,10 @@ public partial class MainWindow : Window
             await File.WriteAllTextAsync(tempFile, profileXml);
             try
             {
-                using var pAdd = Process.Start(new ProcessStartInfo("netsh", $"wlan add profile filename=\"{tempFile}\" user=current")
-                {
-                    CreateNoWindow = true,
-                    UseShellExecute = false
-                });
+                using var pAdd = Process.Start(NetshStartInfo("wlan", "add", "profile", $"filename={tempFile}", "user=current"));
                 if (pAdd != null) await pAdd.WaitForExitAsync();
 
-                using var pConn = Process.Start(new ProcessStartInfo("netsh", $"wlan connect name=\"{ssid}\"")
-                {
-                    CreateNoWindow = true,
-                    UseShellExecute = false
-                });
+                using var pConn = Process.Start(NetshStartInfo("wlan", "connect", $"name={ssid}"));
                 if (pConn != null) await pConn.WaitForExitAsync();
 
                 s_lastWifiProfilesTicks = 0;

@@ -19,6 +19,7 @@ export interface WallpaperViewProps {
   onNavigateToSettings?: () => void;
   onDirectoryChanged?: (newDir: string, entries: WallpaperEntry[]) => void;
   statusText?: string;
+  onToastNotification: (msg: string) => void;
 }
 
 const FALLBACK_GRADIENTS: string[] = [
@@ -40,6 +41,7 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
   onApplyWallpaper,
   onRefreshWallpapers,
   onDirectoryChanged,
+  onToastNotification,
   statusText,
 }) => {
   const { settings, updateSettings } = useSettings();
@@ -47,6 +49,8 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
   const transitionTimerRef = useRef<number | null>(null);
   // Monotonic token so a superseded selection does not clear the newer one's transition state.
   const themeRequestRef = useRef<number>(0);
+  const rescanTimerRef = useRef<number | null>(null);
+  const mountedRef = useRef<boolean>(false);
 
   const [transitioningPath, setTransitioningPath] = useState<string | null>(null);
   const [rescanning, setRescanning] = useState<boolean>(false);
@@ -90,9 +94,16 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
   };
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
-      if (transitionTimerRef.current) {
+      mountedRef.current = false;
+      if (transitionTimerRef.current !== null) {
         window.clearTimeout(transitionTimerRef.current);
+        transitionTimerRef.current = null;
+      }
+      if (rescanTimerRef.current !== null) {
+        window.clearTimeout(rescanTimerRef.current);
+        rescanTimerRef.current = null;
       }
     };
   }, []);
@@ -121,9 +132,17 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
     // success/failure status). Applying here too set the desktop wallpaper twice per click.
     try {
       await onApplyWallpaper(entry, imgEl);
+    } catch (err) {
+      onToastNotification(
+        `Could not apply wallpaper: ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
-      if (themeRequestRef.current === token) {
+      if (themeRequestRef.current === token && mountedRef.current) {
+        if (transitionTimerRef.current !== null) {
+          window.clearTimeout(transitionTimerRef.current);
+        }
         transitionTimerRef.current = window.setTimeout(() => {
+          transitionTimerRef.current = null;
           setTransitioningPath(null);
         }, 450);
       }
@@ -134,13 +153,15 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
     setBrowsingFolder(true);
     try {
       const chosen = await pickWallpaperFolder(settings.wallpaperDirectory);
-      if (chosen) {
-        updateSettings({ wallpaperDirectory: chosen });
-        const entries = await setWallpaperDirectory(chosen);
-        onDirectoryChanged?.(chosen, entries);
-      }
-    } catch {
-      // Ignore cancel
+      // The picker resolves to null when the user cancels; that is not an error.
+      if (!chosen) return;
+      const entries = await setWallpaperDirectory(chosen);
+      updateSettings({ wallpaperDirectory: chosen });
+      onDirectoryChanged?.(chosen, entries);
+    } catch (err) {
+      onToastNotification(
+        `Could not change wallpaper folder: ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       setBrowsingFolder(false);
     }
@@ -149,7 +170,13 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
   const handleRescan = () => {
     setRescanning(true);
     onRefreshWallpapers();
-    window.setTimeout(() => setRescanning(false), 450);
+    if (rescanTimerRef.current !== null) {
+      window.clearTimeout(rescanTimerRef.current);
+    }
+    rescanTimerRef.current = window.setTimeout(() => {
+      rescanTimerRef.current = null;
+      setRescanning(false);
+    }, 450);
   };
 
   return (

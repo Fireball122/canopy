@@ -22,6 +22,25 @@ export interface CommandPaletteProps {
   initialQuery?: string;
 }
 
+type CalculationResult = { ok: true; value: number } | { ok: false };
+
+/** Evaluates a math expression; syntax errors and non-finite results return `{ ok: false }`. */
+function evaluateCalculation(expr: string): CalculationResult {
+  if (!/^[0-9+\-*/().\s%^]+$/.test(expr)) return { ok: false };
+  try {
+    // `^` reads as exponent to users; in JS it is bitwise XOR (2^3 would print 1).
+    const jsExpr = expr.replace(/\^/g, '**');
+    const raw: unknown = Function(`'use strict'; return (${jsExpr})`)();
+    // Trim binary float noise (0.1 + 0.2 = 0.30000000000000004).
+    const result = typeof raw === 'number' ? Number(raw.toPrecision(12)) : raw;
+    if (typeof result === 'number' && Number.isFinite(result)) return { ok: true, value: result };
+    return { ok: false };
+  } catch {
+    // Incomplete input while typing is expected; the caller falls back to normal search.
+    return { ok: false };
+  }
+}
+
 function filterPaletteCommands(
   commands: CommandPaletteItem[],
   query: string,
@@ -64,27 +83,20 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     // 1. Math calculation (= 120 * 1.08)
     if (trimmed.startsWith('=')) {
       const expr = trimmed.slice(1).trim();
-      if (expr.length > 0) {
-        try {
-          if (/^[0-9+\-*/().\s%^]+$/.test(expr)) {
-            // `^` reads as exponent to users; in JS it is bitwise XOR (2^3 would print 1).
-            const jsExpr = expr.replace(/\^/g, '**');
-            const raw: unknown = Function(`'use strict'; return (${jsExpr})`)();
-            // Trim binary float noise (0.1 + 0.2 = 0.30000000000000004).
-            const result = typeof raw === 'number' ? Number(raw.toPrecision(12)) : raw;
-            if (typeof result === 'number' && Number.isFinite(result)) {
-              dynamicCommands.push({
-                id: 'calc:result',
-                label: `${expr} = ${result}`,
-                hint: 'Copy Calculation',
-                icon: <Calculator className="w-3.5 h-3.5 text-amber-400" />,
-                run: () => {
-                  void navigator.clipboard.writeText(String(result)).catch(() => {});
-                },
-              });
-            }
-          }
-        } catch {}
+      const calc: CalculationResult = expr.length > 0 ? evaluateCalculation(expr) : { ok: false };
+      if (calc.ok) {
+        const result = calc.value;
+        dynamicCommands.push({
+          id: 'calc:result',
+          label: `${expr} = ${result}`,
+          hint: 'Copy Calculation',
+          icon: <Calculator className="w-3.5 h-3.5 text-amber-400" />,
+          run: () => {
+            void navigator.clipboard.writeText(String(result)).catch((error: unknown) => {
+              console.error('Failed to copy calculation result:', error);
+            });
+          },
+        });
       }
     }
 
@@ -144,11 +156,13 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
           const updated = [...readStoredCalendarEvents(), newReminder];
           try {
             window.localStorage.setItem(CALENDAR_STORAGE_KEY, JSON.stringify(updated));
-          } catch {
-            // Storage full/blocked: the host copy below still schedules the reminder.
+          } catch (error) {
+            console.warn('Failed to store reminder locally; host copy still schedules it:', error);
           }
           window.dispatchEvent(new CustomEvent('calendar-events-updated', { detail: updated }));
-          void setReminders(updated);
+          void setReminders(updated).catch((error: unknown) => {
+            console.error('Failed to schedule reminder on host:', error);
+          });
         },
       });
     }

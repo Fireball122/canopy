@@ -121,7 +121,7 @@ public sealed class DesktopWallpaperController : IDisposable
         }
         catch (Exception ex)
         {
-            _ = ex; // COM GetMonitors iteration failed; return whatever was collected
+            DiagnosticsLog.LogException("[DesktopWallpaper] GetMonitors iteration failed", ex);
         }
 
         return result;
@@ -231,7 +231,7 @@ public sealed class DesktopWallpaperController : IDisposable
             }
             catch (Exception ex)
             {
-                _ = ex; // COM SetWallpaper(monitorId) failed; fall through to null-id retry
+                DiagnosticsLog.LogException("[DesktopWallpaper] SetWallpaper(monitor) failed; retrying with null id", ex);
             }
 
             try
@@ -240,7 +240,7 @@ public sealed class DesktopWallpaperController : IDisposable
             }
             catch (Exception ex)
             {
-                _ = ex; // COM SetWallpaper(null) retry failed; skip this monitor
+                DiagnosticsLog.LogException("[DesktopWallpaper] SetWallpaper(null) retry failed", ex);
             }
         }
     }
@@ -322,7 +322,7 @@ public sealed class DesktopWallpaperController : IDisposable
         }
         catch (Exception ex)
         {
-            _ = ex; // COM GetMonitorRECT failed; label omits resolution suffix
+            DiagnosticsLog.LogException("[DesktopWallpaper] GetMonitorRECT failed", ex);
         }
 
         return label;
@@ -381,7 +381,7 @@ public sealed class DesktopWallpaperController : IDisposable
         }
         catch (Exception ex)
         {
-            _ = ex; // Marshal.FinalReleaseComObject failed; nothing recoverable to do
+            DiagnosticsLog.LogException("[DesktopWallpaper] FinalReleaseComObject failed", ex);
         }
     }
 
