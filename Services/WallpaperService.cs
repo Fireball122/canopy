@@ -29,7 +29,13 @@ public sealed class WallpaperService : IDisposable
         ".webp"
     };
 
-    private readonly ConcurrentDictionary<string, BitmapSource> _thumbnailCache = new(StringComparer.OrdinalIgnoreCase);
+    // Resolution is header-only metadata keyed by path and invalidated by last-write time, so repeat
+    // get_wallpapers calls don't reopen every image in the folder.
+    private readonly ConcurrentDictionary<string, (long Ticks, string Resolution)> _resolutionCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _applyLock = new();
+    private Task _applyTail = Task.CompletedTask;
+    private int _applyGeneration;
+    private readonly string _defaultWallpapersDirectory;
     private bool _disposed;
 
     public string WallpapersDirectory { get; private set; }
@@ -43,33 +49,43 @@ public sealed class WallpaperService : IDisposable
         "Canopy",
         "thumbnails");
 
-    private string? GetOrCreateDiskThumbnailDataUrl(string filePath)
+    private static string GetThumbnailCachePath(string filePath, long ticks, out string safeName)
     {
+        safeName = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(filePath.ToLowerInvariant())))[..16];
+        return Path.Combine(ThumbnailsCacheDirectory, $"{safeName}_{ticks}.jpg");
+    }
+
+    private static string? GetOrCreateDiskThumbnailDataUrl(string filePath, string cacheFile, string safeName, out bool created)
+    {
+        created = false;
         try
         {
-            Directory.CreateDirectory(ThumbnailsCacheDirectory);
-            long ticks = File.GetLastWriteTimeUtc(filePath).Ticks;
-            string safeName = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(filePath.ToLowerInvariant())))[..16];
-            string cacheFile = Path.Combine(ThumbnailsCacheDirectory, $"{safeName}_{ticks}.jpg");
-
             if (File.Exists(cacheFile))
             {
                 byte[] cachedBytes = File.ReadAllBytes(cacheFile);
-                return $"data:image/jpeg;base64,{Convert.ToBase64String(cachedBytes)}";
+                // An empty entry is an interrupted write; fall through and re-encode it.
+                if (cachedBytes.Length > 0)
+                    return $"data:image/jpeg;base64,{Convert.ToBase64String(cachedBytes)}";
             }
 
-            BitmapSource? bmp = GetOrDecodeThumbnail(filePath);
-            if (bmp is not null)
+            BitmapSource? bmp = DecodeThumbnail(filePath);
+            if (bmp is null)
+                return null;
+
+            var encoder = new JpegBitmapEncoder { QualityLevel = 82 };
+            encoder.Frames.Add(BitmapFrame.Create(bmp));
+            byte[] bytes;
+            using (var ms = new MemoryStream())
             {
-                var encoder = new JpegBitmapEncoder { QualityLevel = 82 };
-                encoder.Frames.Add(BitmapFrame.Create(bmp));
-                using var ms = new MemoryStream();
                 encoder.Save(ms);
-                byte[] bytes = ms.ToArray();
-                File.WriteAllBytes(cacheFile, bytes);
-                PruneThumbnailCache(safeName, cacheFile);
-                return $"data:image/jpeg;base64,{Convert.ToBase64String(bytes)}";
+                bytes = ms.ToArray();
             }
+
+            // A failed cache write still returns the freshly encoded thumbnail.
+            created = TryWriteThumbnailAtomically(cacheFile, bytes);
+            if (created)
+                DeleteStaleThumbnailVariants(safeName, cacheFile);
+            return $"data:image/jpeg;base64,{Convert.ToBase64String(bytes)}";
         }
         catch (Exception ex)
         {
@@ -79,11 +95,35 @@ public sealed class WallpaperService : IDisposable
     }
 
     /// <summary>
-    /// Keeps the on-disk thumbnail cache bounded: drops every stale variant of the wallpaper
-    /// that was just re-encoded (its content or timestamp changed) and then evicts the oldest
-    /// entries once the whole cache grows past <see cref="ThumbnailCacheFileLimit"/> files.
+    /// Write-then-rename so overlapping scans (panel mount + wallpaper view) or a crash mid-write can
+    /// never leave a truncated JPEG under the final name, which would then be served forever.
     /// </summary>
-    private void PruneThumbnailCache(string safeName, string keepFile)
+    private static bool TryWriteThumbnailAtomically(string cacheFile, byte[] bytes)
+    {
+        string tempFile = $"{cacheFile}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllBytes(tempFile, bytes);
+            File.Move(tempFile, cacheFile, overwrite: true);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            DiagnosticsLog.Log($"[WallpaperService] Thumbnail cache write error: {ex.Message}");
+            try
+            {
+                File.Delete(tempFile);
+            }
+            catch (Exception deleteEx)
+            {
+                DiagnosticsLog.Log($"[WallpaperService] Thumbnail temp cleanup error: {deleteEx.Message}");
+            }
+            return false;
+        }
+    }
+
+    /// <summary>Drops every older variant of a wallpaper whose content or timestamp changed.</summary>
+    private static void DeleteStaleThumbnailVariants(string safeName, string keepFile)
     {
         try
         {
@@ -101,17 +141,38 @@ public sealed class WallpaperService : IDisposable
                     DiagnosticsLog.Log($"[WallpaperService] Delete stale thumbnail warning: {ex.Message}");
                 }
             }
+        }
+        catch (Exception ex)
+        {
+            DiagnosticsLog.Log($"[WallpaperService] DeleteStaleThumbnailVariants error: {ex.Message}");
+        }
+    }
 
-            var cached = Directory.EnumerateFiles(ThumbnailsCacheDirectory, "*.jpg")
-                .Select(f => (Path: f, Written: TryGetLastWriteUtc(f)))
-                .ToList();
+    /// <summary>
+    /// Keeps the on-disk cache bounded at <see cref="ThumbnailCacheFileLimit"/> files (or the current
+    /// folder's size, if larger), evicting oldest-first among entries the current folder doesn't use.
+    /// Runs once per scan: it used to re-enumerate the whole cache after every new thumbnail (quadratic
+    /// on first open), and a folder bigger than the cap evicted and re-encoded its own thumbnails on
+    /// every open.
+    /// </summary>
+    private static void EvictOldThumbnails(HashSet<string> inUse)
+    {
+        try
+        {
+            var evictable = new List<(string Path, DateTime Written)>();
+            int total = 0;
+            foreach (string file in Directory.EnumerateFiles(ThumbnailsCacheDirectory, "*.jpg"))
+            {
+                total++;
+                if (!inUse.Contains(file))
+                    evictable.Add((file, TryGetLastWriteUtc(file)));
+            }
 
-            if (cached.Count <= ThumbnailCacheFileLimit)
+            int excess = total - Math.Max(ThumbnailCacheFileLimit, inUse.Count);
+            if (excess <= 0)
                 return;
 
-            foreach (var (path, _) in cached
-                         .OrderBy(entry => entry.Written)
-                         .Take(cached.Count - ThumbnailCacheFileLimit))
+            foreach (var (path, _) in evictable.OrderBy(entry => entry.Written).Take(excess))
             {
                 try
                 {
@@ -125,7 +186,7 @@ public sealed class WallpaperService : IDisposable
         }
         catch (Exception ex)
         {
-            DiagnosticsLog.Log($"[WallpaperService] PruneThumbnailCache error: {ex.Message}");
+            DiagnosticsLog.Log($"[WallpaperService] EvictOldThumbnails error: {ex.Message}");
         }
     }
 
@@ -144,21 +205,20 @@ public sealed class WallpaperService : IDisposable
 
     public WallpaperService()
     {
-        string initialDir = TryLoadPersistedDirectory();
-        if (string.IsNullOrWhiteSpace(initialDir) || !Directory.Exists(initialDir))
+        string picturesDir = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+        if (string.IsNullOrWhiteSpace(picturesDir))
         {
-            string picturesDir = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
-            if (string.IsNullOrWhiteSpace(picturesDir))
-            {
-                picturesDir = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    "Pictures");
-            }
-            initialDir = Path.Combine(picturesDir, "Wallpapers");
+            picturesDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                "Pictures");
         }
+        _defaultWallpapersDirectory = Path.Combine(picturesDir, "Wallpapers");
 
-        WallpapersDirectory = initialDir;
-        EnsureDirectoryAndSeedSamples();
+        string initialDir = TryLoadPersistedDirectory();
+        WallpapersDirectory = string.IsNullOrWhiteSpace(initialDir) || !Directory.Exists(initialDir)
+            ? _defaultWallpapersDirectory
+            : initialDir;
+        EnsureDirectoryAndSeedSamples(WallpapersDirectory);
     }
 
     private static string TryLoadPersistedDirectory()
@@ -242,21 +302,27 @@ public sealed class WallpaperService : IDisposable
         }
     }
 
-    private void EnsureDirectoryAndSeedSamples()
+    private void EnsureDirectoryAndSeedSamples(string directory)
     {
+        // Only Canopy's own default folder is created and seeded. A folder the user picked is theirs:
+        // an empty one used to be filled with copied Windows stock images and generated PNGs on the
+        // next get_wallpapers call.
+        if (!IsSameDirectory(directory, _defaultWallpapersDirectory))
+            return;
+
         try
         {
-            if (!Directory.Exists(WallpapersDirectory))
+            if (!Directory.Exists(directory))
             {
-                Directory.CreateDirectory(WallpapersDirectory);
+                Directory.CreateDirectory(directory);
             }
 
-            bool hasImages = Directory.EnumerateFiles(WallpapersDirectory)
+            bool hasImages = Directory.EnumerateFiles(directory)
                 .Any(f => SupportedExtensions.Contains(Path.GetExtension(f)));
 
             if (!hasImages)
             {
-                SeedDefaultWallpapers();
+                SeedDefaultWallpapers(directory);
             }
         }
         catch (Exception ex)
@@ -265,11 +331,30 @@ public sealed class WallpaperService : IDisposable
         }
     }
 
+    private static bool IsSameDirectory(string first, string second)
+    {
+        if (string.IsNullOrWhiteSpace(first) || string.IsNullOrWhiteSpace(second))
+            return false;
+
+        try
+        {
+            return string.Equals(
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(first)),
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(second)),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex)
+        {
+            DiagnosticsLog.Log($"[WallpaperService] IsSameDirectory error: {ex.Message}");
+            return false;
+        }
+    }
+
     /// <summary>
     /// Populates %USERPROFILE%\Pictures\Wallpapers on first run if empty so the carousel
     /// is immediately interactive. Copies Windows stock wallpapers if available, plus generated Caelestia gradients.
     /// </summary>
-    private void SeedDefaultWallpapers()
+    private static void SeedDefaultWallpapers(string directory)
     {
         try
         {
@@ -288,7 +373,7 @@ public sealed class WallpaperService : IDisposable
                 foreach (string src in stockFiles)
                 {
                     string destName = Path.GetFileName(src);
-                    string destPath = Path.Combine(WallpapersDirectory, destName);
+                    string destPath = Path.Combine(directory, destName);
                     if (!File.Exists(destPath))
                     {
                         File.Copy(src, destPath, overwrite: false);
@@ -297,31 +382,31 @@ public sealed class WallpaperService : IDisposable
             }
 
             // Also generate sleek Canopy dark atmospheric wallpapers if fewer than 4 images exist
-            int count = Directory.EnumerateFiles(WallpapersDirectory)
+            int count = Directory.EnumerateFiles(directory)
                 .Count(f => SupportedExtensions.Contains(Path.GetExtension(f)));
 
             if (count < 4)
             {
                 GenerateAtmosphericWallpaper(
-                    Path.Combine(WallpapersDirectory, "Canopy-Obsidian-Aurora.png"),
+                    Path.Combine(directory, "Canopy-Obsidian-Aurora.png"),
                     Color.FromRgb(10, 12, 20),
                     Color.FromRgb(36, 24, 68),
                     Color.FromRgb(56, 189, 248));
 
                 GenerateAtmosphericWallpaper(
-                    Path.Combine(WallpapersDirectory, "Canopy-Hypr-Nebula.png"),
+                    Path.Combine(directory, "Canopy-Hypr-Nebula.png"),
                     Color.FromRgb(13, 13, 18),
                     Color.FromRgb(76, 29, 149),
                     Color.FromRgb(236, 72, 153));
 
                 GenerateAtmosphericWallpaper(
-                    Path.Combine(WallpapersDirectory, "Canopy-Emerald-Void.png"),
+                    Path.Combine(directory, "Canopy-Emerald-Void.png"),
                     Color.FromRgb(8, 15, 18),
                     Color.FromRgb(6, 78, 59),
                     Color.FromRgb(52, 211, 153));
 
                 GenerateAtmosphericWallpaper(
-                    Path.Combine(WallpapersDirectory, "Canopy-Solar-Eclipse.png"),
+                    Path.Combine(directory, "Canopy-Solar-Eclipse.png"),
                     Color.FromRgb(16, 12, 14),
                     Color.FromRgb(124, 45, 18),
                     Color.FromRgb(251, 146, 60));
@@ -374,25 +459,10 @@ public sealed class WallpaperService : IDisposable
         encoder.Save(fs);
     }
 
-    private BitmapSource? GetOrDecodeThumbnail(string fullPath)
+    private static BitmapImage? DecodeThumbnail(string fullPath)
     {
         try
         {
-            if (!File.Exists(fullPath))
-                return null;
-
-            // Skip OneDrive or cloud offline placeholders to prevent network hangs
-            if ((File.GetAttributes(fullPath) & FileAttributes.Offline) != 0)
-                return null;
-
-            DateTime lastWrite = File.GetLastWriteTimeUtc(fullPath);
-            string cacheKey = $"{fullPath}|{lastWrite.Ticks}";
-
-            if (_thumbnailCache.TryGetValue(cacheKey, out BitmapSource? cached))
-            {
-                return cached;
-            }
-
             using var stream = new FileStream(
                 fullPath,
                 FileMode.Open,
@@ -407,13 +477,11 @@ public sealed class WallpaperService : IDisposable
             bitmap.StreamSource = stream;
             bitmap.EndInit();
             bitmap.Freeze();
-
-            _thumbnailCache[cacheKey] = bitmap;
             return bitmap;
         }
         catch (Exception ex)
         {
-            DiagnosticsLog.Log($"[WallpaperService] GetOrDecodeThumbnail error: {ex.Message}");
+            DiagnosticsLog.Log($"[WallpaperService] DecodeThumbnail error: {ex.Message}");
             return null;
         }
     }
@@ -446,9 +514,46 @@ public sealed class WallpaperService : IDisposable
     /// Returns immediately (no SPI_SETDESKWALLPAPER, no iris wipe, no WM_SETTINGCHANGE reload flicker)
     /// when the requested file is already the current desktop wallpaper.
     /// </summary>
-    public async Task<bool> ApplyWallpaperAsync(string fullPath)
+    public Task<bool> ApplyWallpaperAsync(string fullPath)
     {
         if (string.IsNullOrWhiteSpace(fullPath) || !File.Exists(fullPath))
+            return Task.FromResult(false);
+
+        // Rapid picks used to run overlapping applies whose SystemParametersInfo calls could land out
+        // of order (a slower decode of an earlier pick finishing last), leaving the desktop on an image
+        // the UI no longer marks active, with stacked iris overlays. Applies now run one at a time and
+        // a request superseded while queued is skipped.
+        lock (_applyLock)
+        {
+            int generation = ++_applyGeneration;
+            Task<bool> run = ApplyAfterAsync(_applyTail, fullPath, generation);
+            _applyTail = run;
+            return run;
+        }
+    }
+
+    private async Task<bool> ApplyAfterAsync(Task previous, string fullPath, int generation)
+    {
+        try
+        {
+            await previous.ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            DiagnosticsLog.Log($"[WallpaperService] Previous wallpaper apply failed: {ex.Message}");
+        }
+
+        // A newer pick is queued behind this one; it is what ends up on the desktop, so this request
+        // is satisfied rather than failed.
+        if (generation != Volatile.Read(ref _applyGeneration))
+            return true;
+
+        return await ApplyWallpaperCoreAsync(fullPath).ConfigureAwait(false);
+    }
+
+    private async Task<bool> ApplyWallpaperCoreAsync(string fullPath)
+    {
+        if (!File.Exists(fullPath))
             return false;
 
         string previousPath = Win32.GetCurrentDesktopWallpaper();
@@ -657,15 +762,20 @@ public sealed class WallpaperService : IDisposable
 
 
 
-    private static string GetImageResolution(string fullPath)
+    private string GetImageResolution(string fullPath, long ticks)
+    {
+        if (_resolutionCache.TryGetValue(fullPath, out var cached) && cached.Ticks == ticks)
+            return cached.Resolution;
+
+        string resolution = ReadImageResolution(fullPath);
+        _resolutionCache[fullPath] = (ticks, resolution);
+        return resolution;
+    }
+
+    private static string ReadImageResolution(string fullPath)
     {
         try
         {
-            if ((File.GetAttributes(fullPath) & FileAttributes.Offline) != 0)
-            {
-                return "1920 × 1080";
-            }
-
             using var stream = new FileStream(
                 fullPath,
                 FileMode.Open,
@@ -692,49 +802,99 @@ public sealed class WallpaperService : IDisposable
         return "1920 × 1080";
     }
 
+    private void PruneResolutionCache(List<string> currentFiles)
+    {
+        if (_resolutionCache.Count <= currentFiles.Count)
+            return;
 
-    public List<string> GetWallpaperFiles()
+        var current = new HashSet<string>(currentFiles, StringComparer.OrdinalIgnoreCase);
+        foreach (string path in _resolutionCache.Keys)
+        {
+            if (!current.Contains(path))
+                _resolutionCache.TryRemove(path, out _);
+        }
+    }
+
+    private static void TryEnsureThumbnailDirectory()
     {
         try
         {
-            EnsureDirectoryAndSeedSamples();
-            return Directory.EnumerateFiles(WallpapersDirectory)
-                .Where(f => SupportedExtensions.Contains(Path.GetExtension(f)))
-                .OrderBy(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            Directory.CreateDirectory(ThumbnailsCacheDirectory);
         }
-        catch
+        catch (Exception ex)
         {
-            return new List<string>();
+            DiagnosticsLog.Log($"[WallpaperService] Thumbnail cache directory error: {ex.Message}");
         }
     }
-    public Task<List<object>> GetWallpaperBridgeEntriesAsync()
+
+    /// <summary>
+    /// Sorted wallpaper file paths of the current folder. Runs on the thread pool: seeding and
+    /// enumeration touch the disk, which must not happen on the WPF UI thread (slideshow tick).
+    /// </summary>
+    public Task<List<string>> GetWallpaperFilesAsync()
     {
+        string directory = WallpapersDirectory;
         return Task.Run(() =>
         {
-            EnsureDirectoryAndSeedSamples();
+            try
+            {
+                EnsureDirectoryAndSeedSamples(directory);
+                return Directory.EnumerateFiles(directory)
+                    .Where(f => SupportedExtensions.Contains(Path.GetExtension(f)))
+                    .OrderBy(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                DiagnosticsLog.Log($"[WallpaperService] GetWallpaperFiles error: {ex.Message}");
+                return new List<string>();
+            }
+        });
+    }
+
+    public Task<List<object>> GetWallpaperBridgeEntriesAsync()
+    {
+        string directory = WallpapersDirectory;
+        return Task.Run(() =>
+        {
+            EnsureDirectoryAndSeedSamples(directory);
             string current = Win32.GetCurrentDesktopWallpaper();
             var list = new List<object>();
 
             try
             {
-                var files = Directory.EnumerateFiles(WallpapersDirectory)
+                var files = Directory.EnumerateFiles(directory)
                     .Where(f => SupportedExtensions.Contains(Path.GetExtension(f)))
                     .Where(f =>
                     {
-                        try { return (File.GetAttributes(f) & FileAttributes.Offline) == 0; }
-                        catch { return true; }
+                        try
+                        {
+                            return (File.GetAttributes(f) & FileAttributes.Offline) == 0;
+                        }
+                        catch (Exception ex)
+                        {
+                            DiagnosticsLog.Log($"[WallpaperService] GetAttributes error: {ex.Message}");
+                            return true;
+                        }
                     })
                     .OrderBy(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase)
                     .ToList();
 
+                TryEnsureThumbnailDirectory();
+                var thumbnailsInUse = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                bool createdAny = false;
+
                 foreach (string file in files)
                 {
                     bool active = IsSameFile(file, current);
+                    long ticks = TryGetLastWriteUtc(file).Ticks;
+                    string cacheFile = GetThumbnailCachePath(file, ticks, out string safeName);
+                    thumbnailsInUse.Add(cacheFile);
 
-                    string? dataUrl = GetOrCreateDiskThumbnailDataUrl(file);
+                    string? dataUrl = GetOrCreateDiskThumbnailDataUrl(file, cacheFile, safeName, out bool created);
+                    createdAny |= created;
 
-                    string resolution = GetImageResolution(file);
+                    string resolution = GetImageResolution(file, ticks);
                     list.Add(new
                     {
                         name = Path.GetFileNameWithoutExtension(file),
@@ -744,6 +904,10 @@ public sealed class WallpaperService : IDisposable
                         active
                     });
                 }
+
+                if (createdAny)
+                    EvictOldThumbnails(thumbnailsInUse);
+                PruneResolutionCache(files);
             }
             catch (Exception ex)
             {

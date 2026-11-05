@@ -41,13 +41,55 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
     private readonly ConcurrentDictionary<WasapiLoopbackCapture, DeviceCaptureState> _captureStates = new();
     private readonly float[] _spectrumBands = new float[SpectrumBands];
     private readonly object _spectrumLock = new();
-    private bool _disposed;
+    private volatile bool _disposed;
     private volatile bool _isCapturePaused;
     // Diagnostics: last failure surfaced to the host instead of being swallowed by catch {}.
     private volatile string? _lastError;
-    private long _lastRestartTick;
     private int _restartAttempt;
+    private int _restartPending;
+    private int _defaultChangeGeneration;
+    private int _pendingRenderChange;
     private float _lastFrameRms;
+
+    // Serialises capture (re)starts: a device switch raises OnDefaultDeviceChanged (once per role)
+    // and RecordingStopped at the same moment, and unsynchronised starts each added a capture.
+    private readonly object _captureGate = new();
+    // Endpoint the running loopback capture records. Owned separately from _device: overwriting
+    // _device here orphaned the MMDevice that owns _endpointVolume, and its finalizer then disposed
+    // the live endpoint volume (notifications stopped, later calls hit a released RCW).
+    private MMDevice? _captureDevice;
+
+    // Hann window and band edges depend only on constants: built once instead of recomputing 512
+    // cosines and 80 Math.Pow calls on every FFT frame (~94 frames/s at 48 kHz).
+    private static readonly float[] HannWindow = BuildHannWindow();
+    private static readonly (int[] Start, int[] End) BandBins = BuildBandBins();
+
+    private static float[] BuildHannWindow()
+    {
+        var window = new float[FftLength];
+        for (int i = 0; i < FftLength; i++)
+        {
+            window[i] = 0.5f * (1.0f - MathF.Cos(2.0f * MathF.PI * i / (FftLength - 1)));
+        }
+        return window;
+    }
+
+    // Perceptual (power 2.2) band split over the lower half of the FFT. Same mapping as before the
+    // tables were hoisted: each band covers [start, end) with at least one bin.
+    private static (int[] Start, int[] End) BuildBandBins()
+    {
+        int maxBin = FftLength / 2;
+        var start = new int[SpectrumBands];
+        var end = new int[SpectrumBands];
+        for (int b = 0; b < SpectrumBands; b++)
+        {
+            double lowFrac = Math.Pow((double)b / SpectrumBands, 2.2);
+            double highFrac = Math.Pow((double)(b + 1) / SpectrumBands, 2.2);
+            start[b] = Math.Clamp((int)(lowFrac * maxBin), 0, maxBin - 1);
+            end[b] = Math.Clamp((int)(highFrac * maxBin), start[b] + 1, maxBin);
+        }
+        return (start, end);
+    }
 
     // Spectrum dB window: magnitudes at/below -80 dB map to 0, at/above -10 dB map to 1.
     private const float SpectrumFloorDb = -80.0f;
@@ -94,6 +136,9 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
                 CleanupDeviceNoLock();
 
                 _enumerator = new MMDeviceEnumerator();
+                // Register before probing for a default endpoint: returning early on "no device"
+                // skipped registration, so an endpoint plugged in later never re-initialised audio.
+                _enumerator.RegisterEndpointNotificationCallback(this);
                 if (!_enumerator.HasDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia))
                 {
                     IsAvailable = false;
@@ -103,7 +148,6 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
                 _device = _enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
                 _endpointVolume = _device.AudioEndpointVolume;
                 _endpointVolume.OnVolumeNotification += OnEndpointVolumeNotification;
-                _enumerator.RegisterEndpointNotificationCallback(this);
                 // Also initialize default communications microphone if available
                 if (_enumerator.HasDefaultAudioEndpoint(DataFlow.Capture, Role.Communications))
                 {
@@ -130,102 +174,121 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
 
     private void StartWasapiLoopbackSpectrum()
     {
-        Task.Run(StartCaptureInternal);
+        _ = Task.Run(StartCaptureInternal);
     }
 
     private void StartCaptureInternal()
     {
-        if (_disposed || _isCapturePaused)
-            return;
-        try
+        lock (_captureGate)
         {
-            List<WasapiLoopbackCapture> previous;
-            lock (_syncLock)
-            {
-                previous = new List<WasapiLoopbackCapture>(_loopbackCaptures);
-                _loopbackCaptures.Clear();
-                _captureStates.Clear();
-            }
+            if (_disposed || _isCapturePaused)
+                return;
 
-            foreach (var cap in previous)
-            {
-                cap.DataAvailable -= OnLoopbackDataAvailable;
-                cap.RecordingStopped -= OnLoopbackRecordingStopped;
-                try { cap.StopRecording(); } catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] StopRecording warning: {ex.Message}"); }
-                try { cap.Dispose(); } catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] Dispose warning: {ex.Message}"); }
-            }
-
-            if (_enumerator is null)
-            {
-                InitializeEndpoint();
-            }
-            if (_enumerator is null) return;
-
-            var newCaptures = new List<WasapiLoopbackCapture>();
-            MMDevice? defaultDevice = null;
             try
             {
-                if (_enumerator.HasDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia))
-                {
-                    defaultDevice = _enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
-                }
-            }
-            catch (Exception ex)
-            {
-                DiagnosticsLog.Log($"[AudioController] GetDefaultAudioEndpoint error: {ex.Message}");
-            }
+                StopAllCaptures("Restart");
 
-            if (defaultDevice != null)
-            {
+                // A private enumerator: the shared _enumerator is disposed and replaced by
+                // InitializeEndpoint on other threads, which raced this method mid-use.
+                using var enumerator = new MMDeviceEnumerator();
+                if (!enumerator.HasDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia))
+                {
+                    // Nothing to record; OnDefaultDeviceChanged restarts capture when an endpoint appears.
+                    LastError = "No default render endpoint for loopback capture";
+                    return;
+                }
+
+                MMDevice device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                WasapiLoopbackCapture? capture = null;
                 try
                 {
-                    var capture = new WasapiLoopbackCapture(defaultDevice);
+                    capture = new WasapiLoopbackCapture(device);
                     _captureStates[capture] = new DeviceCaptureState();
                     capture.DataAvailable += OnLoopbackDataAvailable;
                     capture.RecordingStopped += OnLoopbackRecordingStopped;
                     capture.StartRecording();
-                    newCaptures.Add(capture);
-                    _device = defaultDevice;
                 }
                 catch (Exception ex)
                 {
-                    DiagnosticsLog.Log($"[AudioController] Default device loopback capture start on {defaultDevice.FriendlyName} error: {ex.Message}");
-                }
-            }
+                    DiagnosticsLog.Log($"[AudioController] Loopback capture start error: {ex.Message}");
+                    LastError = "Loopback capture start failed: " + ex.Message;
+                    if (capture is not null)
+                    {
+                        _captureStates.TryRemove(capture, out _);
+                        DisposeCaptures([capture], device, "Start failure");
+                    }
+                    else
+                    {
+                        device.Dispose();
+                    }
 
-            if (newCaptures.Count == 0)
-            {
-                try
+                    // A default endpoint exists but would not start (typically mid device switch):
+                    // retry with backoff instead of leaving the spectrum dead.
+                    ScheduleCaptureRestart();
+                    return;
+                }
+
+                bool keep;
+                lock (_syncLock)
                 {
-                    var fallbackCapture = new WasapiLoopbackCapture();
-                    _captureStates[fallbackCapture] = new DeviceCaptureState();
-                    fallbackCapture.DataAvailable += OnLoopbackDataAvailable;
-                    fallbackCapture.RecordingStopped += OnLoopbackRecordingStopped;
-                    fallbackCapture.StartRecording();
-                    newCaptures.Add(fallbackCapture);
+                    keep = !_disposed && !_isCapturePaused;
+                    if (keep)
+                    {
+                        _loopbackCaptures.Add(capture);
+                        _captureDevice = device;
+                    }
                 }
-                catch (Exception ex)
+
+                if (!keep)
                 {
-                    DiagnosticsLog.Log($"[AudioController] Default loopback fallback failed: {ex.Message}");
+                    // Paused or disposed while starting: never leave an orphaned capture running.
+                    _captureStates.TryRemove(capture, out _);
+                    DisposeCaptures([capture], device, "Superseded");
+                    return;
                 }
-            }
-            if (newCaptures.Count > 0)
-            {
-                Interlocked.Exchange(ref _restartAttempt, 0);
-            }
 
-            lock (_syncLock)
-            {
-                _loopbackCaptures.AddRange(newCaptures);
+                LastError = null;
             }
-
-            LastError = null;
+            catch (Exception ex)
+            {
+                LastError = "Loopback capture init failed: " + ex.Message;
+                DiagnosticsLog.Log($"[AudioController] Loopback capture init failed: {ex.Message}");
+                ScheduleCaptureRestart();
+            }
         }
-        catch (Exception ex)
+    }
+
+    /// <summary>Detaches every running capture (and the endpoint it records) and stops it synchronously.</summary>
+    private void StopAllCaptures(string context)
+    {
+        var (captures, device) = DetachCaptures();
+        DisposeCaptures(captures, device, context);
+    }
+
+    private (List<WasapiLoopbackCapture> Captures, MMDevice? Device) DetachCaptures()
+    {
+        lock (_syncLock)
         {
-            LastError = "Loopback capture init failed: " + ex.Message;
-            ScheduleCaptureRestart();
+            var captures = new List<WasapiLoopbackCapture>(_loopbackCaptures);
+            _loopbackCaptures.Clear();
+            _captureStates.Clear();
+            MMDevice? device = _captureDevice;
+            _captureDevice = null;
+            return (captures, device);
         }
+    }
+
+    private void DisposeCaptures(List<WasapiLoopbackCapture> captures, MMDevice? device, string context)
+    {
+        foreach (var cap in captures)
+        {
+            cap.DataAvailable -= OnLoopbackDataAvailable;
+            cap.RecordingStopped -= OnLoopbackRecordingStopped;
+            try { cap.StopRecording(); } catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] {context} StopRecording warning: {ex.Message}"); }
+            try { cap.Dispose(); } catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] {context} Dispose warning: {ex.Message}"); }
+        }
+
+        try { device?.Dispose(); } catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] {context} device dispose warning: {ex.Message}"); }
     }
 
     private void OnLoopbackRecordingStopped(object? sender, StoppedEventArgs e)
@@ -247,16 +310,19 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
     {
         if (_disposed || _isCapturePaused)
             return;
-        long now = Environment.TickCount64;
-        if (now - Interlocked.Read(ref _lastRestartTick) < 750)
-            return;
-        Interlocked.Exchange(ref _lastRestartTick, now);
 
+        // Coalesce instead of dropping: the former 750 ms debounce discarded a failure that landed
+        // just after a restart (e.g. the restarted capture dying on a still-switching device),
+        // leaving the spectrum dead until the panel was reopened.
+        if (Interlocked.CompareExchange(ref _restartPending, 1, 0) != 0)
+            return;
+
+        int attempt = Interlocked.Increment(ref _restartAttempt);
+        int delayMs = Math.Min(3000, 200 * (1 << Math.Min(attempt, 4)));
         _ = Task.Run(async () =>
         {
-            int attempt = Interlocked.Increment(ref _restartAttempt);
-            int delayMs = Math.Min(3000, 200 * (1 << Math.Min(attempt, 4)));
-            await Task.Delay(delayMs);
+            await Task.Delay(delayMs).ConfigureAwait(false);
+            Interlocked.Exchange(ref _restartPending, 0);
             if (!_disposed)
             {
                 StartCaptureInternal();
@@ -271,20 +337,12 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
     public void PauseCapture()
     {
         _isCapturePaused = true;
-        List<WasapiLoopbackCapture> capturesToStop;
-        lock (_syncLock)
+        // Detaching under the lock stops spectrum updates immediately; the stop/dispose itself joins
+        // the NAudio capture thread, so it runs off the caller's (UI) thread.
+        var (captures, device) = DetachCaptures();
+        if (captures.Count > 0 || device is not null)
         {
-            capturesToStop = new List<WasapiLoopbackCapture>(_loopbackCaptures);
-            _loopbackCaptures.Clear();
-            _captureStates.Clear();
-        }
-
-        foreach (var cap in capturesToStop)
-        {
-            cap.DataAvailable -= OnLoopbackDataAvailable;
-            cap.RecordingStopped -= OnLoopbackRecordingStopped;
-            try { cap.StopRecording(); } catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] Pause StopRecording warning: {ex.Message}"); }
-            try { cap.Dispose(); } catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] Pause Dispose warning: {ex.Message}"); }
+            _ = Task.Run(() => DisposeCaptures(captures, device, "Pause"));
         }
 
         lock (_spectrumLock)
@@ -302,6 +360,10 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
         if (_disposed)
             return;
 
+        // Already capturing (repeated expand): restarting would only tear down a healthy stream.
+        if (!_isCapturePaused && IsCaptureRunning)
+            return;
+
         _isCapturePaused = false;
         StartWasapiLoopbackSpectrum();
     }
@@ -314,6 +376,11 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
 
             if (sender is not WasapiLoopbackCapture capture || !_captureStates.TryGetValue(capture, out var state))
                 return;
+
+            // Audio is flowing again: reset restart backoff only now, not on StartRecording success,
+            // so a capture that dies right after starting keeps backing off instead of looping at 400 ms.
+            if (Volatile.Read(ref _restartAttempt) != 0)
+                Interlocked.Exchange(ref _restartAttempt, 0);
 
             var wf = capture.WaveFormat;
             if (wf is null) return;
@@ -380,19 +447,15 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
     {
         try
         {
-            // Apply Hann window and populate FFT complex input buffer
-            for (int i = 0; i < FftLength; i++)
-            {
-                float window = 0.5f * (1.0f - MathF.Cos(2.0f * MathF.PI * i / (FftLength - 1)));
-                state.FftBuffer[i].X = state.SampleBuffer[i] * window;
-                state.FftBuffer[i].Y = 0.0f;
-            }
-
-            // Frame RMS from the raw (unwindowed) capture samples
+            // Apply the Hann window into the FFT input and take the frame RMS from the raw
+            // (unwindowed) capture samples in the same pass.
             float sumSq = 0.0f;
             for (int i = 0; i < FftLength; i++)
             {
-                sumSq += state.SampleBuffer[i] * state.SampleBuffer[i];
+                float sample = state.SampleBuffer[i];
+                sumSq += sample * sample;
+                state.FftBuffer[i].X = sample * HannWindow[i];
+                state.FftBuffer[i].Y = 0.0f;
             }
             float frameRms = MathF.Sqrt(sumSq / FftLength);
             _lastFrameRms = frameRms;
@@ -401,15 +464,10 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
 
             lock (_spectrumLock)
             {
-                // Map 256 unique FFT bins logarithmically across 40 frequency bands
-                int maxBin = FftLength / 2;
                 for (int b = 0; b < SpectrumBands; b++)
                 {
-                    double lowFrac = Math.Pow((double)b / SpectrumBands, 2.2);
-                    double highFrac = Math.Pow((double)(b + 1) / SpectrumBands, 2.2);
-
-                    int startBin = Math.Clamp((int)(lowFrac * maxBin), 0, maxBin - 1);
-                    int endBin = Math.Clamp((int)(highFrac * maxBin), startBin + 1, maxBin);
+                    int startBin = BandBins.Start[b];
+                    int endBin = BandBins.End[b];
 
                     float bandMag = 0.0f;
                     for (int bin = startBin; bin < endBin; bin++)
@@ -464,132 +522,93 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
     private void OnEndpointVolumeNotification(AudioVolumeNotificationData data)
     {
         float percent = Math.Clamp(data.MasterVolume * 100f, 0f, 100f);
-        VolumeStateChanged?.Invoke(this, new AudioVolumeStateChangedEventArgs(percent, data.Muted));
+        RaiseVolumeStateChanged(percent, data.Muted);
+    }
+
+    /// <summary>Raised from CoreAudio callback / thread-pool threads: a throwing handler must not escape.</summary>
+    private void RaiseVolumeStateChanged(float percent, bool muted)
+    {
+        try
+        {
+            VolumeStateChanged?.Invoke(this, new AudioVolumeStateChangedEventArgs(percent, muted));
+        }
+        catch (Exception ex)
+        {
+            DiagnosticsLog.Log($"[AudioController] VolumeStateChanged handler error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Runs <paramref name="action"/> against the cached render (or microphone) endpoint volume.
+    /// A failure — typically AUDCLNT_E_DEVICE_INVALIDATED after an unplug or format change, which
+    /// used to escape GetMute/GetMicMute or leave the stale endpoint cached forever — rebuilds the
+    /// endpoints once and retries against the current default device.
+    /// </summary>
+    private bool TryWithEndpoint(bool microphone, string operation, Action<AudioEndpointVolume> action)
+    {
+        lock (_syncLock)
+        {
+            // The render endpoint is rebuilt when missing (the existing recovery path). The microphone
+            // is not: a machine without a mic would rebuild every endpoint on each status query, and
+            // OnDefaultDeviceChanged re-initialises when one appears.
+            if (!microphone && _endpointVolume is null)
+                InitializeEndpoint();
+
+            for (int attempt = 0; attempt < 2; attempt++)
+            {
+                AudioEndpointVolume? endpoint = microphone ? _micEndpointVolume : _endpointVolume;
+                if (endpoint is null)
+                    return false;
+
+                try
+                {
+                    action(endpoint);
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    DiagnosticsLog.Log($"[AudioController] {operation} failed (attempt {attempt + 1}): {ex.Message}");
+                    if (attempt == 0)
+                        InitializeEndpoint();
+                }
+            }
+
+            return false;
+        }
+    }
+
+    private static void ApplyVolume(AudioEndpointVolume endpoint, float scalar)
+    {
+        endpoint.MasterVolumeLevelScalar = scalar;
+        if (scalar > 0.001f && endpoint.Mute)
+        {
+            endpoint.Mute = false;
+        }
     }
 
     public float GetMasterVolumePercent()
     {
-        lock (_syncLock)
-        {
-            try
-            {
-                if (_endpointVolume is null)
-                    InitializeEndpoint();
-
-                if (_endpointVolume is not null)
-                    return Math.Clamp(_endpointVolume.MasterVolumeLevelScalar * 100f, 0f, 100f);
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                using var enumerator = new MMDeviceEnumerator();
-                if (enumerator.HasDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia))
-                {
-                    using var dev = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
-                    return Math.Clamp(dev.AudioEndpointVolume.MasterVolumeLevelScalar * 100f, 0f, 100f);
-                }
-            }
-            catch
-            {
-            }
-            return 0f;
-        }
+        float percent = 0f;
+        _ = TryWithEndpoint(false, "GetMasterVolume", ep => percent = Math.Clamp(ep.MasterVolumeLevelScalar * 100f, 0f, 100f));
+        return percent;
     }
 
     public void SetMasterVolumePercent(float volumePercent)
     {
         float scalar = Math.Clamp(volumePercent / 100f, 0f, 1f);
-        lock (_syncLock)
-        {
-            try
-            {
-                if (_endpointVolume is null)
-                    InitializeEndpoint();
-
-                if (_endpointVolume is not null)
-                {
-                    _endpointVolume.MasterVolumeLevelScalar = scalar;
-                    if (scalar > 0.001f && _endpointVolume.Mute)
-                    {
-                        _endpointVolume.Mute = false;
-                    }
-                    return;
-                }
-            }
-            catch (Exception ex)
-            {
-                DiagnosticsLog.Log($"[AudioController] SetMasterVolume initial attempt warning: {ex.Message}");
-            }
-
-            // Fallback: query default device directly from fresh enumerator
-            try
-            {
-                using var enumerator = new MMDeviceEnumerator();
-                if (enumerator.HasDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia))
-                {
-                    using var dev = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
-                    dev.AudioEndpointVolume.MasterVolumeLevelScalar = scalar;
-                    if (scalar > 0.001f && dev.AudioEndpointVolume.Mute)
-                    {
-                        dev.AudioEndpointVolume.Mute = false;
-                    }
-                    InitializeEndpoint();
-                }
-            }
-            catch (Exception ex)
-            {
-                DiagnosticsLog.Log($"[AudioController] SetMasterVolume recovery error: {ex.Message}");
-            }
-        }
+        _ = TryWithEndpoint(false, "SetMasterVolume", ep => ApplyVolume(ep, scalar));
     }
 
     public bool GetMute()
     {
-        lock (_syncLock)
-        {
-            if (_endpointVolume is null)
-                InitializeEndpoint();
-
-            return _endpointVolume?.Mute ?? false;
-        }
+        bool muted = false;
+        _ = TryWithEndpoint(false, "GetMute", ep => muted = ep.Mute);
+        return muted;
     }
 
     public void SetMute(bool mute)
     {
-        lock (_syncLock)
-        {
-            if (_endpointVolume is null)
-                InitializeEndpoint();
-
-            try
-            {
-                if (_endpointVolume is not null)
-                {
-                    _endpointVolume.Mute = mute;
-                    return;
-                }
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                using var enumerator = new MMDeviceEnumerator();
-                if (enumerator.HasDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia))
-                {
-                    using var dev = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
-                    dev.AudioEndpointVolume.Mute = mute;
-                    InitializeEndpoint();
-                }
-            }
-            catch
-            {
-            }
-        }
+        _ = TryWithEndpoint(false, "SetMute", ep => ep.Mute = mute);
     }
 
     public bool ToggleMute()
@@ -602,67 +621,27 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
     // Microphone Controls
     public float GetMicVolumePercent()
     {
-        lock (_syncLock)
-        {
-            if (_micEndpointVolume is null)
-                return 75f;
-
-            try
-            {
-                return Math.Clamp(_micEndpointVolume.MasterVolumeLevelScalar * 100f, 0f, 100f);
-            }
-            catch
-            {
-                return 75f;
-            }
-        }
+        float percent = 75f;
+        _ = TryWithEndpoint(true, "GetMicVolume", ep => percent = Math.Clamp(ep.MasterVolumeLevelScalar * 100f, 0f, 100f));
+        return percent;
     }
 
     public void SetMicVolumePercent(float volumePercent)
     {
         float scalar = Math.Clamp(volumePercent / 100f, 0f, 1f);
-        lock (_syncLock)
-        {
-            if (_micEndpointVolume is null)
-                return;
-
-            try
-            {
-                _micEndpointVolume.MasterVolumeLevelScalar = scalar;
-                if (scalar > 0.001f && _micEndpointVolume.Mute)
-                {
-                    _micEndpointVolume.Mute = false;
-                }
-            }
-            catch
-            {
-            }
-        }
+        _ = TryWithEndpoint(true, "SetMicVolume", ep => ApplyVolume(ep, scalar));
     }
 
     public bool GetMicMute()
     {
-        lock (_syncLock)
-        {
-            return _micEndpointVolume?.Mute ?? false;
-        }
+        bool muted = false;
+        _ = TryWithEndpoint(true, "GetMicMute", ep => muted = ep.Mute);
+        return muted;
     }
 
     public void SetMicMute(bool mute)
     {
-        lock (_syncLock)
-        {
-            if (_micEndpointVolume is not null)
-            {
-                try
-                {
-                    _micEndpointVolume.Mute = mute;
-                }
-                catch
-                {
-                }
-            }
-        }
+        _ = TryWithEndpoint(true, "SetMicMute", ep => ep.Mute = mute);
     }
 
     public bool ToggleMicMute()
@@ -672,32 +651,60 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
         return next;
     }
 
-    private void CleanupDeviceNoLock()
+    /// <summary>Pushes the (new) default endpoint's state to listeners after a device switch.</summary>
+    private void RaiseCurrentVolumeState()
     {
-        if (_endpointVolume is not null)
+        float percent = 0f;
+        bool muted = false;
+        bool read;
+        lock (_syncLock)
         {
+            AudioEndpointVolume? endpoint = _endpointVolume;
+            if (endpoint is null)
+                return;
             try
             {
-                _endpointVolume.OnVolumeNotification -= OnEndpointVolumeNotification;
+                percent = Math.Clamp(endpoint.MasterVolumeLevelScalar * 100f, 0f, 100f);
+                muted = endpoint.Mute;
+                read = true;
             }
-            catch
+            catch (Exception ex)
             {
+                DiagnosticsLog.Log($"[AudioController] Read volume after device change failed: {ex.Message}");
+                read = false;
             }
+        }
+
+        if (read)
+            RaiseVolumeStateChanged(percent, muted);
+    }
+
+    private void CleanupDeviceNoLock()
+    {
+        // Every step is isolated and every field is cleared even when a release throws (NAudio's
+        // AudioEndpointVolume.Dispose throws on a failed unregister). Previously one throw aborted the
+        // cleanup with the stale objects still cached, so each later re-initialisation threw again.
+        if (_endpointVolume is not null)
+        {
+            try { _endpointVolume.OnVolumeNotification -= OnEndpointVolumeNotification; } catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] Volume notification unsubscribe error: {ex.Message}"); }
             _endpointVolume = null;
         }
 
         _micEndpointVolume = null;
-        _micDevice?.Dispose();
+        MMDevice? micDevice = _micDevice;
         _micDevice = null;
+        try { micDevice?.Dispose(); } catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] Mic device dispose error: {ex.Message}"); }
 
-        _device?.Dispose();
+        MMDevice? device = _device;
         _device = null;
+        try { device?.Dispose(); } catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] Render device dispose error: {ex.Message}"); }
 
-        if (_enumerator is not null)
+        MMDeviceEnumerator? enumerator = _enumerator;
+        _enumerator = null;
+        if (enumerator is not null)
         {
-            try { _enumerator.UnregisterEndpointNotificationCallback(this); } catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] Unregister callback error: {ex.Message}"); }
-            _enumerator.Dispose();
-            _enumerator = null;
+            try { enumerator.UnregisterEndpointNotificationCallback(this); } catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] Unregister callback error: {ex.Message}"); }
+            try { enumerator.Dispose(); } catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] Enumerator dispose error: {ex.Message}"); }
         }
     }
 
@@ -707,20 +714,7 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
             return;
 
         _disposed = true;
-        List<WasapiLoopbackCapture> capturesToDispose;
-        lock (_syncLock)
-        {
-            capturesToDispose = new List<WasapiLoopbackCapture>(_loopbackCaptures);
-            _loopbackCaptures.Clear();
-        }
-
-        foreach (var cap in capturesToDispose)
-        {
-            cap.DataAvailable -= OnLoopbackDataAvailable;
-            cap.RecordingStopped -= OnLoopbackRecordingStopped;
-            try { cap.StopRecording(); } catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] StopRecording on dispose error: {ex.Message}"); }
-            try { cap.Dispose(); } catch (Exception ex) { DiagnosticsLog.Log($"[AudioController] Dispose on dispose error: {ex.Message}"); }
-        }
+        StopAllCaptures("Dispose");
 
         lock (_syncLock)
         {
@@ -731,15 +725,33 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
     // IMMNotificationClient implementation for automatic endpoint hotplugging
     public void OnDefaultDeviceChanged(DataFlow flow, Role role, string defaultDeviceId)
     {
-        if (flow == DataFlow.Render && role is Role.Multimedia or Role.Console)
+        bool render = flow == DataFlow.Render && role is Role.Multimedia or Role.Console;
+        // The default communications mic changing used to be ignored, leaving mic controls bound to
+        // the previous (possibly unplugged) device.
+        bool microphone = flow == DataFlow.Capture && role == Role.Communications;
+        if (!render && !microphone)
+            return;
+
+        if (render)
+            Interlocked.Exchange(ref _pendingRenderChange, 1);
+
+        // Windows raises one notification per role, so a single switch arrives as a burst that used
+        // to re-initialise (and restart capture) once per notification; only the last one acts.
+        int generation = Interlocked.Increment(ref _defaultChangeGeneration);
+        _ = Task.Run(async () =>
         {
-            _ = Task.Run(async () =>
-            {
-                await Task.Delay(180); // Let OS audio session settle
-                InitializeEndpoint();
-                StartWasapiLoopbackSpectrum();
-            });
-        }
+            await Task.Delay(180).ConfigureAwait(false); // Let OS audio session settle
+            if (_disposed || generation != Volatile.Read(ref _defaultChangeGeneration))
+                return;
+
+            bool restartCapture = Interlocked.Exchange(ref _pendingRenderChange, 0) != 0;
+            InitializeEndpoint();
+            // The frontend only reads master volume at startup; without this the slider keeps
+            // showing the previous device's level after switching outputs.
+            RaiseCurrentVolumeState();
+            if (restartCapture)
+                StartCaptureInternal();
+        });
     }
 
     public void OnDeviceStateChanged(string deviceId, DeviceState newState) { }
@@ -787,18 +799,28 @@ public sealed class AudioController : IDisposable, IMMNotificationClient
     public bool SetDefaultAudioDevice(string deviceId)
     {
         if (string.IsNullOrWhiteSpace(deviceId)) return false;
+        object? policyClient = null;
         try
         {
-            var policyConfig = (IPolicyConfig)new _PolicyConfigClient();
+            policyClient = new _PolicyConfigClient();
+            var policyConfig = (IPolicyConfig)policyClient;
             int hr1 = policyConfig.SetDefaultEndpoint(deviceId, Role.Multimedia);
             int hr2 = policyConfig.SetDefaultEndpoint(deviceId, Role.Console);
             int hr3 = policyConfig.SetDefaultEndpoint(deviceId, Role.Communications);
+            if (hr3 != 0)
+                DiagnosticsLog.Log($"[AudioController] SetDefaultEndpoint(Communications) hr=0x{hr3:X8}");
             return hr1 == 0 || hr2 == 0;
         }
         catch (Exception ex)
         {
             _lastError = ex.Message;
             return false;
+        }
+        finally
+        {
+            // One RCW per call; release it now instead of leaving it to the finalizer thread.
+            if (policyClient is not null && Marshal.IsComObject(policyClient))
+                Marshal.ReleaseComObject(policyClient);
         }
     }
 }

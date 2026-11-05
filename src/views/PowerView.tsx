@@ -1,6 +1,7 @@
 import { Check, Clock, Lock, LogOut, Moon, Power, RotateCw, Shield, X } from 'lucide-react';
 import type React from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { usePanelOpen } from '../hooks/usePanelOpen';
 import { executePowerAction, type SystemStats } from '../services/hostBridge';
 
 export interface PowerViewProps {
@@ -22,33 +23,72 @@ export const PowerView: React.FC<PowerViewProps> = ({ stats, onActionTriggered }
   const [countdownSeconds, setCountdownSeconds] = useState<number>(4);
   const [statusFeedback, setStatusFeedback] = useState<string | null>(null);
   const countdownTimerRef = useRef<number | null>(null);
+  const feedbackTimerRef = useRef<number | null>(null);
+  const panelOpen = usePanelOpen();
 
-  const clearPendingCountdown = () => {
-    if (countdownTimerRef.current) {
+  const clearPendingCountdown = useCallback(() => {
+    if (countdownTimerRef.current !== null) {
       window.clearInterval(countdownTimerRef.current);
       countdownTimerRef.current = null;
     }
     setPendingAction(null);
     setCountdownSeconds(4);
-  };
+  }, []);
 
   useEffect(() => {
     return () => {
-      if (countdownTimerRef.current) {
+      if (countdownTimerRef.current !== null) {
         window.clearInterval(countdownTimerRef.current);
+      }
+      if (feedbackTimerRef.current !== null) {
+        window.clearTimeout(feedbackTimerRef.current);
       }
     };
   }, []);
 
+  // A destructive countdown must never outlive the panel: once collapsed (and possibly suspended),
+  // a resumed timer would fire the action the next time the user opens Canopy.
+  useEffect(() => {
+    if (!panelOpen) {
+      clearPendingCountdown();
+    }
+  }, [panelOpen, clearPendingCountdown]);
+
+  // Escape cancels the pending confirmation.
+  useEffect(() => {
+    if (!pendingAction) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        clearPendingCountdown();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [pendingAction, clearPendingCountdown]);
+
+  const showFeedback = (message: string) => {
+    if (feedbackTimerRef.current !== null) {
+      window.clearTimeout(feedbackTimerRef.current);
+    }
+    setStatusFeedback(message);
+    feedbackTimerRef.current = window.setTimeout(() => {
+      feedbackTimerRef.current = null;
+      setStatusFeedback(null);
+    }, 3000);
+  };
+
   const triggerDirectAction = async (action: PowerActionType) => {
     clearPendingCountdown();
-    setStatusFeedback(`Executing ${action}...`);
+    showFeedback(`Executing ${action}...`);
     onActionTriggered?.(action);
     try {
-      await executePowerAction(action);
+      const ok = await executePowerAction(action);
+      if (!ok) {
+        showFeedback(`Failed to execute ${action}`);
+      }
     } catch {
-      setStatusFeedback(`Failed to execute ${action}`);
-      window.setTimeout(() => setStatusFeedback(null), 3000);
+      showFeedback(`Failed to execute ${action}`);
     }
   };
 
@@ -253,6 +293,7 @@ export const PowerView: React.FC<PowerViewProps> = ({ stats, onActionTriggered }
               className="p-1.5 rounded-full hover:bg-white/10 active:scale-95 transition-all pointer-events-auto cursor-pointer"
               style={{ color: 'var(--theme-text-secondary)' }}
               title="Cancel action"
+              aria-label="Cancel action"
             >
               <X className="w-4 h-4" />
             </button>

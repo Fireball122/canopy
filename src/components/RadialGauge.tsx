@@ -94,6 +94,7 @@ export const RadialGauge: React.FC<RadialGaugeProps> = ({
               r={Math.max(0, radius - strokeWidth * 4.1)}
               fill="none"
               stroke="rgba(255, 255, 255, 0.08)"
+              style={{ stroke: 'var(--theme-track, rgba(255, 255, 255, 0.08))' }}
               strokeWidth={1.25}
             />
             {spokes.map((spoke) => (
@@ -105,9 +106,10 @@ export const RadialGauge: React.FC<RadialGaugeProps> = ({
                 y2={spoke.y2}
                 stroke={active ? `url(#${spokeGradientId})` : 'rgba(255, 255, 255, 0.22)'}
                 style={{
-                  stroke: active ? undefined : 'rgba(255, 255, 255, 0.22)',
+                  // Idle spokes follow the theme text colour so they stay visible on light cards.
+                  stroke: active ? undefined : 'var(--theme-text-secondary)',
                   transition: 'all 85ms ease-out',
-                  opacity: active ? Math.min(1, 0.55 + spoke.length / (size * 0.17)) : 0.45,
+                  opacity: active ? Math.min(1, 0.55 + spoke.length / (size * 0.17)) : 0.3,
                 }}
                 strokeWidth={Math.max(1.6, (size / 190) * 2.6)}
                 strokeLinecap="round"
@@ -130,6 +132,7 @@ export const RadialGauge: React.FC<RadialGaugeProps> = ({
               cy={size / 2}
               r={radius}
               stroke="rgba(255, 255, 255, 0.08)"
+              style={{ stroke: 'var(--theme-track, rgba(255, 255, 255, 0.08))' }}
               strokeWidth={strokeWidth}
               fill="transparent"
             />
@@ -174,12 +177,18 @@ export const RadialGauge: React.FC<RadialGaugeProps> = ({
       {gaugeElement}
       <div className="flex flex-col min-w-0">
         {label && (
-          <span className="text-sm font-semibold text-white/90 tracking-tight truncate tabular-nums">
+          <span
+            className="text-sm font-semibold tracking-tight truncate tabular-nums"
+            style={{ color: 'var(--theme-text-primary)' }}
+          >
             {label}
           </span>
         )}
         {sublabel && (
-          <span className="text-[11px] font-medium text-white/45 truncate tabular-nums">
+          <span
+            className="text-[11px] font-medium truncate tabular-nums"
+            style={{ color: 'var(--theme-text-secondary)' }}
+          >
             {sublabel}
           </span>
         )}

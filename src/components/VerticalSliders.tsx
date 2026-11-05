@@ -110,6 +110,8 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
 
   const handleWheel = (id: SliderId, currentVal: number, e: React.WheelEvent<HTMLDivElement>) => {
     e.stopPropagation();
+    // Horizontal touchpad swipes arrive with deltaY === 0 and must not nudge the level down.
+    if (e.deltaY === 0) return;
     const delta = e.deltaY < 0 ? 5 : -5;
     applySliderValue(id, currentVal + delta);
   };
@@ -277,7 +279,17 @@ export const VerticalSliders: React.FC<VerticalSlidersProps> = ({
             <button
               type="button"
               data-slider-icon-btn="true"
-              aria-label={`Toggle ${slider.label}`}
+              aria-label={
+                slider.id === 'volume'
+                  ? slider.muted
+                    ? 'Unmute volume'
+                    : 'Mute volume'
+                  : slider.id === 'mic'
+                    ? slider.muted
+                      ? 'Unmute microphone'
+                      : 'Mute microphone'
+                    : slider.label
+              }
               onClick={
                 slider.id === 'volume'
                   ? handleVolumeIconClick

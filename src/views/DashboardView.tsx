@@ -201,7 +201,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const handleSelectAudioDevice = async (dev: AudioDeviceInfo) => {
     try {
-      await setDefaultAudioDevice(dev.id);
+      const ok = await setDefaultAudioDevice(dev.id);
+      if (!ok) {
+        onToastNotification?.(`Could not switch to ${dev.name}`);
+        return;
+      }
       setAudioOutputs((prev) => prev.map((d) => ({ ...d, is_default: d.id === dev.id })));
       onToastNotification?.(`Audio output set to ${dev.name}`);
     } catch {
@@ -242,18 +246,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     [effectiveDuration],
   );
 
+  // Seeking is meaningless without a known track length (live streams, idle sessions).
+  const canSeek = effectiveDuration > 0;
+
   const handleRingPointerDown = useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
+      if (!canSeek) return;
       e.currentTarget.setPointerCapture(e.pointerId);
       const secs = calcScrubSecs(e);
       setScrubPreviewSecs(secs);
     },
-    [calcScrubSecs],
+    [calcScrubSecs, canSeek],
   );
 
   const handleRingPointerMove = useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
-      if (scrubPreviewSecs !== null || e.buttons === 1) {
+      // Only scrub a drag that started on the ring (pointer is captured on pointerdown).
+      if (scrubPreviewSecs !== null) {
         const secs = calcScrubSecs(e);
         setScrubPreviewSecs(secs);
       }
@@ -270,7 +279,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           // Ignore
         }
       }
-      const secs = scrubPreviewSecs ?? calcScrubSecs(e);
+      // A release that never started on the ring (press began elsewhere) must not seek.
+      if (scrubPreviewSecs === null) return;
+      const secs = calcScrubSecs(e);
       setScrubPreviewSecs(null);
       onSeek(secs);
     },
@@ -513,8 +524,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <button
                 type="button"
                 onClick={async () => {
-                  const res = await toggleCaffeine();
-                  setCaffeineActive(res.enabled);
+                  try {
+                    const res = await toggleCaffeine();
+                    setCaffeineActive(res.enabled);
+                  } catch {
+                    // Host failure is surfaced by the bridge-error toast; keep the real state.
+                  }
                 }}
                 className="canopy-pill px-2 py-1 flex items-center gap-1 text-[10px] font-medium transition-all hover:scale-105 active:scale-95 cursor-pointer pointer-events-auto"
                 style={{
@@ -541,7 +556,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     const res = await toggleDnd();
                     setDndActive(res.enabled);
                   } catch {
-                    setDndActive((prev) => !prev);
+                    // Host failure is surfaced by the bridge-error toast; do not fake a toggle.
                   }
                 }}
                 className="canopy-pill px-2 py-1 flex items-center gap-1 text-[10px] font-medium transition-all hover:scale-105 active:scale-95 cursor-pointer pointer-events-auto"
@@ -868,9 +883,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               }}
               onWheel={(e) => {
                 e.stopPropagation();
+                if (!canSeek || e.deltaY === 0) return;
                 const delta = e.deltaY < 0 ? 5 : -5;
-                const duration = effectiveDuration || 300;
-                const newPos = Math.max(0, Math.min(duration, effectivePosition + delta));
+                const newPos = Math.max(0, Math.min(effectiveDuration, effectivePosition + delta));
                 void onSeek(newPos);
               }}
               className={`absolute w-[56px] h-[56px] rounded-full overflow-hidden border border-white/15 shadow-lg flex items-center justify-center pointer-events-auto cursor-pointer ${
@@ -958,7 +973,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             className="p-2 rounded-full transition-all active:scale-95 pointer-events-auto cursor-pointer shadow-md"
             style={{
               background: 'var(--theme-accent)',
-              color: '#11111b',
+              color: 'var(--theme-on-accent, #11111b)',
             }}
             title={isMusicPlaying ? 'Pause' : 'Play'}
           >

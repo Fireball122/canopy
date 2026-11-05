@@ -227,6 +227,95 @@ function clearPersistentActiveTabState(): void {
   }
 }
 
+/** Pre-1.0 theme names still found in old settings files and host `theme:` commands. */
+const LEGACY_THEME_ALIASES: Readonly<Record<string, CanopySettings['themeMode']>> = {
+  obsidian: 'dark',
+  alabaster: 'light',
+};
+
+/** Closed string unions: anything outside the list would leave the UI with no option selected. */
+const ENUM_SETTINGS: Readonly<Partial<Record<keyof CanopySettings, readonly string[]>>> = {
+  clockFormat: ['12h', '24h'],
+  calendarFirstDay: ['sunday', 'monday'],
+  temperatureUnit: ['fahrenheit', 'celsius'],
+  weatherLocationMode: ['auto', 'manual'],
+  themeMode: ['canopy', 'adaptive', 'dark', 'light', 'auto'],
+  mascotMode: ['bongo', 'gif', 'none'],
+  searchPosition: ['left', 'right'],
+  batteryPosition: ['left', 'right'],
+  visualizerStyle: ['radial', 'bars', 'wave'],
+  panelMonitorMode: ['cursor', 'primary'],
+  triggerMonitorScope: ['all', 'primary'],
+  panelAnchor: ['top-center', 'top-left', 'top-right'],
+};
+
+/** Optional keys whose default is `undefined`, so the default cannot describe their type. */
+const OPTIONAL_NUMBER_SETTINGS: Readonly<Record<string, true>> = {
+  manualLatitude: true,
+  manualLongitude: true,
+};
+
+const DEFAULT_SETTING_VALUES: Readonly<Record<string, unknown>> = { ...DEFAULT_SETTINGS };
+
+/** Maps a legacy theme alias (any case) to its current name; other values pass through. */
+function normalizeThemeMode(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  const lower = value.toLowerCase();
+  return Object.hasOwn(LEGACY_THEME_ALIASES, lower) ? LEGACY_THEME_ALIASES[lower] : lower;
+}
+
+function isValidSettingValue(key: string, value: unknown): boolean {
+  // Own-key checks only: `constructor`/`__proto__` in untrusted JSON must never match.
+  if (Object.hasOwn(OPTIONAL_NUMBER_SETTINGS, key)) {
+    return value === undefined || (typeof value === 'number' && Number.isFinite(value));
+  }
+  if (!Object.hasOwn(DEFAULT_SETTING_VALUES, key)) return false;
+  const allowed = ENUM_SETTINGS[key as keyof CanopySettings];
+  if (allowed) return typeof value === 'string' && allowed.includes(value);
+  const fallback = DEFAULT_SETTING_VALUES[key];
+  if (Array.isArray(fallback)) {
+    return Array.isArray(value) && value.every((item) => typeof item === 'string');
+  }
+  if (typeof fallback === 'number') return typeof value === 'number' && Number.isFinite(value);
+  if (fallback !== null && typeof fallback === 'object') {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+  }
+  return typeof value === typeof fallback;
+}
+
+function isCustomAppEntry(app: unknown): boolean {
+  return (
+    app !== null &&
+    typeof app === 'object' &&
+    'label' in app &&
+    typeof app.label === 'string' &&
+    'path' in app &&
+    typeof app.path === 'string'
+  );
+}
+
+/**
+ * Narrows untrusted settings JSON (host settings.json, localStorage, an imported file) to the keys
+ * and value types this build understands. Wrong-typed values — e.g. `pinnedApps: null` from a
+ * hand-edited or older file — are dropped so the defaults apply instead of crashing a view.
+ */
+export function sanitizeSettings(raw: unknown): Partial<CanopySettings> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const clean: Record<string, unknown> = {};
+  for (const [key, rawValue] of Object.entries(raw)) {
+    const value: unknown = key === 'themeMode' ? normalizeThemeMode(rawValue) : rawValue;
+    if (!isValidSettingValue(key, value)) continue;
+    if (key === 'customApps' && value !== null && typeof value === 'object') {
+      clean[key] = Object.fromEntries(
+        Object.entries(value).filter(([, app]: [string, unknown]) => isCustomAppEntry(app)),
+      );
+      continue;
+    }
+    clean[key] = value;
+  }
+  return clean as Partial<CanopySettings>;
+}
+
 function loadStoredSettings(): CanopySettings {
   if (typeof window === 'undefined') {
     return { ...DEFAULT_SETTINGS };
@@ -237,13 +326,9 @@ function loadStoredSettings(): CanopySettings {
     if (!raw) {
       return { ...DEFAULT_SETTINGS };
     }
-    const parsed = JSON.parse(raw) as Partial<CanopySettings>;
-    if (!parsed || typeof parsed !== 'object') {
-      return { ...DEFAULT_SETTINGS };
-    }
     return {
       ...DEFAULT_SETTINGS,
-      ...parsed,
+      ...sanitizeSettings(JSON.parse(raw)),
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -264,6 +349,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
   const [hydratedFromHost, setHydratedFromHost] = useState(false);
   const pendingUpdatesRef = useRef<Partial<CanopySettings>>({});
+  const pendingSaveRef = useRef<CanopySettings | null>(null);
 
   // The host copy at %LOCALAPPDATA%\Canopy\settings.json is the durable store; the WebView2
   // localStorage copy is only a fast cache. Read the host file first — writing it before this
@@ -272,22 +358,14 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     let active = true;
     void (async () => {
       try {
-        const hostSettings = await getSettingsJson<Partial<CanopySettings>>();
+        const hostSettings = sanitizeSettings(await getSettingsJson());
         if (active) {
-          setSettings((prev) => {
-            const merged: CanopySettings = {
-              ...prev,
-              ...(hostSettings && typeof hostSettings === 'object' ? hostSettings : {}),
-              ...pendingUpdatesRef.current,
-            };
-            pendingUpdatesRef.current = {};
-            applyGlassCssVariables(merged.glassBlurStrength, merged.glassOpacity);
-            void saveSettingsJson(merged as unknown as Record<string, unknown>).catch(
-              () => undefined,
-            );
-            return merged;
-          });
-          setHydratedFromHost(true);
+          // Edits made before the host file arrived are re-applied on top of it. Read them here,
+          // not inside the updater: updaters must stay pure (StrictMode runs them twice).
+          const pending = pendingUpdatesRef.current;
+          pendingUpdatesRef.current = {};
+          // The settings effect below persists the merged result once hydration flips.
+          setSettings((prev) => ({ ...prev, ...hostSettings, ...pending }));
         }
       } catch {
         // Unreadable host file (first run, permissions): keep the localStorage copy.
@@ -331,23 +409,14 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
 
     const handleThemeChanged = (e: Event) => {
-      const detail = (e as CustomEvent<{ mode?: string; theme?: string }>).detail;
-      const targetMode = detail?.mode || detail?.theme;
-      if (typeof targetMode === 'string') {
-        const validModes: Array<CanopySettings['themeMode']> = [
-          'canopy',
-          'adaptive',
-          'dark',
-          'light',
-          'auto',
-        ];
-        if (validModes.includes(targetMode as CanopySettings['themeMode'])) {
-          const nextMode = targetMode as CanopySettings['themeMode'];
-          setSettings((prev) => {
-            if (prev.themeMode === nextMode) return prev;
-            return { ...prev, themeMode: nextMode };
-          });
-        }
+      const detail = (e as CustomEvent<unknown>).detail;
+      if (!detail || typeof detail !== 'object') return;
+      const requested =
+        ('mode' in detail && detail.mode) || ('theme' in detail && detail.theme) || undefined;
+      const nextMode = normalizeThemeMode(requested);
+      if (isValidSettingValue('themeMode', nextMode)) {
+        const themeMode = nextMode as CanopySettings['themeMode'];
+        setSettings((prev) => (prev.themeMode === themeMode ? prev : { ...prev, themeMode }));
       }
     };
 
@@ -374,11 +443,26 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       // Ignore storage quota errors
     }
     if (!hydratedFromHost) return;
+    pendingSaveRef.current = settings;
     const timer = window.setTimeout(() => {
+      pendingSaveRef.current = null;
       void saveSettingsJson(settings as unknown as Record<string, unknown>).catch(() => undefined);
     }, 250);
     return () => window.clearTimeout(timer);
   }, [settings, hydratedFromHost]);
+
+  // A reload (palette "Reload Canopy UI", host reload_ui) inside the 250 ms debounce would drop the
+  // last edit from settings.json, and on the next start the stale host file wins over localStorage.
+  useEffect(() => {
+    const flushPendingSave = () => {
+      const pending = pendingSaveRef.current;
+      if (!pending) return;
+      pendingSaveRef.current = null;
+      void saveSettingsJson(pending as unknown as Record<string, unknown>).catch(() => undefined);
+    };
+    window.addEventListener('pagehide', flushPendingSave);
+    return () => window.removeEventListener('pagehide', flushPendingSave);
+  }, []);
 
   // Push every host-relevant setting to the native host in one message.
   useEffect(() => {

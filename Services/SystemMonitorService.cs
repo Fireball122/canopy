@@ -54,12 +54,15 @@ public readonly record struct SystemTelemetrySnapshot(
 public sealed class SystemMonitorService : IDisposable
 {
     private PerformanceCounter? _cpuCounter;
-    private PerformanceCounter? _availMemCounter;
     private PerformanceCounter[]? _coreCounters;
     private volatile bool _countersReady;
-    private bool _disposed;
+    private volatile bool _disposed;
     private volatile bool _isPaused;
     private SystemTelemetrySnapshot? _lastSnapshot;
+
+    // Sample() can be reached by overlapping bridge calls (and from any thread); all per-tick delta
+    // state it mutates (CPU times, NIC byte maps, counters, last snapshot) is guarded by this gate.
+    private readonly object _sampleGate = new();
 
     public void Pause() => _isPaused = true;
     public void Resume() => _isPaused = false;
@@ -74,21 +77,32 @@ public sealed class SystemMonitorService : IDisposable
     private int _wmiThermalFailures;
     private long _lastHeavySampleTick;
     private int _heavySampleInFlight;
-    private long _prevNetBytesRecv;
-    private long _prevNetBytesSent;
+    // Per-adapter byte counters keyed by NetworkInterface.Id. Summing totals over a changing adapter
+    // set reported an adapter's whole lifetime traffic as one tick's throughput the moment it came up
+    // (VPN connect, Wi-Fi reconnect), producing multi-GB/s spikes.
+    private Dictionary<string, (long Rx, long Tx)> _prevNicBytes = new(StringComparer.Ordinal);
+    private Dictionary<string, (long Rx, long Tx)> _nextNicBytes = new(StringComparer.Ordinal);
     private long _prevNetTick;
-    private double _lastNetDownKbps = 23.3;
-    private double _lastNetUpKbps = 14.2;
+    private double _lastNetDownKbps;
+    private double _lastNetUpKbps;
     private IReadOnlyList<InstalledAppSnapshot>? _cachedInstalledApps;
     private readonly Dictionary<int, (TimeSpan TotalTime, long SampleTick)> _processCpuHistory = new();
     private double? _cachedGpuUsage;
     private double? _cachedGpuTempC;
-    // Volatile snapshot: built once on a background task, read on the sampling thread. Assigning a
-    // fully-populated list means readers never observe a half-filled collection.
-    private volatile List<PerformanceCounter> _gpuCounters = [];
+    // GPU Engine instances are per process (pid_N_..._engtype_3D) and churn constantly, so the
+    // category is read in one query per heavy tick and diffed against the previous raw samples.
+    // Only touched from the serialized heavy-telemetry task.
+    private PerformanceCounterCategory? _gpuEngineCategory;
+    private Dictionary<string, CounterSample> _prevGpuSamples = new(StringComparer.Ordinal);
+    private Dictionary<string, CounterSample> _nextGpuSamples = new(StringComparer.Ordinal);
+    private int _gpuPerfFailures;
+    private int _gpuWmiFailures;
+    private static int s_hardwareNameAttempts;
     private static string? _staticGpuName;
     private static string? _staticCpuName;
     private static readonly string? NvidiaSmiPath = FindNvidiaSmi();
+    private static readonly TimeSpan WmiQueryTimeout = TimeSpan.FromSeconds(3);
+    private const int MaxTerminalOutputChars = 200_000;
 
     /// <summary>
     /// Shares the host's process-wide logger so suppressed telemetry failures are recorded
@@ -113,8 +127,7 @@ public sealed class SystemMonitorService : IDisposable
         PrimeSystemTimes();
         PrimeNetworkBytes();
         _ = Task.Run(InitializePerformanceCounters);
-        _ = Task.Run(InitializeGpuCounter);
-        _ = Task.Run(RefreshHeavyTelemetry);
+        TryStartHeavyRefresh(Environment.TickCount64);
     }
 
     private void InitializePerformanceCounters()
@@ -122,10 +135,7 @@ public sealed class SystemMonitorService : IDisposable
         try
         {
             var cpu = new PerformanceCounter("Processor", "% Processor Time", "_Total", true);
-            var mem = new PerformanceCounter("Memory", "Available MBytes", string.Empty, true);
-
             _ = cpu.NextValue();
-            _ = mem.NextValue();
 
             int coreCount = Math.Max(1, Environment.ProcessorCount);
             var cores = new List<PerformanceCounter>(coreCount);
@@ -152,50 +162,54 @@ public sealed class SystemMonitorService : IDisposable
                 }
             }
 
-            if (_disposed)
+            lock (_sampleGate)
             {
-                cpu.Dispose();
-                mem.Dispose();
-                foreach (var c in cores) c.Dispose();
-                return;
-            }
+                if (_disposed)
+                {
+                    cpu.Dispose();
+                    foreach (var c in cores) c.Dispose();
+                    return;
+                }
 
-            _cpuCounter = cpu;
-            _availMemCounter = mem;
-            if (cores.Count > 0)
-                _coreCounters = cores.ToArray();
-            _countersReady = true;
+                _cpuCounter = cpu;
+                if (cores.Count > 0)
+                    _coreCounters = cores.ToArray();
+                _countersReady = true;
+            }
         }
-        catch
+        catch (Exception ex)
         {
+            Log.WriteException(nameof(InitializePerformanceCounters), ex);
             _countersReady = false;
         }
     }
-    private void InitializeGpuCounter()
+
+    /// <summary>
+    /// Starts one background heavy-telemetry pass unless one is already running. The pass mutates
+    /// non-thread-safe state (<see cref="_processCpuHistory"/>, the GPU sample maps), so it must never
+    /// overlap itself — the constructor's initial pass used to bypass this guard and race the first tick.
+    /// </summary>
+    private void TryStartHeavyRefresh(long nowTick)
     {
-        try
+        if (Interlocked.CompareExchange(ref _heavySampleInFlight, 1, 0) != 0)
+            return;
+
+        _lastHeavySampleTick = nowTick;
+        _ = Task.Run(() =>
         {
-            var category = new PerformanceCounterCategory("GPU Engine");
-            var counters = new List<PerformanceCounter>();
-            foreach (string instance in category.GetInstanceNames())
+            try
             {
-                if (!instance.EndsWith("engtype_3D", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                var counter = new PerformanceCounter("GPU Engine", "Utilization Percentage", instance, true);
-                _ = counter.NextValue(); // prime: the first read of a counter is always 0
-                counters.Add(counter);
+                RefreshHeavyTelemetry();
             }
-
-            if (_disposed)
+            catch (Exception ex)
             {
-                foreach (var counter in counters) counter.Dispose();
-                return;
+                Log.WriteException(nameof(RefreshHeavyTelemetry), ex);
             }
-
-            _gpuCounters = counters;
-        }
-        catch (Exception ex) { Log.WriteException(nameof(InitializeGpuCounter), ex); }
+            finally
+            {
+                Interlocked.Exchange(ref _heavySampleInFlight, 0);
+            }
+        });
     }
 
 
@@ -211,19 +225,27 @@ public sealed class SystemMonitorService : IDisposable
 
     private void PrimeNetworkBytes()
     {
-        var (rx, tx) = ReadTotalNetworkBytes();
-        _prevNetBytesRecv = rx;
-        _prevNetBytesSent = tx;
+        ReadNetworkBytes(_prevNicBytes);
         _prevNetTick = Environment.TickCount64;
     }
 
-    private static (long RxBytes, long TxBytes) ReadTotalNetworkBytes()
+    private static void ReadNetworkBytes(Dictionary<string, (long Rx, long Tx)> into)
     {
-        long rx = 0;
-        long tx = 0;
+        into.Clear();
+        NetworkInterface[] nics;
         try
         {
-            foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+            nics = NetworkInterface.GetAllNetworkInterfaces();
+        }
+        catch (Exception ex)
+        {
+            Log.WriteException(nameof(ReadNetworkBytes), ex);
+            return;
+        }
+
+        foreach (var nic in nics)
+        {
+            try
             {
                 if (nic.OperationalStatus != OperationalStatus.Up ||
                     nic.NetworkInterfaceType == NetworkInterfaceType.Loopback)
@@ -231,15 +253,14 @@ public sealed class SystemMonitorService : IDisposable
                     continue;
                 }
                 var stats = nic.GetIPv4Statistics();
-                rx += stats.BytesReceived;
-                tx += stats.BytesSent;
+                into[nic.Id] = (stats.BytesReceived, stats.BytesSent);
+            }
+            catch (Exception ex)
+            {
+                // One adapter failing its stats query must not zero the others.
+                Log.WriteException(nameof(ReadNetworkBytes), ex);
             }
         }
-        catch (Exception ex)
-        {
-            Log.WriteException(nameof(ReadTotalNetworkBytes), ex);
-        }
-        return (rx, tx);
     }
 
     private (double DownKbps, double UpKbps) SampleNetworkKbps()
@@ -251,12 +272,21 @@ public sealed class SystemMonitorService : IDisposable
             return (_lastNetDownKbps, _lastNetUpKbps);
         }
 
-        var (rx, tx) = ReadTotalNetworkBytes();
-        long diffRx = Math.Max(0L, rx - _prevNetBytesRecv);
-        long diffTx = Math.Max(0L, tx - _prevNetBytesSent);
+        ReadNetworkBytes(_nextNicBytes);
+        long diffRx = 0;
+        long diffTx = 0;
+        foreach (var (id, current) in _nextNicBytes)
+        {
+            // Adapters that just came up have no baseline yet, and a driver reset makes counters go
+            // backwards; neither is traffic from this interval.
+            if (_prevNicBytes.TryGetValue(id, out var previous))
+            {
+                diffRx += Math.Max(0L, current.Rx - previous.Rx);
+                diffTx += Math.Max(0L, current.Tx - previous.Tx);
+            }
+        }
 
-        _prevNetBytesRecv = rx;
-        _prevNetBytesSent = tx;
+        (_prevNicBytes, _nextNicBytes) = (_nextNicBytes, _prevNicBytes);
         _prevNetTick = now;
 
         double seconds = elapsedMs / 1000.0;
@@ -267,6 +297,14 @@ public sealed class SystemMonitorService : IDisposable
 
     public SystemTelemetrySnapshot Sample()
     {
+        lock (_sampleGate)
+        {
+            return SampleLocked();
+        }
+    }
+
+    private SystemTelemetrySnapshot SampleLocked()
+    {
         if (_isPaused && _lastSnapshot.HasValue)
             return _lastSnapshot.Value;
 
@@ -276,20 +314,9 @@ public sealed class SystemMonitorService : IDisposable
         (double netDownKbps, double netUpKbps) = SampleNetworkKbps();
 
         long nowTick = Environment.TickCount64;
-        if (nowTick - _lastHeavySampleTick > 2500 && Interlocked.CompareExchange(ref _heavySampleInFlight, 1, 0) == 0)
+        if (nowTick - _lastHeavySampleTick > 2500)
         {
-            _lastHeavySampleTick = nowTick;
-            _ = Task.Run(() =>
-            {
-                try
-                {
-                    RefreshHeavyTelemetry();
-                }
-                finally
-                {
-                    Interlocked.Exchange(ref _heavySampleInFlight, 0);
-                }
-            });
+            TryStartHeavyRefresh(nowTick);
         }
 
         double[] coreUsages = SampleCoreUsages(cpuPercent);
@@ -352,7 +379,7 @@ public sealed class SystemMonitorService : IDisposable
         var fallback = new double[count];
         for (int i = 0; i < count; i++)
         {
-            fallback[i] = Math.Round(Math.Clamp(overallCpu, 1.0, 100.0), 1);
+            fallback[i] = Math.Round(Math.Clamp(overallCpu, 0.0, 100.0), 1);
         }
         return fallback;
     }
@@ -433,7 +460,7 @@ public sealed class SystemMonitorService : IDisposable
         {
             try
             {
-                using var searcher = new ManagementObjectSearcher(@"root\WMI", "SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature");
+                using var searcher = CreateWmiSearcher(@"root\WMI", "SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature");
                 using ManagementObjectCollection results = searcher.Get();
                 bool foundTemp = false;
                 foreach (ManagementObject obj in results)
@@ -459,7 +486,8 @@ public sealed class SystemMonitorService : IDisposable
             }
             catch (Exception ex)
             {
-                _ = ex;
+                // Usually access denied (the class needs elevation); gives up after three attempts.
+                Log.WriteException("ThermalZoneQuery", ex);
                 _wmiThermalFailures++;
                 _cachedCpuTempC = null;
             }
@@ -467,8 +495,22 @@ public sealed class SystemMonitorService : IDisposable
         RefreshGpuTelemetry();
     }
 
+    private static ManagementObjectSearcher CreateWmiSearcher(string scope, string query) =>
+        // A wedged WMI provider otherwise blocks enumeration forever, which pinned the heavy-sample
+        // in-flight flag and froze top processes / GPU telemetry for the rest of the session.
+        new(scope, query, new System.Management.EnumerationOptions
+        {
+            Timeout = WmiQueryTimeout,
+            ReturnImmediately = true,
+            Rewindable = false,
+        });
+
     private void RefreshGpuTelemetry()
     {
+        // Names used to be resolved only after every usage source had failed, so machines where NVML
+        // or the GPU Engine counters work never reported a CPU or GPU name.
+        EnsureHardwareNames();
+
         // NVML is the only non-spawning source of GPU temperature; null when no NVIDIA driver is present.
         _cachedGpuTempC = NvmlGpu.TryReadTemperatureCelsius();
 
@@ -478,28 +520,17 @@ public sealed class SystemMonitorService : IDisposable
             _cachedGpuUsage = Math.Clamp(Math.Round(nvmlUsage.Value, 1), 0.0, 100.0);
             return;
         }
-        List<PerformanceCounter> gpuCounters = _gpuCounters;
-        if (gpuCounters.Count > 0)
-        {
-            try
-            {
-                double total = 0.0;
-                foreach (PerformanceCounter counter in gpuCounters)
-                {
-                    total += counter.NextValue();
-                }
-                _cachedGpuUsage = Math.Clamp(Math.Round(total, 1), 0.0, 100.0);
-                return;
-            }
-            catch (Exception ex)
-            {
-                Log.WriteException(nameof(RefreshGpuTelemetry), ex);
-            }
-        }
+
+        if (_gpuPerfFailures < 3 && TrySampleGpuEngineCounters())
+            return;
+
+        // The WMI class is backed by the same provider; stop hammering it once it keeps failing.
+        if (_gpuWmiFailures >= 3)
+            return;
 
         try
         {
-            using var searcher = new ManagementObjectSearcher(@"root\CIMV2", "SELECT UtilizationPercentage FROM Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine WHERE Name LIKE '%engtype_3D%'");
+            using var searcher = CreateWmiSearcher(@"root\CIMV2", "SELECT UtilizationPercentage FROM Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine WHERE Name LIKE '%engtype_3D%'");
             using ManagementObjectCollection results = searcher.Get();
             double sum = 0.0;
             int count = 0;
@@ -516,19 +547,94 @@ public sealed class SystemMonitorService : IDisposable
             }
             if (count > 0)
             {
-                _cachedGpuUsage = Math.Clamp(sum, 0.0, 100.0);
+                _cachedGpuUsage = Math.Clamp(Math.Round(sum, 1), 0.0, 100.0);
+                _gpuWmiFailures = 0;
+            }
+            else
+            {
+                _gpuWmiFailures++;
             }
         }
         catch (Exception ex)
         {
+            _gpuWmiFailures++;
             Log.WriteException("GpuUtilisationQuery", ex);
         }
+    }
+
+    /// <summary>
+    /// Sums 3D-engine utilisation across every live GPU Engine instance from a single category read.
+    /// The previous design primed one PerformanceCounter per instance at startup: instances belonging
+    /// to processes launched later were never counted, and the first exited process made NextValue
+    /// throw on every tick, permanently dropping to the WMI fallback.
+    /// </summary>
+    /// <returns>True when the category was readable (usage is updated once a baseline exists).</returns>
+    private bool TrySampleGpuEngineCounters()
+    {
+        try
+        {
+            _gpuEngineCategory ??= new PerformanceCounterCategory("GPU Engine");
+            InstanceDataCollection? utilization = _gpuEngineCategory.ReadCategory()["Utilization Percentage"];
+            if (utilization is null)
+            {
+                _gpuPerfFailures++;
+                return false;
+            }
+
+            _nextGpuSamples.Clear();
+            double total = 0.0;
+            bool hasBaseline = false;
+            foreach (InstanceData instance in utilization.Values)
+            {
+                string name = instance.InstanceName;
+                if (!name.EndsWith("engtype_3D", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                CounterSample sample = instance.Sample;
+                _nextGpuSamples[name] = sample;
+                if (_prevGpuSamples.TryGetValue(name, out CounterSample previous))
+                {
+                    total += CounterSample.Calculate(previous, sample);
+                    hasBaseline = true;
+                }
+            }
+
+            (_prevGpuSamples, _nextGpuSamples) = (_nextGpuSamples, _prevGpuSamples);
+            if (_prevGpuSamples.Count == 0)
+            {
+                _gpuPerfFailures++;
+                return false;
+            }
+
+            _gpuPerfFailures = 0;
+            if (hasBaseline)
+            {
+                _cachedGpuUsage = Math.Clamp(Math.Round(total, 1), 0.0, 100.0);
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _gpuPerfFailures++;
+            Log.WriteException(nameof(TrySampleGpuEngineCounters), ex);
+            return false;
+        }
+    }
+
+    private static void EnsureHardwareNames()
+    {
+        if ((!string.IsNullOrWhiteSpace(_staticGpuName) && !string.IsNullOrWhiteSpace(_staticCpuName)) ||
+            s_hardwareNameAttempts >= 3)
+        {
+            return;
+        }
+        s_hardwareNameAttempts++;
 
         if (string.IsNullOrWhiteSpace(_staticGpuName))
         {
             try
             {
-                using var searcher = new ManagementObjectSearcher(@"root\CIMV2", "SELECT Name FROM Win32_VideoController");
+                using var searcher = CreateWmiSearcher(@"root\CIMV2", "SELECT Name FROM Win32_VideoController");
                 using ManagementObjectCollection results = searcher.Get();
                 foreach (ManagementObject obj in results)
                 {
@@ -537,7 +643,7 @@ public sealed class SystemMonitorService : IDisposable
                         string? name = obj["Name"]?.ToString();
                         if (!string.IsNullOrWhiteSpace(name) && !name.Contains("Basic", StringComparison.OrdinalIgnoreCase))
                         {
-                            _staticGpuName = name;
+                            _staticGpuName = name.Trim();
                             break;
                         }
                     }
@@ -551,9 +657,15 @@ public sealed class SystemMonitorService : IDisposable
 
         if (string.IsNullOrWhiteSpace(_staticCpuName))
         {
+            // Registry read first: same string as Win32_Processor.Name without a WMI round trip.
+            _ = GetFastCpuName();
+        }
+
+        if (string.IsNullOrWhiteSpace(_staticCpuName))
+        {
             try
             {
-                using var searcher = new ManagementObjectSearcher(@"root\CIMV2", "SELECT Name FROM Win32_Processor");
+                using var searcher = CreateWmiSearcher(@"root\CIMV2", "SELECT Name FROM Win32_Processor");
                 using ManagementObjectCollection results = searcher.Get();
                 foreach (ManagementObject obj in results)
                 {
@@ -891,7 +1003,8 @@ public sealed class SystemMonitorService : IDisposable
             Log.WriteException(nameof(SampleDisk), ex);
         }
 
-        return (184.0, 512.0, 35.9);
+        // Unknown, not invented: the UI renders zeros instead of a plausible-looking fake drive.
+        return (0.0, 0.0, 0.0);
     }
 
     private double SampleCpuPercent()
@@ -933,37 +1046,22 @@ public sealed class SystemMonitorService : IDisposable
         return _lastCpuPercent;
     }
 
-    private (double UsedGb, double TotalGb, double Percent) SampleMemory()
+    private static (double UsedGb, double TotalGb, double Percent) SampleMemory()
     {
+        // ullAvailPhys is the same "Available" figure the Memory\Available MBytes counter reports,
+        // without a second performance-data query on every tick.
         var memStatus = Win32.MEMORYSTATUSEX.Create();
         if (Win32.GlobalMemoryStatusEx(ref memStatus) && memStatus.ullTotalPhys > 0)
         {
             const double bytesPerGb = 1024.0 * 1024.0 * 1024.0;
             double totalGb = memStatus.ullTotalPhys / bytesPerGb;
-            double availGb;
-
-            if (_countersReady && _availMemCounter is not null)
-            {
-                try
-                {
-                    availGb = _availMemCounter.NextValue() / 1024.0;
-                }
-                catch
-                {
-                    availGb = memStatus.ullAvailPhys / bytesPerGb;
-                }
-            }
-            else
-            {
-                availGb = memStatus.ullAvailPhys / bytesPerGb;
-            }
-
+            double availGb = memStatus.ullAvailPhys / bytesPerGb;
             double usedGb = Math.Max(0.0, totalGb - availGb);
-            double percent = totalGb > 0 ? (usedGb / totalGb) * 100.0 : memStatus.dwMemoryLoad;
+            double percent = (usedGb / totalGb) * 100.0;
             return (usedGb, totalGb, percent);
         }
 
-        return (0.0, 16.0, 0.0);
+        return (0.0, 0.0, 0.0);
     }
 
     private static string GetFastCpuName()
@@ -999,12 +1097,20 @@ public sealed class SystemMonitorService : IDisposable
                 using var proc = Process.Start(psi);
                 if (proc is not null)
                 {
-                    string outName = proc.StandardOutput.ReadToEnd().Trim();
-                    proc.WaitForExit();
-                    if (!string.IsNullOrWhiteSpace(outName))
+                    // The name line is far below the pipe buffer size, so waiting before reading cannot
+                    // deadlock; an unbounded ReadToEnd used to hang forever on a wedged driver.
+                    if (!proc.WaitForExit(3000))
                     {
-                        _staticGpuName = outName;
-                        return _staticGpuName;
+                        try { proc.Kill(); } catch (Exception killEx) { Log.WriteException("NvidiaSmiKill", killEx); }
+                    }
+                    else
+                    {
+                        string outName = proc.StandardOutput.ReadToEnd().Split('\n', 2)[0].Trim();
+                        if (!string.IsNullOrWhiteSpace(outName))
+                        {
+                            _staticGpuName = outName;
+                            return _staticGpuName;
+                        }
                     }
                 }
             }
@@ -1074,7 +1180,9 @@ public sealed class SystemMonitorService : IDisposable
         if (string.Equals(trimmed, "fastfetch", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(trimmed, "neofetch", StringComparison.OrdinalIgnoreCase))
         {
-            return GenerateFastfetchOutput();
+            // Off the caller's thread: the bridge dispatcher runs on the WPF UI thread, and the GPU
+            // name lookup may spawn nvidia-smi and walk the display-class registry.
+            return await Task.Run(GenerateFastfetchOutput);
         }
 
         Process? proc = null;
@@ -1113,6 +1221,13 @@ public sealed class SystemMonitorService : IDisposable
                 ? stdout.TrimEnd()
                 : $"{stdout.TrimEnd()}\n{stderr.TrimEnd()}".Trim();
 
+            // A chatty command (recursive listings) can emit tens of MB in 8 s; posting all of it to
+            // the WebView freezes the terminal view.
+            if (combined.Length > MaxTerminalOutputChars)
+            {
+                combined = string.Concat(combined.AsSpan(0, MaxTerminalOutputChars), "\n… (output truncated)");
+            }
+
             return string.IsNullOrWhiteSpace(combined) ? "(Command completed with no output)" : combined;
         }
         catch (OperationCanceledException)
@@ -1141,12 +1256,13 @@ public sealed class SystemMonitorService : IDisposable
 
         try
         {
-            _cpuCounter?.Dispose();
-            foreach (PerformanceCounter counter in _gpuCounters) counter.Dispose();
-            _availMemCounter?.Dispose();
-            if (_coreCounters is not null)
+            lock (_sampleGate)
             {
-                foreach (var c in _coreCounters) c.Dispose();
+                _cpuCounter?.Dispose();
+                if (_coreCounters is not null)
+                {
+                    foreach (var c in _coreCounters) c.Dispose();
+                }
             }
         }
         catch (Exception ex)

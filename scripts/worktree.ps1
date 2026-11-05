@@ -22,7 +22,21 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ScriptDir = $PSScriptRoot
-$RepoRoot = Split-Path $ScriptDir -Parent
+
+# Resolve the main checkout even when this script is invoked from a worktree's own copy: the first
+# `worktree list` entry is always the main working tree. Without this, `merge`/`abort` run from
+# inside a worktree would merge into and then delete the worktree they are running from.
+$RepoRoot = $null
+$worktreeListing = & git -C $ScriptDir worktree list --porcelain
+if ($LASTEXITCODE -eq 0) {
+  $mainEntry = @($worktreeListing | Where-Object { $_ -like 'worktree *' })[0]
+  if ($mainEntry) {
+    $RepoRoot = (Resolve-Path -LiteralPath $mainEntry.Substring('worktree '.Length)).Path
+  }
+}
+if (-not $RepoRoot) {
+  $RepoRoot = Split-Path $ScriptDir -Parent
+}
 $WorktreeBase = Join-Path (Split-Path $RepoRoot -Parent) "canopy-worktrees"
 
 function Write-Info([string]$msg) {
@@ -46,6 +60,34 @@ function Assert-FeatureName([string]$name) {
     Write-Fail "Feature name is required for action '$Action'."
     Write-Host "Usage: .\scripts\worktree.ps1 $Action <feature-name>" -ForegroundColor Yellow
     exit 1
+  }
+}
+
+# Runs a git command whose failure is tolerated (cleanup paths). Windows PowerShell 5.1 promotes
+# redirected native stderr to a terminating error under ErrorActionPreference=Stop, so a missing
+# branch or worktree would otherwise abort the script halfway through cleanup.
+function Invoke-GitTolerant {
+  $previousPreference = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    & git @args 2>&1 | Out-Null
+  }
+  finally {
+    $ErrorActionPreference = $previousPreference
+  }
+}
+
+# Removes the shared node_modules junction without following it. `git worktree remove --force`
+# must never see the junction, or it could recurse into the main checkout's node_modules.
+function Remove-NodeModulesJunction([string]$worktreeDir) {
+  $targetNodeModules = Join-Path $worktreeDir "node_modules"
+  if (-not (Test-Path -LiteralPath $targetNodeModules)) {
+    return
+  }
+  $item = Get-Item -LiteralPath $targetNodeModules -Force
+  if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+    # Non-recursive delete removes only the reparse point, never the junction target.
+    [System.IO.Directory]::Delete($targetNodeModules, $false)
   }
 }
 
@@ -103,6 +145,9 @@ switch ($Action) {
     if ((Test-Path $sourceNodeModules) -and (-not (Test-Path $targetNodeModules))) {
       Write-Info "Linking shared node_modules via NTFS junction..."
       & cmd.exe /c "mklink /J `"$targetNodeModules`" `"$sourceNodeModules`"" | Out-Null
+      if ($LASTEXITCODE -ne 0) {
+        Write-WarnNotice "Could not create the node_modules junction; run npm ci inside the worktree."
+      }
     }
 
     # Copy local environment files and uncommitted cage scripts if present
@@ -190,14 +235,18 @@ switch ($Action) {
       }
 
       Write-Info "Step 3: Cleaning up worktree and branch..."
-      # Remove junction if present
-      $targetNodeModules = Join-Path $TargetDir "node_modules"
-      if (Test-Path $targetNodeModules) {
-        & cmd.exe /c "rmdir `"$targetNodeModules`"" 2>$null | Out-Null
-      }
+      Remove-NodeModulesJunction $TargetDir
 
       git worktree remove $TargetDir --force
+      if ($LASTEXITCODE -ne 0) {
+        Write-WarnNotice "Merged, but could not remove worktree '$TargetDir'; remove it manually."
+        exit 1
+      }
       git branch -d $Branch
+      if ($LASTEXITCODE -ne 0) {
+        Write-WarnNotice "Merged, but branch '$Branch' could not be deleted."
+        exit 1
+      }
       Write-Pass "Successfully merged '$Branch' and cleaned up worktree."
     }
     finally {
@@ -214,20 +263,19 @@ switch ($Action) {
     Write-WarnNotice "Aborting and discarding worktree '$FeatureName'..."
     Push-Location $RepoRoot
     try {
-      $targetNodeModules = Join-Path $TargetDir "node_modules"
-      if (Test-Path $targetNodeModules) {
-        & cmd.exe /c "rmdir `"$targetNodeModules`"" 2>$null | Out-Null
-      }
+      Remove-NodeModulesJunction $TargetDir
 
       if (Test-Path $TargetDir) {
-        git worktree remove $TargetDir --force 2>$null
+        Invoke-GitTolerant worktree remove $TargetDir --force
       }
 
       if (Test-Path $TargetDir) {
         Remove-Item -Path $TargetDir -Recurse -Force -ErrorAction SilentlyContinue
       }
 
-      git branch -D $Branch 2>$null
+      # Drop the stale administrative entry if the directory was removed outside git.
+      Invoke-GitTolerant worktree prune
+      Invoke-GitTolerant branch -D $Branch
       Write-Pass "Worktree and branch '$Branch' discarded."
     }
     finally {

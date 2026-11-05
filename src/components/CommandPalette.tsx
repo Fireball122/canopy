@@ -1,7 +1,8 @@
 import { Calculator, Calendar as CalendarIcon, Search, Sun, Volume2 } from 'lucide-react';
 import type React from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { setReminders } from '../services/hostBridge';
+import { CALENDAR_STORAGE_KEY, type CalendarEvent, readStoredCalendarEvents } from './CalendarCard';
 
 export interface CommandPaletteItem {
   id: string;
@@ -47,6 +48,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 }) => {
   const [query, setQuery] = useState<string>(initialQuery);
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -65,7 +67,11 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       if (expr.length > 0) {
         try {
           if (/^[0-9+\-*/().\s%^]+$/.test(expr)) {
-            const result = Function(`'use strict'; return (${expr})`)();
+            // `^` reads as exponent to users; in JS it is bitwise XOR (2^3 would print 1).
+            const jsExpr = expr.replace(/\^/g, '**');
+            const raw: unknown = Function(`'use strict'; return (${jsExpr})`)();
+            // Trim binary float noise (0.1 + 0.2 = 0.30000000000000004).
+            const result = typeof raw === 'number' ? Number(raw.toPrecision(12)) : raw;
             if (typeof result === 'number' && Number.isFinite(result)) {
               dynamicCommands.push({
                 id: 'calc:result',
@@ -73,7 +79,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                 hint: 'Copy Calculation',
                 icon: <Calculator className="w-3.5 h-3.5 text-amber-400" />,
                 run: () => {
-                  void navigator.clipboard.writeText(String(result));
+                  void navigator.clipboard.writeText(String(result)).catch(() => {});
                 },
               });
             }
@@ -129,20 +135,20 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
           const yyyy = nextHour.getFullYear();
           const mon = String(nextHour.getMonth() + 1).padStart(2, '0');
           const dd = String(nextHour.getDate()).padStart(2, '0');
-          const newReminder = {
+          const newReminder: CalendarEvent = {
             id: `rem_${Date.now()}`,
             text: reminderText,
             date: `${yyyy}-${mon}-${dd}`,
             time: `${hh}:${mm}`,
           };
+          const updated = [...readStoredCalendarEvents(), newReminder];
           try {
-            const raw = window.localStorage.getItem('shell_calendar_events');
-            const existing = raw ? JSON.parse(raw) : [];
-            const updated = Array.isArray(existing) ? [...existing, newReminder] : [newReminder];
-            window.localStorage.setItem('shell_calendar_events', JSON.stringify(updated));
-            window.dispatchEvent(new CustomEvent('calendar-events-updated', { detail: updated }));
-            void setReminders(updated);
-          } catch {}
+            window.localStorage.setItem(CALENDAR_STORAGE_KEY, JSON.stringify(updated));
+          } catch {
+            // Storage full/blocked: the host copy below still schedules the reminder.
+          }
+          window.dispatchEvent(new CustomEvent('calendar-events-updated', { detail: updated }));
+          void setReminders(updated);
         },
       });
     }
@@ -154,6 +160,19 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     return filterPaletteCommands(commands, query);
   }, [commands, query, onVolumeChange, onBrightnessChange]);
 
+  // The command list can shrink under the cursor (host refreshes `commands`), so clamp.
+  const activeIndex = matches.length === 0 ? 0 : Math.min(selectedIndex, matches.length - 1);
+
+  // Keep the keyboard-highlighted row visible inside the scrollable list.
+  useEffect(() => {
+    const list = listRef.current;
+    if (!open || !list) return;
+    const row = list.children[activeIndex];
+    if (row instanceof HTMLElement) {
+      row.scrollIntoView({ block: 'nearest' });
+    }
+  }, [open, activeIndex]);
+
   if (!open) return null;
 
   return (
@@ -162,6 +181,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       onMouseDown={onClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command palette"
         className="w-[520px] rounded-2xl overflow-hidden pointer-events-auto"
         style={{
           background: 'var(--theme-bg)',
@@ -178,6 +200,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
           <input
             autoFocus
             type="text"
+            aria-label="Search commands"
             value={query}
             placeholder="Type a command…"
             onChange={(e) => {
@@ -191,17 +214,15 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                 onClose();
               } else if (e.key === 'ArrowDown') {
                 e.preventDefault();
-                setSelectedIndex((prev) =>
-                  matches.length === 0 ? 0 : (prev + 1) % matches.length,
-                );
+                setSelectedIndex(matches.length === 0 ? 0 : (activeIndex + 1) % matches.length);
               } else if (e.key === 'ArrowUp') {
                 e.preventDefault();
-                setSelectedIndex((prev) =>
-                  matches.length === 0 ? 0 : (prev - 1 + matches.length) % matches.length,
+                setSelectedIndex(
+                  matches.length === 0 ? 0 : (activeIndex - 1 + matches.length) % matches.length,
                 );
               } else if (e.key === 'Enter') {
                 e.preventDefault();
-                const cmd = matches[selectedIndex];
+                const cmd = matches[activeIndex];
                 if (cmd) {
                   onClose();
                   cmd.run();
@@ -219,14 +240,14 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
           </span>
         </div>
 
-        <div className="max-h-[230px] overflow-y-auto py-1">
+        <div ref={listRef} className="max-h-[230px] overflow-y-auto py-1">
           {matches.length === 0 ? (
             <div className="px-3 py-3 text-[11px]" style={{ color: 'var(--theme-text-secondary)' }}>
               No matching commands
             </div>
           ) : (
             matches.map((command, index) => {
-              const highlighted = index === selectedIndex;
+              const highlighted = index === activeIndex;
               return (
                 <button
                   key={command.id}

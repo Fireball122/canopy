@@ -75,8 +75,9 @@ public partial class App : Application
         }
 
         // `--hidden` starts parked (autostart / background launch), `--expand` and `--toggle`
-        // open the panel on launch, which is what the desktop shortcut asks for.
-        bool startHidden = HasArgument(e.Args, "--hidden");
+        // open the panel on launch, which is what the desktop shortcut asks for. `--collapse` on a
+        // first launch means "start parked": the panel is not open yet, so there is nothing to collapse.
+        bool startHidden = HasArgument(e.Args, "--hidden") || HasArgument(e.Args, "--collapse");
         bool forceExpand = HasArgument(e.Args, "--expand") || HasArgument(e.Args, "--toggle");
         bool startExpanded = forceExpand || (!startHidden && HostPreferences.LoadShowPanelOnLaunch());
 
@@ -93,27 +94,24 @@ public partial class App : Application
 
         StartExpandSignalListener(mainWindow);
 
-        if (HasArgument(e.Args, "--test-notify"))
-        {
-            Dispatcher.InvokeAsync(async () =>
-            {
-                await Task.Delay(500);
-                NotificationWindow.ShowNotification(
-                    "Canopy Reminder: Raindrop to Pill Capsule alert working seamlessly!",
-                    "Canopy Reminder");
-            });
-        }
-
+        // Open/close requests are already folded into startExpanded. Replaying them would race the
+        // first expand (`--toggle` collapsed the panel it had just opened), and tab/theme/notify
+        // events posted before the bundle has loaded were silently dropped, so wait for the UI.
         string? startupCmd = ParseCommandLineCommand(e.Args);
-        if (!string.IsNullOrWhiteSpace(startupCmd))
+        if (!string.IsNullOrWhiteSpace(startupCmd) && !IsOpenCloseCommand(startupCmd))
         {
             _ = mainWindow.Dispatcher.InvokeAsync(async () =>
             {
-                await Task.Delay(350);
+                await mainWindow.WaitForUiReadyAsync(TimeSpan.FromSeconds(15));
                 ExecuteControlCommand(mainWindow, startupCmd);
             });
         }
     }
+
+    private static bool IsOpenCloseCommand(string command) =>
+        command.Equals("expand", StringComparison.OrdinalIgnoreCase) ||
+        command.Equals("collapse", StringComparison.OrdinalIgnoreCase) ||
+        command.Equals("toggle", StringComparison.OrdinalIgnoreCase);
 
     private static bool HasArgument(string[] args, string name) =>
         args.Any(arg => string.Equals(arg, name, StringComparison.OrdinalIgnoreCase));
@@ -289,10 +287,13 @@ public partial class App : Application
     {
         try
         {
+            // OnStartup blocks on this task from the UI thread, so no continuation may be marshalled
+            // back to the dispatcher: ConnectAsync completes on the thread pool, and resuming on the
+            // captured DispatcherSynchronizationContext deadlocked every second launch.
             using var client = new NamedPipeClientStream(".", ControlPipeName, PipeDirection.Out);
-            await client.ConnectAsync(timeoutMs);
+            await client.ConnectAsync(timeoutMs).ConfigureAwait(false);
             using var writer = new StreamWriter(client) { AutoFlush = true };
-            await writer.WriteLineAsync(command);
+            await writer.WriteLineAsync(command).ConfigureAwait(false);
             return true;
         }
         catch
@@ -317,20 +318,34 @@ public partial class App : Application
                         PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
                     await server.WaitForConnectionAsync(token);
                     using var reader = new StreamReader(server);
-                    string? line = await reader.ReadLineAsync(token);
+                    // A client that connects but never writes must not park the only listener forever.
+                    using var readCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+                    readCts.CancelAfter(TimeSpan.FromSeconds(2));
+                    string? line = await reader.ReadLineAsync(readCts.Token);
                     if (!string.IsNullOrWhiteSpace(line))
                     {
                         _ = mainWindow.Dispatcher.InvokeAsync(() => ExecuteControlCommand(mainWindow, line));
                     }
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
                 {
                     break;
+                }
+                catch (OperationCanceledException)
+                {
+                    _log.Write("ControlPipeServer: client connected but sent no command within 2s");
                 }
                 catch (Exception ex)
                 {
                     _log.WriteException("ControlPipeServer", ex);
-                    await Task.Delay(250, token);
+                    try
+                    {
+                        await Task.Delay(250, token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
                 }
             }
         }, token);

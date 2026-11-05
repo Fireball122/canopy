@@ -258,16 +258,17 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initial
   const ramUsage = Math.round(stats.ram_usage || 0);
   const diskUsage = Math.round(stats.disk_usage || 0);
 
-  const ramUsedGb = Number.isFinite(stats.ram_used_gb) ? stats.ram_used_gb : 5.4;
-  const ramTotalGb = Number.isFinite(stats.ram_total_gb) ? stats.ram_total_gb : 16.0;
+  const ramUsedGb = Number.isFinite(stats.ram_used_gb) ? stats.ram_used_gb : 0;
+  const ramTotalGb = Number.isFinite(stats.ram_total_gb) ? stats.ram_total_gb : 0;
   const diskTotalGb = stats.disk_total_gb || 0;
-  const diskUsedGb = stats.disk_used_gb || Math.round((diskUsage / 100) * (diskTotalGb || 100));
+  const diskUsedGb = stats.disk_used_gb || Math.round((diskUsage / 100) * diskTotalGb);
   const storageFreeGb = Math.max(0, Math.round(diskTotalGb - diskUsedGb));
 
+  // Never invent throughput: an invalid sample reads as idle rather than a fake rate.
   const netDownKbps =
-    Number.isFinite(stats.net_down_kbps) && stats.net_down_kbps >= 0 ? stats.net_down_kbps : 23.3;
+    Number.isFinite(stats.net_down_kbps) && stats.net_down_kbps >= 0 ? stats.net_down_kbps : 0;
   const netUpKbps =
-    Number.isFinite(stats.net_up_kbps) && stats.net_up_kbps >= 0 ? stats.net_up_kbps : 1433.6;
+    Number.isFinite(stats.net_up_kbps) && stats.net_up_kbps >= 0 ? stats.net_up_kbps : 0;
 
   useEffect(() => {
     setGpuHistory((prev) => [...prev.slice(1), gpuUsage]);
@@ -306,57 +307,19 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initial
     100,
     Math.max(6, Math.round((Math.log10(netUpKbps + 1) / 5) * 100)),
   );
-  // Derive 8-16 logical core utilization bars from stats.core_usages or realistic distribution
-  const coreUsages: number[] = useMemo(() => {
-    if (Array.isArray(stats.core_usages) && stats.core_usages.length > 0) {
-      return stats.core_usages.slice(0, 32).map((v) => Math.min(100, Math.max(0, Math.round(v))));
-    }
-    const base = stats.cpu_usage || 18;
-    const offsets = [6, -4, 11, -7, 3, -2, 8, -5, 4, -6, 9, -3];
-    return offsets.map((offset, idx) =>
-      Math.min(100, Math.max(2, Math.round(base + offset + ((idx % 3) - 1) * 2))),
-    );
-  }, [stats.core_usages, stats.cpu_usage]);
+  // Per-core bars and the process table show host data only; fabricated rows would read as real.
+  const coreUsages: number[] = useMemo(
+    () =>
+      Array.isArray(stats.core_usages)
+        ? stats.core_usages.slice(0, 32).map((v) => Math.min(100, Math.max(0, Math.round(v))))
+        : [],
+    [stats.core_usages],
+  );
 
-  // Top 5 resource-consuming processes from stats.top_processes or realistic fallback
-  const topProcesses: ProcessEntry[] = useMemo(() => {
-    if (Array.isArray(stats.top_processes) && stats.top_processes.length > 0) {
-      return stats.top_processes.slice(0, 5);
-    }
-    const baseCpu = Math.max(4, stats.cpu_usage || 18);
-    return [
-      {
-        name: 'dwm.exe (Desktop Window Manager)',
-        pid: 1104,
-        cpu_usage: Number((baseCpu * 0.24).toFixed(1)),
-        memory_mb: 214.6,
-      },
-      {
-        name: 'canopy-shell.exe',
-        pid: 4812,
-        cpu_usage: Number((baseCpu * 0.16).toFixed(1)),
-        memory_mb: 68.4,
-      },
-      {
-        name: 'msedgewebview2.exe',
-        pid: 9240,
-        cpu_usage: Number((baseCpu * 0.14).toFixed(1)),
-        memory_mb: 164.2,
-      },
-      {
-        name: 'Spotify.exe',
-        pid: 7320,
-        cpu_usage: Number((baseCpu * 0.11).toFixed(1)),
-        memory_mb: 312.8,
-      },
-      {
-        name: 'explorer.exe',
-        pid: 3896,
-        cpu_usage: Number((baseCpu * 0.08).toFixed(1)),
-        memory_mb: 142.0,
-      },
-    ];
-  }, [stats.top_processes, stats.cpu_usage]);
+  const topProcesses: ProcessEntry[] = useMemo(
+    () => (Array.isArray(stats.top_processes) ? stats.top_processes.slice(0, 5) : []),
+    [stats.top_processes],
+  );
 
   return (
     <div className="w-full h-full flex flex-col gap-2 overflow-y-auto pr-0.5 pointer-events-auto select-none">
@@ -472,7 +435,7 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initial
             </span>
           </div>
 
-          <div className="flex items-center gap-1 bg-[var(--theme-track, rgba(255,255,255,0.05))] p-0.5 rounded-full border border-[var(--theme-border, rgba(255,255,255,0.08))]">
+          <div className="flex items-center gap-1 bg-[var(--theme-track)] p-0.5 rounded-full border border-[var(--theme-border)]">
             <button
               type="button"
               onClick={() => toggleNetworkViewMode('bars')}
@@ -676,6 +639,14 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initial
               </span>
             </div>
 
+            {coreUsages.length === 0 && (
+              <div
+                className="py-3 text-center text-[10px] font-mono"
+                style={{ color: 'var(--theme-text-secondary)' }}
+              >
+                Waiting for per-core data…
+              </div>
+            )}
             <div className="grid grid-cols-4 gap-1.5">
               {coreUsages.map((load, idx) => (
                 <div
@@ -775,6 +746,14 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initial
 
             {/* Process Rows */}
             <div className="space-y-1">
+              {topProcesses.length === 0 && (
+                <div
+                  className="py-3 text-center text-[10px] font-mono"
+                  style={{ color: 'var(--theme-text-secondary)' }}
+                >
+                  Waiting for process data…
+                </div>
+              )}
               {topProcesses.map((proc) => (
                 <div
                   key={`${proc.pid}-${proc.name}`}
@@ -803,7 +782,10 @@ export const PerformanceView: React.FC<PerformanceViewProps> = ({ stats, initial
                   >
                     {proc.cpu_usage.toFixed(1)}%
                   </span>
-                  <span className="col-span-2 text-right text-[#89dceb] text-[10px]">
+                  <span
+                    className="col-span-2 text-right text-[10px]"
+                    style={{ color: 'var(--theme-text-secondary)' }}
+                  >
                     {Math.round(proc.memory_mb)} MB
                   </span>
                 </div>

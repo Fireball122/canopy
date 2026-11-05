@@ -45,6 +45,7 @@ import {
   setHotspotConfig,
   toggleHotspot as toggleHostHotspot,
   togglePowerSaver as toggleHostPowerSaver,
+  type WifiState,
 } from '../services/hostBridge';
 
 export interface NetworkViewProps {
@@ -53,7 +54,7 @@ export interface NetworkViewProps {
 }
 
 function formatLinkSpeed(speedMbps?: number): string {
-  if (!speedMbps || speedMbps <= 0) return '1 Gbps';
+  if (!speedMbps || speedMbps <= 0) return '—';
   if (speedMbps >= 1000) {
     const gbps = speedMbps / 1000;
     return Number.isInteger(gbps) ? `${gbps} Gbps` : `${gbps.toFixed(1)} Gbps`;
@@ -67,7 +68,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
   const [wifiEnabled, setWifiEnabled] = useState<boolean>(true);
   const [connectedSsid, setConnectedSsid] = useState<string | null>(null);
   const [wifiSignal, setWifiSignal] = useState<number>(0);
-  const [wifiBand, setWifiBand] = useState<string>('5 GHz');
+  const [wifiBand, setWifiBand] = useState<string>('');
   const [wifiProfiles, setWifiProfiles] = useState<string[]>([]);
 
   const [bluetoothEnabled, setBluetoothEnabled] = useState<boolean>(true);
@@ -87,8 +88,8 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
   // Bluetooth Telemetry & Radio Details
   const [bluetoothAdapterName, setBluetoothAdapterName] =
     useState<string>('Bluetooth Radio Adapter');
-  const [bluetoothVersion, setBluetoothVersion] = useState<string>('Bluetooth 5.2');
-  const [bluetoothLmp, setBluetoothLmp] = useState<string>('LMP 11.8710');
+  const [bluetoothVersion, setBluetoothVersion] = useState<string>('—');
+  const [bluetoothLmp, setBluetoothLmp] = useState<string>('—');
   const [bluetoothConnectedCount, setBluetoothConnectedCount] = useState<number>(0);
   const [bluetoothRxKbps, setBluetoothRxKbps] = useState<number>(0);
   const [bluetoothTxKbps, setBluetoothTxKbps] = useState<number>(0);
@@ -120,10 +121,12 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
   const [copiedIp, setCopiedIp] = useState<boolean>(false);
 
   // Fetch real hardware telemetry from host
-  const refreshAll = useCallback(async () => {
+  const refreshAll = useCallback(async (): Promise<WifiState | null> => {
     setIsRefreshing(true);
     try {
-      const [adapList, wf, bt, hs, pm] = await Promise.all([
+      // allSettled: one failing subsystem (e.g. no Bluetooth radio, hotspot API missing) must not
+      // discard the adapter/Wi-Fi data that did arrive.
+      const [adapRes, wfRes, btRes, hsRes, pmRes] = await Promise.allSettled([
         getNetworkAdapters(),
         getWifiState(),
         getBluetoothState(),
@@ -131,37 +134,51 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
         getPowerMode(),
       ]);
 
-      setAdapters(adapList);
+      if (adapRes.status === 'fulfilled') {
+        setAdapters(adapRes.value);
+      }
 
-      setWifiEnabled(wf.enabled);
-      setConnectedSsid(wf.connected ? wf.ssid || 'Connected' : null);
-      setWifiSignal(wf.signal || 0);
-      if (wf.band) setWifiBand(wf.band);
-      setWifiProfiles(wf.profiles || []);
+      if (wfRes.status === 'fulfilled') {
+        const wf = wfRes.value;
+        setWifiEnabled(wf.enabled);
+        setConnectedSsid(wf.connected ? wf.ssid || 'Connected' : null);
+        setWifiSignal(wf.signal || 0);
+        setWifiBand(wf.connected && wf.band ? wf.band : '');
+        setWifiProfiles(wf.profiles || []);
+      }
 
-      setBluetoothEnabled(bt.enabled);
-      setBluetoothDevices(bt.devices || []);
-      if (bt.adapter_name) setBluetoothAdapterName(bt.adapter_name);
-      if (bt.version) setBluetoothVersion(bt.version);
-      if (bt.lmp) setBluetoothLmp(bt.lmp);
-      const connCount =
-        typeof bt.connected_count === 'number'
-          ? bt.connected_count
-          : (bt.devices || []).filter((d) => d.connected).length;
-      setBluetoothConnectedCount(connCount);
-      const rx = typeof bt.rx_kbps === 'number' ? bt.rx_kbps : 0;
-      const tx = typeof bt.tx_kbps === 'number' ? bt.tx_kbps : 0;
-      setBluetoothRxKbps(rx);
-      setBluetoothTxKbps(tx);
-      setBtTrafficHistory((prev) => [...prev.slice(1), Math.max(0.5, rx + tx)]);
-      setHotspotEnabled(hs.enabled);
-      setHotspotSsid(hs.ssid?.trim() ? hs.ssid.trim() : 'Canopy Hotspot');
-      setHotspotPass(hs.passphrase || '');
-      setHotspotClients(hs.clients || 0);
+      if (btRes.status === 'fulfilled') {
+        const bt = btRes.value;
+        setBluetoothEnabled(bt.enabled);
+        setBluetoothDevices(bt.devices || []);
+        if (bt.adapter_name) setBluetoothAdapterName(bt.adapter_name);
+        if (bt.version) setBluetoothVersion(bt.version);
+        if (bt.lmp) setBluetoothLmp(bt.lmp);
+        const connCount =
+          typeof bt.connected_count === 'number'
+            ? bt.connected_count
+            : (bt.devices || []).filter((d) => d.connected).length;
+        setBluetoothConnectedCount(connCount);
+        const rx = typeof bt.rx_kbps === 'number' ? bt.rx_kbps : 0;
+        const tx = typeof bt.tx_kbps === 'number' ? bt.tx_kbps : 0;
+        setBluetoothRxKbps(rx);
+        setBluetoothTxKbps(tx);
+        setBtTrafficHistory((prev) => [...prev.slice(1), Math.max(0.5, rx + tx)]);
+      }
 
-      setIsPowerSaver(pm.is_power_saver);
-    } catch {
-      // Fallback
+      if (hsRes.status === 'fulfilled') {
+        const hs = hsRes.value;
+        setHotspotEnabled(hs.enabled);
+        setHotspotSsid(hs.ssid?.trim() ? hs.ssid.trim() : 'Canopy Hotspot');
+        setHotspotPass(hs.passphrase || '');
+        setHotspotClients(hs.clients || 0);
+      }
+
+      if (pmRes.status === 'fulfilled') {
+        setIsPowerSaver(pmRes.value.is_power_saver);
+      }
+
+      return wfRes.status === 'fulfilled' ? wfRes.value : null;
     } finally {
       setIsRefreshing(false);
     }
@@ -189,11 +206,16 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
     const next = !wifiEnabled;
     setWifiEnabled(next);
     try {
-      await setHostWifiEnabled(next);
+      const ok = await setHostWifiEnabled(next);
+      if (!ok) {
+        setWifiEnabled(!next);
+        onToastNotification?.(`Could not turn Wi-Fi ${next ? 'on' : 'off'}`);
+        return;
+      }
       setTimeout(() => void refreshAll(), 1000);
       onToastNotification?.(next ? 'Wi-Fi radio enabled' : 'Wi-Fi radio disabled');
     } catch {
-      // Ignore
+      setWifiEnabled(!next);
     }
   };
 
@@ -201,11 +223,16 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
     const next = !bluetoothEnabled;
     setBluetoothEnabled(next);
     try {
-      await setHostBluetoothEnabled(next);
+      const ok = await setHostBluetoothEnabled(next);
+      if (!ok) {
+        setBluetoothEnabled(!next);
+        onToastNotification?.(`Could not turn Bluetooth ${next ? 'on' : 'off'}`);
+        return;
+      }
       setTimeout(() => void refreshAll(), 1000);
       onToastNotification?.(next ? 'Bluetooth radio enabled' : 'Bluetooth radio disabled');
     } catch {
-      // Ignore
+      setBluetoothEnabled(!next);
     }
   };
 
@@ -229,11 +256,23 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
     setIsActionInProgress(true);
     onToastNotification?.(`Connecting to ${ssid}...`);
     try {
-      await connectWifi(ssid);
-      setTimeout(() => {
-        void refreshAll();
+      const requested = await connectWifi(ssid);
+      if (!requested) {
         setIsActionInProgress(false);
-        onToastNotification?.(`Connected to ${ssid}`);
+        onToastNotification?.(`Could not connect to ${ssid}`);
+        return;
+      }
+      setTimeout(() => {
+        // Report what Windows actually did instead of assuming the join succeeded.
+        void refreshAll()
+          .then((wf) => {
+            onToastNotification?.(
+              wf?.connected && wf.ssid === ssid
+                ? `Connected to ${ssid}`
+                : `Not connected to ${ssid} yet`,
+            );
+          })
+          .finally(() => setIsActionInProgress(false));
       }, 1500);
     } catch {
       setIsActionInProgress(false);
@@ -386,10 +425,14 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
   };
 
   const handleCopyIp = (ip: string) => {
-    void navigator.clipboard.writeText(ip);
-    setCopiedIp(true);
-    onToastNotification?.(`Copied IP: ${ip}`);
-    setTimeout(() => setCopiedIp(false), 2000);
+    navigator.clipboard
+      .writeText(ip)
+      .then(() => {
+        setCopiedIp(true);
+        onToastNotification?.(`Copied IP: ${ip}`);
+        setTimeout(() => setCopiedIp(false), 2000);
+      })
+      .catch(() => onToastNotification?.('Could not copy IP address'));
   };
 
   const getDeviceIcon = (dev: { name: string; is_audio?: boolean }) => {
@@ -427,8 +470,9 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
     return <SignalLow className="w-4 h-4 text-[var(--theme-text-secondary)] shrink-0" />;
   };
 
-  const activeIpAddress =
-    primaryAdapter?.ip_address || (activeEthernet ? activeEthernet.ip_address : '192.168.1.189');
+  // Only a real address: a made-up fallback would be copied and trusted by the user.
+  const activeIpAddress = primaryAdapter?.ip_address || '';
+  const primaryConnected = Boolean(primaryAdapter?.is_connected);
 
   const btSparklineData = useMemo(() => {
     const w = 180;
@@ -502,8 +546,12 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
                       <>
                         <span className="w-1.5 h-1.5 rounded-full bg-[var(--theme-accent)] animate-pulse" />
                         <span className="truncate font-semibold text-white">{connectedSsid}</span>
-                        <span className="opacity-50">•</span>
-                        <span className="text-[var(--theme-accent)]">{wifiBand}</span>
+                        {wifiBand && (
+                          <>
+                            <span className="opacity-50">•</span>
+                            <span className="text-[var(--theme-accent)]">{wifiBand}</span>
+                          </>
+                        )}
                       </>
                     ) : (
                       <span>Not Connected</span>
@@ -588,6 +636,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
                       type="button"
                       onClick={() => setShowAddWifiForm(false)}
                       className="text-white/50 hover:text-white"
+                      aria-label="Close join form"
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -612,6 +661,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
                         type="button"
                         onClick={() => setNewWifiPassVisible(!newWifiPassVisible)}
                         className="absolute right-1.5 top-1/2 -translate-y-1/2 text-white/50 hover:text-white"
+                        aria-label={newWifiPassVisible ? 'Hide password' : 'Show password'}
                       >
                         {newWifiPassVisible ? (
                           <EyeOff className="w-3 h-3" />
@@ -636,6 +686,11 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
               )}
 
               <div className="flex-1 overflow-y-auto canopy-scroll flex flex-col gap-1 pr-0.5 min-h-0">
+                {wifiProfiles.length === 0 && (
+                  <div className="flex-1 flex items-center justify-center text-center p-3 text-[11px] text-[var(--theme-text-secondary)]">
+                    No saved Wi-Fi networks — use Join or Scan Networks
+                  </div>
+                )}
                 {wifiProfiles.map((p) => {
                   const isCurrent = connectedSsid === p;
                   return (
@@ -689,7 +744,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
 
               <div className="pt-1.5 border-t border-white/5 flex items-center justify-between shrink-0">
                 <span className="text-[9px] font-mono text-[var(--theme-text-secondary)]">
-                  Signal: {wifiSignal}% ({wifiBand})
+                  Signal: {wifiSignal}%{wifiBand ? ` (${wifiBand})` : ''}
                 </span>
                 <button
                   type="button"
@@ -713,14 +768,13 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
                     </span>
                   </div>
                   <span className="text-[10px] font-mono text-[var(--theme-text-secondary)]">
-                    Connected
+                    {primaryConnected ? 'Connected' : 'Disconnected'}
                   </span>
                 </div>
 
                 {/* Adapter Description */}
                 <div className="text-[11px] text-[var(--theme-text-secondary)] truncate">
-                  {primaryAdapter?.description ||
-                    (connectedSsid ? 'Intel Wi-Fi 6E Wireless Adapter' : 'Gigabit Controller')}
+                  {primaryAdapter?.description || 'No network adapter detected'}
                 </div>
 
                 {/* IP Address Card with One-Click Copy */}
@@ -731,13 +785,14 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
                       IPv4:
                     </span>
                     <span className="text-xs font-mono font-semibold text-white tracking-tight truncate tabular-nums">
-                      {activeIpAddress}
+                      {activeIpAddress || 'Not assigned'}
                     </span>
                   </div>
                   <button
                     type="button"
                     onClick={() => handleCopyIp(activeIpAddress)}
-                    className="px-2 py-0.5 rounded-lg border border-white/10 text-[9.5px] font-mono hover:bg-white/10 active:scale-95 transition-all flex items-center gap-1 text-[var(--theme-text-secondary)] hover:text-white cursor-pointer"
+                    disabled={!activeIpAddress}
+                    className="px-2 py-0.5 rounded-lg border border-white/10 text-[9.5px] font-mono hover:bg-white/10 active:scale-95 transition-all flex items-center gap-1 text-[var(--theme-text-secondary)] hover:text-white cursor-pointer disabled:opacity-40 disabled:cursor-default"
                   >
                     {copiedIp ? (
                       <Check className="w-3 h-3 text-emerald-400" />
@@ -766,7 +821,9 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
                     <span className="text-xs font-bold font-mono text-[var(--theme-accent)] truncate mt-0.5">
                       {primaryAdapter?.type === 'ethernet'
                         ? '802.3 Ethernet'
-                        : `802.11ax (${wifiBand})`}
+                        : primaryAdapter?.type === 'wifi'
+                          ? `802.11${wifiBand ? ` (${wifiBand})` : ''}`
+                          : '—'}
                     </span>
                   </div>
 
@@ -775,7 +832,11 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
                       Signal / Duplex
                     </span>
                     <span className="text-xs font-bold font-mono text-white tabular-nums mt-0.5">
-                      {connectedSsid ? `${wifiSignal}% Quality` : 'Full Duplex'}
+                      {connectedSsid
+                        ? `${wifiSignal}% Quality`
+                        : primaryConnected
+                          ? 'Full Duplex'
+                          : '—'}
                     </span>
                   </div>
 
@@ -783,9 +844,14 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
                     <span className="text-[9px] font-mono uppercase tracking-wider text-[var(--theme-text-secondary)]">
                       Gateway State
                     </span>
-                    <span className="text-xs font-bold font-mono text-emerald-400 mt-0.5 flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                      Active Route
+                    <span
+                      className="text-xs font-bold font-mono mt-0.5 flex items-center gap-1.5"
+                      style={{
+                        color: primaryConnected ? '#34d399' : 'var(--theme-text-secondary)',
+                      }}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                      {primaryConnected ? 'Active Route' : 'No Route'}
                     </span>
                   </div>
                 </div>
@@ -1161,10 +1227,12 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
           <Globe className="w-3.5 h-3.5 text-[var(--theme-accent)] shrink-0" />
           <span className="font-semibold text-white tracking-tight truncate max-w-[260px]">
             {activeEthernet
-              ? `LAN: ${activeEthernet.ip_address} • 1 Gbps`
+              ? `LAN: ${activeEthernet.ip_address} • ${formatLinkSpeed(activeEthernet.speed_mbps)}`
               : connectedSsid
-                ? `Wi-Fi: ${connectedSsid} • ${wifiBand}`
-                : 'Network Online'}
+                ? `Wi-Fi: ${connectedSsid}${wifiBand ? ` • ${wifiBand}` : ''}`
+                : primaryConnected
+                  ? 'Network Online'
+                  : 'Offline'}
           </span>
         </div>
 
@@ -1178,7 +1246,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
               disabled={isActionInProgress}
               className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[9.5px] font-mono transition-all cursor-pointer ${
                 hotspotEnabled
-                  ? 'bg-[var(--theme-accent)] text-[var(--theme-on-accent, #111)] font-semibold shadow-sm'
+                  ? 'bg-[var(--theme-accent)] text-[var(--theme-on-accent)] font-semibold shadow-sm'
                   : 'text-[var(--theme-text-secondary)] hover:text-white'
               }`}
               title={`Mobile Hotspot (${hotspotSsid} • ${hotspotClients} clients)`}
@@ -1202,7 +1270,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
             onClick={handleTogglePowerPlan}
             className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[9.5px] font-mono transition-all pointer-events-auto cursor-pointer ${
               isPowerSaver
-                ? 'border-[var(--theme-accent)] bg-[var(--theme-accent)] text-[var(--theme-on-accent, #111)] font-semibold'
+                ? 'border-[var(--theme-accent)] bg-[var(--theme-accent)] text-[var(--theme-on-accent)] font-semibold'
                 : 'border-white/10 hover:border-white/20 text-[var(--theme-text-secondary)] hover:text-white'
             }`}
             title="Toggle Windows Power Plan"
@@ -1261,6 +1329,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
                 type="button"
                 onClick={() => setHotspotModalOpen(false)}
                 className="text-[var(--theme-text-secondary)] hover:text-white cursor-pointer"
+                aria-label="Close hotspot settings"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1298,6 +1367,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
                     type="button"
                     onClick={() => setHotspotPassVisible(!hotspotPassVisible)}
                     className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/50 hover:text-white"
+                    aria-label={hotspotPassVisible ? 'Hide password' : 'Show password'}
                   >
                     {hotspotPassVisible ? (
                       <EyeOff className="w-3.5 h-3.5" />
@@ -1332,7 +1402,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({ onToastNotification })
                   type="button"
                   onClick={handleSaveHotspotConfig}
                   disabled={hotspotSaving}
-                  className="px-3.5 py-1 rounded-full text-xs font-semibold bg-[var(--theme-accent)] text-[var(--theme-on-accent, #111)] hover:opacity-90 active:scale-95 transition-all disabled:opacity-50 shadow-sm"
+                  className="px-3.5 py-1 rounded-full text-xs font-semibold bg-[var(--theme-accent)] text-[var(--theme-on-accent)] hover:opacity-90 active:scale-95 transition-all disabled:opacity-50 shadow-sm"
                 >
                   {hotspotSaving ? 'Saving...' : 'Apply & Save'}
                 </button>

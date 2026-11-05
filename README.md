@@ -118,12 +118,22 @@ If you want to build Canopy yourself or tweak the code:
    dotnet build -c Release
    dotnet run -c Release --no-build
    ```
+   `dotnet build` rebuilds the frontend bundle automatically whenever `src/` or `public/` changed.
 
-4. **Package local installer (optional):**
+4. **Verify before committing** (version consistency, `tsc`, Biome, Vite build, warnings-as-errors .NET build):
    ```powershell
-   # Builds dist-installer/Canopy-v1.0.8-Setup.exe (requires Inno Setup 6)
-   .\installer\build-setup-exe.ps1
+   powershell -ExecutionPolicy Bypass -File .\verify.ps1
    ```
+
+5. **Package local installers (optional):**
+   ```powershell
+   # Each script defaults to the <Version> in Canopy.csproj and writes to dist-installer\
+   .\installer\build-setup-exe.ps1   # Canopy-v<version>-Setup.exe (requires Inno Setup 6)
+   .\installer\build-msi.ps1         # Canopy-v<version>-x64.msi (requires WiX v4)
+   .\build-portable.ps1              # Canopy-v<version>-win-x64-portable.zip
+   ```
+   See [`RELEASE_GUIDE.md`](RELEASE_GUIDE.md) for publishing a release.
+
 ---
 
 ## Architecture Overview

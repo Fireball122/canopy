@@ -28,7 +28,32 @@ interface CalendarDayCell {
   eventCount: number;
 }
 
-const STORAGE_KEY = 'shell_calendar_events';
+export const CALENDAR_STORAGE_KEY = 'shell_calendar_events';
+
+/** Keeps only well-formed reminders (drops legacy demo seeds and foreign shapes). */
+export function parseCalendarEvents(value: unknown): CalendarEvent[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is CalendarEvent =>
+    Boolean(
+      item &&
+        typeof item === 'object' &&
+        typeof (item as CalendarEvent).id === 'string' &&
+        !(item as CalendarEvent).id.startsWith('seed-canopy-') &&
+        typeof (item as CalendarEvent).date === 'string' &&
+        typeof (item as CalendarEvent).text === 'string',
+    ),
+  );
+}
+
+export function readStoredCalendarEvents(): CalendarEvent[] {
+  try {
+    const raw = window.localStorage.getItem(CALENDAR_STORAGE_KEY);
+    return raw === null ? [] : parseCalendarEvents(JSON.parse(raw) as unknown);
+  } catch {
+    return [];
+  }
+}
+
 const WEEKDAYS_MONDAY = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'] as const;
 const WEEKDAYS_SUNDAY = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'] as const;
 
@@ -52,6 +77,13 @@ function format12HourDisplay(hhmm: string): string {
   return `${hour12}:${String(rawM).padStart(2, '0')} ${period}`;
 }
 
+function toIsoKey(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 function formatFriendlyDate(iso: string): string {
   try {
     const [y, m, d] = iso.split('-').map(Number);
@@ -73,13 +105,9 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
 
   const weekdayHeaders = calendarFirstDay === 'sunday' ? WEEKDAYS_SUNDAY : WEEKDAYS_MONDAY;
 
-  const today = useMemo(() => new Date(), []);
-  const todayIso = useMemo(() => {
-    const y = today.getFullYear();
-    const m = String(today.getMonth() + 1).padStart(2, '0');
-    const d = String(today.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }, [today]);
+  // Canopy lives in the tray for days: "today" must roll over at midnight and on panel reopen.
+  const [today, setToday] = useState<Date>(() => new Date());
+  const todayIso = useMemo(() => toIsoKey(today), [today]);
 
   const [viewDate, setViewDate] = useState<Date>(
     () => new Date(today.getFullYear(), today.getMonth(), 1),
@@ -91,6 +119,31 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
   const [isAdding, setIsAdding] = useState<boolean>(false);
 
   const panelOpen = usePanelOpen();
+
+  useEffect(() => {
+    if (!panelOpen) return;
+    const refreshToday = () => {
+      const now = new Date();
+      if (toIsoKey(now) !== todayIso) {
+        setToday(now);
+      }
+    };
+    refreshToday();
+    const now = new Date();
+    const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const timer = window.setTimeout(refreshToday, nextMidnight.getTime() - now.getTime() + 1000);
+    return () => window.clearTimeout(timer);
+  }, [panelOpen, todayIso]);
+
+  // When the day rolls over, follow it so the grid and selection point at the new today.
+  useEffect(() => {
+    setSelectedIso(todayIso);
+    setViewDate((prev) =>
+      prev.getFullYear() === today.getFullYear() && prev.getMonth() === today.getMonth()
+        ? prev
+        : new Date(today.getFullYear(), today.getMonth(), 1),
+    );
+  }, [todayIso, today]);
 
   useEffect(() => {
     if (!panelOpen) {
@@ -111,42 +164,12 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [drawerOpen]);
 
-  const [events, setEvents] = useState<CalendarEvent[]>(() => {
-    try {
-      const raw = typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEY) : null;
-      if (raw !== null) {
-        const parsed = JSON.parse(raw) as unknown;
-        if (Array.isArray(parsed)) {
-          return parsed.filter((item): item is CalendarEvent =>
-            Boolean(
-              item &&
-                typeof item === 'object' &&
-                typeof (item as CalendarEvent).id === 'string' &&
-                !(item as CalendarEvent).id.startsWith('seed-canopy-') &&
-                typeof (item as CalendarEvent).date === 'string' &&
-                typeof (item as CalendarEvent).text === 'string',
-            ),
-          );
-        }
-      }
-    } catch {
-      // Fall through to empty
-    }
-    return [];
-  });
+  const [events, setEvents] = useState<CalendarEvent[]>(readStoredCalendarEvents);
 
   useEffect(() => {
     const handleEventsUpdated = (e: Event) => {
-      const detail = (e as CustomEvent<CalendarEvent[]>).detail;
-      if (Array.isArray(detail)) {
-        setEvents(detail);
-      } else {
-        try {
-          const raw =
-            typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEY) : null;
-          if (raw) setEvents(JSON.parse(raw));
-        } catch {}
-      }
+      const detail = (e as CustomEvent<unknown>).detail;
+      setEvents(Array.isArray(detail) ? parseCalendarEvents(detail) : readStoredCalendarEvents());
     };
     window.addEventListener('calendar-events-updated', handleEventsUpdated);
     return () => window.removeEventListener('calendar-events-updated', handleEventsUpdated);
@@ -155,7 +178,7 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
   useEffect(() => {
     try {
       if (typeof window !== 'undefined') {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
+        window.localStorage.setItem(CALENDAR_STORAGE_KEY, JSON.stringify(events));
       }
     } catch {
       // Ignore storage errors
@@ -414,11 +437,13 @@ export const CalendarCard: React.FC<CalendarCardProps> = ({
       {/* Slide-over Reminders & Time Management Drawer */}
       {drawerOpen && (
         <div
-          className="absolute inset-1 z-30 rounded-xl border p-3 flex flex-col justify-between animate-in fade-in zoom-in-95 duration-150"
+          role="dialog"
+          aria-label={`Reminders for ${formatFriendlyDate(selectedIso)}`}
+          className="absolute inset-1 z-30 rounded-xl border p-3 flex flex-col justify-between backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150"
           style={{
-            background: '#09090b',
+            background: 'var(--theme-bg)',
             borderColor: 'var(--theme-border)',
-            boxShadow: '0 24px 48px rgba(0, 0, 0, 0.95), inset 0 1px 0 0 rgba(255, 255, 255, 0.1)',
+            boxShadow: '0 24px 48px rgba(0, 0, 0, 0.45), inset 0 1px 0 0 rgba(255, 255, 255, 0.1)',
           }}
         >
           {/* Drawer Header */}

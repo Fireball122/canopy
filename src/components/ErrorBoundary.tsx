@@ -55,6 +55,7 @@ export class ErrorBoundary extends Component<Props, State> {
             {this.state.error?.message || 'An unexpected rendering error occurred in this view.'}
           </p>
           <button
+            type="button"
             onClick={() => {
               this.setState({ hasError: false, error: null });
               this.props.onReset?.();
@@ -62,7 +63,7 @@ export class ErrorBoundary extends Component<Props, State> {
             className="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors"
             style={{
               background: 'var(--theme-accent, #89b4fa)',
-              color: 'var(--theme-bg, #11111b)',
+              color: 'var(--theme-on-accent, #11111b)',
             }}
           >
             <RefreshCw className="w-3.5 h-3.5" />

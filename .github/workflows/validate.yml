@@ -1,6 +1,9 @@
 name: Validate Canopy
 
 on:
+  push:
+    branches:
+      - main
   pull_request:
   workflow_dispatch:
 
@@ -9,7 +12,7 @@ permissions:
 
 jobs:
   validate:
-    name: Build Windows application
+    name: Verify Windows application
     runs-on: windows-latest
 
     steps:
@@ -30,8 +33,9 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build frontend
-        run: npm run build
-
-      - name: Build Windows host
-        run: dotnet build -c Release -p:SkipFrontendBuild=true
+      # Same gate developers and the pre-commit hook run (version consistency, tsc, Biome,
+      # Vite build, warnings-as-errors .NET build), executed under Windows PowerShell 5.1 so
+      # the scripts stay compatible with the shell shipped in Windows.
+      - name: Run verification cage
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File ./verify.ps1

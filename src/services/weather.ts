@@ -120,6 +120,8 @@ function buildUnavailableWeather(
 }
 
 interface OpenMeteoResponse {
+  /** Offset of the forecast location from UTC; `time` values are wall-clock times there. */
+  utc_offset_seconds?: number;
   current?: {
     temperature_2m?: number;
     relative_humidity_2m?: number;
@@ -171,8 +173,27 @@ async function resolveIpGeolocation(): Promise<CachedGeoLocation | null> {
   if (!cachedIpGeo && typeof window !== 'undefined') {
     try {
       const saved = window.localStorage.getItem('canopy_last_known_geo');
-      if (saved) {
-        cachedIpGeo = JSON.parse(saved) as CachedGeoLocation;
+      const parsed: unknown = saved ? JSON.parse(saved) : null;
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        'lat' in parsed &&
+        typeof parsed.lat === 'number' &&
+        Number.isFinite(parsed.lat) &&
+        'lon' in parsed &&
+        typeof parsed.lon === 'number' &&
+        Number.isFinite(parsed.lon)
+      ) {
+        cachedIpGeo = {
+          lat: parsed.lat,
+          lon: parsed.lon,
+          locationName:
+            'locationName' in parsed && typeof parsed.locationName === 'string'
+              ? parsed.locationName
+              : 'Local Area',
+          fetchedAt:
+            'fetchedAt' in parsed && typeof parsed.fetchedAt === 'number' ? parsed.fetchedAt : 0,
+        };
       }
     } catch {
       // Ignore storage errors
@@ -401,8 +422,11 @@ export async function fetchWeather(
     `&temperature_unit=${unit === 'fahrenheit' ? 'fahrenheit' : 'celsius'}` +
     `&wind_speed_unit=mph&timezone=auto`;
 
+  // Without a deadline a stalled connection left the Weather tab spinning until the next refresh.
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), 8000);
   try {
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: controller.signal });
     if (!response.ok) {
       return buildUnavailableWeather(locationName, unit);
     }
@@ -425,9 +449,12 @@ export async function fetchWeather(
     const hourlyTemps = data.hourly?.temperature_2m ?? [];
     const hourlyCodes = data.hourly?.weather_code ?? [];
 
+    // `timezone=auto` returns offset-less wall-clock times of the forecast location. Parsing them
+    // as PC-local time picked the wrong "Now" hour for a manual city in another time zone.
+    const utcOffsetMs = Number(data.utc_offset_seconds ?? 0) * 1000;
     const nowMs = Date.now();
     let startIdx = hourlyTimes.findIndex((iso) => {
-      const ms = new Date(iso).getTime();
+      const ms = Date.parse(`${iso}Z`) - utcOffsetMs;
       return !Number.isNaN(ms) && ms >= nowMs - 45 * 60 * 1000;
     });
     if (startIdx < 0) startIdx = 0;
@@ -484,5 +511,7 @@ export async function fetchWeather(
     };
   } catch {
     return buildUnavailableWeather(locationName, unit);
+  } finally {
+    globalThis.clearTimeout(timeoutId);
   }
 }

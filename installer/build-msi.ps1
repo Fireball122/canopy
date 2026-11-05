@@ -1,15 +1,24 @@
 # build-msi.ps1 - Compiles a native Windows Installer (.msi) using WiX v4
 param(
-    [string]$Version = "1.0.8",
+    # Defaults to <Version> in Canopy.csproj, the single source of truth for the release version.
+    [string]$Version = "",
     [string]$Configuration = "Release"
 )
 
 $ErrorActionPreference = "Stop"
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ProjectRoot = (Resolve-Path (Join-Path $ScriptDir "..")).Path
+
+if (-not $Version) {
+    [xml]$csproj = Get-Content -LiteralPath (Join-Path $ProjectRoot "Canopy.csproj") -Raw
+    $Version = @($csproj.Project.PropertyGroup | ForEach-Object { $_.Version } | Where-Object { $_ })[0]
+    if (-not $Version) { throw "Could not read <Version> from Canopy.csproj; pass -Version explicitly." }
+    $Version = $Version.Trim()
+}
 if ($Version -notmatch '^\d+\.\d+\.\d+$') {
     throw "MSI versions must use major.minor.patch numbers, for example 1.2.3."
 }
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectRoot = Resolve-Path (Join-Path $ScriptDir "..")
+
 $PublishDir = Join-Path $ProjectRoot "bin\$Configuration\net8.0-windows10.0.19041.0\publish-msi"
 $OutputDir = Join-Path $ProjectRoot "dist-installer"
 $GeneratedWxs = Join-Path $ScriptDir "GeneratedFiles.wxs"
@@ -24,7 +33,12 @@ finally {
     Pop-Location
 }
 
-Write-Host "==> 2. Publishing Canopy ($Configuration)..." -ForegroundColor Cyan
+$distSource = Join-Path $ProjectRoot "dist"
+if (-not (Test-Path (Join-Path $distSource "index.html"))) {
+    throw "Frontend bundle missing: dist\index.html was not produced by npm run build."
+}
+
+Write-Host "==> 2. Publishing Canopy v$Version ($Configuration)..." -ForegroundColor Cyan
 if (Test-Path $PublishDir) { Remove-Item $PublishDir -Recurse -Force }
 New-Item -ItemType Directory -Path $PublishDir -Force | Out-Null
 if (-not (Test-Path $OutputDir)) { New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null }
@@ -32,17 +46,16 @@ if (-not (Test-Path $OutputDir)) { New-Item -ItemType Directory -Path $OutputDir
 $dotnet = "$HOME/.dotnet/dotnet.exe"
 if (-not (Test-Path $dotnet)) { $dotnet = "dotnet" }
 
-& $dotnet publish "$ProjectRoot\Canopy.csproj" -c $Configuration -r win-x64 -o $PublishDir --self-contained true -p:SkipFrontendBuild=true
+& $dotnet publish "$ProjectRoot\Canopy.csproj" -c $Configuration -r win-x64 -o $PublishDir --self-contained true -p:SkipFrontendBuild=true "-p:Version=$Version"
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
 
 Copy-Item (Join-Path $ProjectRoot "app.ico") (Join-Path $PublishDir "app.ico") -Force
 
-# Ensure dist/ frontend bundle is explicitly included in MSI payload
-$distSource = Join-Path $ProjectRoot "dist"
+# Mirror dist/ exactly. dotnet publish already copies it, and Copy-Item onto an existing
+# directory nests the source inside it (publish\dist\dist), duplicating the whole bundle.
 $distDest = Join-Path $PublishDir "dist"
-if (Test-Path $distSource) {
-    Copy-Item $distSource $distDest -Recurse -Force
-}
+if (Test-Path $distDest) { Remove-Item $distDest -Recurse -Force }
+Copy-Item $distSource $distDest -Recurse -Force
 
 # Ensure x64 WebView2Loader.dll is in both root and runtimes\win-x64\native for robust native loading
 $nativeLoader = Join-Path $PublishDir "runtimes\win-x64\native\WebView2Loader.dll"
@@ -67,33 +80,38 @@ function Get-StableHash([string]$Text) {
     }
 }
 
+function ConvertTo-XmlAttribute([string]$Text) {
+    return [System.Security.SecurityElement]::Escape($Text)
+}
+
 $sb = [System.Text.StringBuilder]::new()
 [void]$sb.AppendLine('<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">')
 [void]$sb.AppendLine('  <Fragment>')
 [void]$sb.AppendLine('    <ComponentGroup Id="ProductComponents">')
 
-$fileIndex = 0
 foreach ($file in $allFiles) {
-    $fileIndex++
     $relPath = $file.FullName.Substring($PublishDir.Length).TrimStart('\', '/')
     $relDir = Split-Path -Parent $relPath
     $dirId = "INSTALLFOLDER"
-    
+
     if ($relDir) {
         # Normalize directory path to ID
         $cleanDir = $relDir -replace '[\\/]', '_' -replace '[^a-zA-Z0-9_]', ''
         $dirId = "DIR_" + $cleanDir
     }
 
+    # Component GUIDs derive from the install-relative path so they stay stable across versions,
+    # which MajorUpgrade relies on to replace files cleanly.
     $identity = $relPath.Replace('\', '/').ToLowerInvariant()
     $hash = Get-StableHash $identity
     $hashText = ([System.BitConverter]::ToString($hash)).Replace('-', '')
     $compGuid = ([guid]::new([byte[]]$hash[0..15])).ToString().ToUpperInvariant()
     $componentId = "cmp_" + $hashText.Substring(0, 20)
     $fileId = "fil_" + $hashText.Substring(0, 20)
+    $source = ConvertTo-XmlAttribute $file.FullName
 
     [void]$sb.AppendLine("      <Component Id=`"$componentId`" Directory=`"$dirId`" Guid=`"$compGuid`">")
-    [void]$sb.AppendLine("        <File Id=`"$fileId`" Source=`"$($file.FullName)`" KeyPath=`"yes`" />")
+    [void]$sb.AppendLine("        <File Id=`"$fileId`" Source=`"$source`" KeyPath=`"yes`" />")
     [void]$sb.AppendLine("      </Component>")
 }
 
@@ -104,20 +122,20 @@ foreach ($file in $allFiles) {
 $subDirs = Get-ChildItem -Path $PublishDir -Recurse -Directory | Sort-Object FullName
 if ($subDirs) {
     [void]$sb.AppendLine('  <Fragment>')
-    
+
     foreach ($dir in $subDirs) {
         $relPath = $dir.FullName.Substring($PublishDir.Length).TrimStart('\', '/')
         $parentPath = Split-Path -Parent $relPath
-        $dirName = $dir.Name
+        $dirName = ConvertTo-XmlAttribute $dir.Name
         $cleanDir = $relPath -replace '[\\/]', '_' -replace '[^a-zA-Z0-9_]', ''
         $dirId = "DIR_" + $cleanDir
-        
+
         $parentId = if ($parentPath) { "DIR_" + ($parentPath -replace '[\\/]', '_' -replace '[^a-zA-Z0-9_]', '') } else { "INSTALLFOLDER" }
         [void]$sb.AppendLine("    <DirectoryRef Id=`"$parentId`">")
         [void]$sb.AppendLine("      <Directory Id=`"$dirId`" Name=`"$dirName`" />")
         [void]$sb.AppendLine('    </DirectoryRef>')
     }
-    
+
     [void]$sb.AppendLine('  </Fragment>')
 }
 
@@ -125,29 +143,46 @@ if ($subDirs) {
 
 Set-Content -Path $GeneratedWxs -Value $sb.ToString() -Encoding UTF8
 
-Write-Host "==> 4. Checking WiX Toolset..." -ForegroundColor Cyan
-$wix = "$HOME/.dotnet/tools/wix.exe"
-if (-not (Test-Path $wix)) {
-    $wixCmd = Get-Command "wix" -ErrorAction SilentlyContinue
-    if ($wixCmd) { $wix = $wixCmd.Source }
+try {
+    Write-Host "==> 4. Checking WiX Toolset..." -ForegroundColor Cyan
+    $wix = "$HOME/.dotnet/tools/wix.exe"
+    if (-not (Test-Path $wix)) {
+        $wixCmd = Get-Command "wix" -ErrorAction SilentlyContinue
+        $wix = if ($wixCmd) { $wixCmd.Source } else { $null }
+    }
+    if (-not $wix) {
+        throw "WiX Toolset not found. Install it with: dotnet tool install --global wix --version 4.0.5"
+    }
+
+    # Ensure WixToolset.Util.wixext is available. `extension add` reports on stderr when the
+    # extension is already cached; Windows PowerShell 5.1 turns redirected stderr into a
+    # terminating error under ErrorActionPreference=Stop, so relax it for this probe only.
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $wix extension add -g WixToolset.Util.wixext/4.0.5 2>&1 | Out-Null
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+    }
+
+    $MsiOutput = Join-Path $OutputDir "Canopy-v$Version-x64.msi"
+    Write-Host "==> 5. Building MSI Installer with WiX: $MsiOutput" -ForegroundColor Cyan
+
+    & $wix build (Join-Path $ScriptDir "Canopy.wxs") "$GeneratedWxs" `
+        -arch x64 `
+        -ext WixToolset.Util.wixext `
+        -d SourceDir="$PublishDir" `
+        -d ProductVersion="$Version" `
+        -out "$MsiOutput"
+    if ($LASTEXITCODE -ne 0) { throw "WiX build failed" }
 }
-
-# Ensure WixToolset.Util.wixext extension is available
-& $wix extension add -g WixToolset.Util.wixext/4.0.5 2>$null
-
-$MsiOutput = Join-Path $OutputDir "Canopy-v$Version-x64.msi"
-Write-Host "==> 5. Building MSI Installer with WiX: $MsiOutput" -ForegroundColor Cyan
-
-& $wix build (Join-Path $ScriptDir "Canopy.wxs") "$GeneratedWxs" `
-    -arch x64 `
-    -ext WixToolset.Util.wixext `
-    -d SourceDir="$PublishDir" `
-    -d ProductVersion="$Version" `
-    -out "$MsiOutput"
-if ($LASTEXITCODE -ne 0) { throw "WiX build failed" }
-
-Remove-Item $GeneratedWxs -Force -ErrorAction SilentlyContinue
+finally {
+    Remove-Item $GeneratedWxs -Force -ErrorAction SilentlyContinue
+}
 
 Write-Host "==> SUCCESS: Created $MsiOutput" -ForegroundColor Green
 $msiItem = Get-Item $MsiOutput
 Write-Host ("Installer Size: {0:N2} MB" -f ($msiItem.Length / 1MB)) -ForegroundColor Green
+# winget/CanopyShell.Canopy.installer.yaml needs this hash (and the new ProductCode) per release.
+Write-Host ("SHA256: {0}" -f (Get-FileHash -LiteralPath $MsiOutput -Algorithm SHA256).Hash) -ForegroundColor Green

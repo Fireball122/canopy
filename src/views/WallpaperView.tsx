@@ -4,15 +4,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSettings } from '../context/SettingsContext';
 import {
   pickWallpaperFolder,
-  setDesktopWallpaper,
   setWallpaperDirectory,
   type WallpaperEntry,
 } from '../services/hostBridge';
-import { applyThemeModeFallback, applyThemePalette } from '../services/palette';
+import { applyThemeModeFallback } from '../services/palette';
 
 export interface WallpaperViewProps {
   wallpapers: WallpaperEntry[];
-  onApplyWallpaper: (entry: WallpaperEntry, imgEl?: HTMLImageElement | null) => void;
+  onApplyWallpaper: (
+    entry: WallpaperEntry,
+    imgEl?: HTMLImageElement | null,
+  ) => void | Promise<void>;
   onRefreshWallpapers: () => void;
   onNavigateToSettings?: () => void;
   onDirectoryChanged?: (newDir: string, entries: WallpaperEntry[]) => void;
@@ -28,96 +30,9 @@ const FALLBACK_GRADIENTS: string[] = [
   'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #89b4fa 100%)',
 ];
 
-interface ExtractedSwatches {
-  dominant: string;
-  accent: string;
-  surface: string;
-}
-
 function formatFriendlyName(rawName: string): string {
   const withoutExt = rawName.replace(/\.[a-zA-Z0-9]+$/, '');
   return withoutExt.replace(/[-_]+/g, ' ').trim() || 'Wallpaper';
-}
-
-function extractImageSwatches(imgEl: HTMLImageElement | null): ExtractedSwatches {
-  const fallback: ExtractedSwatches = {
-    dominant: 'var(--theme-accent)',
-    accent: 'var(--theme-text-primary)',
-    surface: 'var(--theme-bg)',
-  };
-
-  if (!imgEl?.complete || imgEl.naturalWidth <= 0) {
-    return fallback;
-  }
-
-  try {
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    canvas.width = 32;
-    canvas.height = 32;
-    if (!ctx) return fallback;
-
-    ctx.drawImage(imgEl, 0, 0, 32, 32);
-    const data = ctx.getImageData(0, 0, 32, 32).data;
-
-    let rSum = 0;
-    let gSum = 0;
-    let bSum = 0;
-    let count = 0;
-
-    let vibR = 162;
-    let vibG = 155;
-    let vibB = 254;
-    let maxSat = -1;
-
-    let secR = 137;
-    let secG = 220;
-    let secB = 235;
-    let secSat = -1;
-
-    for (let i = 0; i < data.length; i += 16) {
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
-      rSum += r;
-      gSum += g;
-      bSum += b;
-      count++;
-
-      const maxC = Math.max(r, g, b);
-      const minC = Math.min(r, g, b);
-      const sat = maxC - minC;
-      if (sat > maxSat && maxC > 40 && minC < 235) {
-        secR = vibR;
-        secG = vibG;
-        secB = vibB;
-        secSat = maxSat;
-        maxSat = sat;
-        vibR = r;
-        vibG = g;
-        vibB = b;
-      } else if (sat > secSat && maxC > 40 && minC < 235) {
-        secSat = sat;
-        secR = r;
-        secG = g;
-        secB = b;
-      }
-    }
-
-    if (count === 0) return fallback;
-
-    const avgR = Math.round(rSum / count);
-    const avgG = Math.round(gSum / count);
-    const avgB = Math.round(bSum / count);
-
-    return {
-      dominant: `rgb(${vibR}, ${vibG}, ${vibB})`,
-      accent: `rgb(${secR}, ${secG}, ${secB})`,
-      surface: `rgb(${avgR}, ${avgG}, ${avgB})`,
-    };
-  } catch {
-    return fallback;
-  }
 }
 
 export const WallpaperView: React.FC<WallpaperViewProps> = ({
@@ -130,19 +45,12 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
   const { settings, updateSettings } = useSettings();
   const imgRefs = useRef<Record<string, HTMLImageElement | null>>({});
   const transitionTimerRef = useRef<number | null>(null);
-  // Monotonic token guarding async palette extraction against superseded selections.
+  // Monotonic token so a superseded selection does not clear the newer one's transition state.
   const themeRequestRef = useRef<number>(0);
 
-  const activeWallpaper = wallpapers.find((w) => w.active) || wallpapers[0] || null;
   const [transitioningPath, setTransitioningPath] = useState<string | null>(null);
   const [rescanning, setRescanning] = useState<boolean>(false);
   const [browsingFolder, setBrowsingFolder] = useState<boolean>(false);
-  const [swatches, setSwatches] = useState<ExtractedSwatches>({
-    dominant: 'var(--theme-accent)',
-    accent: 'var(--theme-accent-warm, var(--theme-accent))',
-    surface: 'var(--theme-bg)',
-  });
-  void swatches;
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [filterFavoritesOnly, setFilterFavoritesOnly] = useState<boolean>(false);
   const isFavorite = useCallback(
@@ -182,14 +90,6 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
   };
 
   useEffect(() => {
-    if (!activeWallpaper) return;
-    const imgEl = imgRefs.current[activeWallpaper.path] ?? null;
-    if (imgEl?.complete && imgEl.naturalWidth > 0) {
-      setSwatches(extractImageSwatches(imgEl));
-    }
-  }, [activeWallpaper]);
-
-  useEffect(() => {
     return () => {
       if (transitionTimerRef.current) {
         window.clearTimeout(transitionTimerRef.current);
@@ -204,49 +104,30 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
     setTransitioningPath(entry.path);
 
     updateSettings({ activeWallpaperPath: entry.path });
-    const targetThemeMode = settings.themeMode;
     const token = ++themeRequestRef.current;
     const imgEl = imgRefs.current[entry.path] ?? null;
-    if (imgEl?.complete && imgEl.naturalWidth > 0) {
-      applyThemePalette(imgEl, targetThemeMode);
-      setSwatches(extractImageSwatches(imgEl));
-    } else if (entry.data_url) {
-      try {
-        const decoded = new Image();
-        decoded.crossOrigin = 'anonymous';
-        decoded.src = entry.data_url;
-        await decoded.decode();
-
-        if (themeRequestRef.current !== token) {
-          return;
-        }
-
-        applyThemePalette(decoded, targetThemeMode);
-        setSwatches(extractImageSwatches(decoded));
-      } catch {
-        if (themeRequestRef.current !== token) {
-          return;
-        }
-        applyThemeModeFallback(targetThemeMode, settings.glassOpacity, settings.glassBlurStrength);
-      }
-    } else {
-      applyThemeModeFallback(settings.themeMode, settings.glassOpacity, settings.glassBlurStrength);
+    if (!entry.data_url && !(imgEl?.complete && imgEl.naturalWidth > 0)) {
+      // No pixels to sample: fall back to the selected theme mode, keeping the custom accent.
+      applyThemeModeFallback(
+        settings.themeMode,
+        settings.glassOpacity,
+        settings.glassBlurStrength,
+        settings.customAccentColor,
+        settings.trueOledMode,
+      );
     }
 
+    // The shell owns the apply (palette with custom accent / OLED, the single host call and the
+    // success/failure status). Applying here too set the desktop wallpaper twice per click.
     try {
-      await setDesktopWallpaper(entry.path);
-    } catch {
-      // Handled gracefully
+      await onApplyWallpaper(entry, imgEl);
+    } finally {
+      if (themeRequestRef.current === token) {
+        transitionTimerRef.current = window.setTimeout(() => {
+          setTransitioningPath(null);
+        }, 450);
+      }
     }
-
-    if (themeRequestRef.current !== token) {
-      return; // A newer selection took over while the host applied this one.
-    }
-
-    onApplyWallpaper(entry, imgEl);
-    transitionTimerRef.current = window.setTimeout(() => {
-      setTransitioningPath(null);
-    }, 450);
   };
 
   const handleBrowseFolder = async () => {
@@ -317,6 +198,7 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
                 type="button"
                 onClick={() => setSearchQuery('')}
                 className="opacity-60 hover:opacity-100 pointer-events-auto cursor-pointer"
+                aria-label="Clear search"
               >
                 <X className="w-3 h-3" />
               </button>
@@ -389,6 +271,22 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
 
       {/* Sleek Borderless 16:9 Thumbnail Grid */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden px-1 py-1 pointer-events-auto">
+        {filteredWallpapers.length === 0 && (
+          <div
+            className="h-full flex flex-col items-center justify-center gap-1.5 text-center px-4"
+            style={{ color: 'var(--theme-text-secondary)' }}
+          >
+            <ImageIcon className="w-6 h-6 opacity-60" style={{ color: 'var(--theme-accent)' }} />
+            <span className="text-xs font-semibold" style={{ color: 'var(--theme-text-primary)' }}>
+              {wallpapers.length === 0 ? 'No wallpapers found' : 'No wallpapers match'}
+            </span>
+            <span className="text-[11px]">
+              {wallpapers.length === 0
+                ? 'Pick a folder with images using the Folder button above.'
+                : 'Clear the search or turn off the favorites filter.'}
+            </span>
+          </div>
+        )}
         <div className="grid grid-cols-3 gap-3">
           {filteredWallpapers.map((entry, idx) => {
             const isActive = Boolean(entry.active);
@@ -398,10 +296,20 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
             const resBadge = getResolutionBadge(entry.resolution);
             const fallbackBg = FALLBACK_GRADIENTS[idx % FALLBACK_GRADIENTS.length];
             return (
-              <button
+              // A div (not a button) so the nested favourite button is valid, focusable markup.
+              <div
                 key={entry.path}
-                type="button"
-                onClick={() => handleSelectWallpaper(entry)}
+                role="button"
+                tabIndex={0}
+                aria-label={`Apply wallpaper ${friendlyTitle}`}
+                onClick={() => void handleSelectWallpaper(entry)}
+                onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget) return;
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    void handleSelectWallpaper(entry);
+                  }
+                }}
                 className="group relative w-full aspect-video rounded-[13px] overflow-hidden focus:outline-none pointer-events-auto cursor-pointer"
                 style={{
                   background: entry.data_url ? undefined : fallbackBg,
@@ -427,11 +335,6 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
                     alt={friendlyTitle}
                     crossOrigin="anonymous"
                     loading="lazy"
-                    onLoad={(e) => {
-                      if (isActive) {
-                        setSwatches(extractImageSwatches(e.currentTarget));
-                      }
-                    }}
                     className="w-full h-full object-cover transition-all duration-300 ease-out brightness-100"
                   />
                 )}
@@ -466,7 +369,9 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
                   type="button"
                   onClick={(e) => toggleFavorite(e, entry.path)}
                   className={`absolute top-2 right-2 p-1.5 rounded-full backdrop-blur-md transition-all duration-200 z-10 pointer-events-auto cursor-pointer ${
-                    isFav ? 'opacity-100 scale-105' : 'opacity-0 group-hover:opacity-100'
+                    isFav
+                      ? 'opacity-100 scale-105'
+                      : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
                   }`}
                   style={{
                     background: isFav ? 'var(--theme-accent)' : 'rgba(0, 0, 0, 0.55)',
@@ -474,6 +379,7 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
                     border: '1px solid rgba(255, 255, 255, 0.2)',
                   }}
                   title={isFav ? 'Remove from favorites' : 'Add to favorites'}
+                  aria-label={isFav ? 'Remove from favorites' : 'Add to favorites'}
                 >
                   <Heart className={`w-3 h-3 ${isFav ? 'fill-current' : ''}`} />
                 </button>
@@ -487,7 +393,7 @@ export const WallpaperView: React.FC<WallpaperViewProps> = ({
                     {friendlyTitle}
                   </span>
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>

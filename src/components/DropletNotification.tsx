@@ -22,28 +22,66 @@ export const DropletNotification: React.FC<DropletNotificationProps> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const textRef = useRef<HTMLSpanElement | null>(null);
   const timerRef = useRef<number | null>(null);
+  // Pending steps of the dismiss animation; cancelled when a new message arrives so a stale
+  // sequence cannot call onDismiss() and wipe the toast that replaced it.
+  const dismissStepsRef = useRef<number[]>([]);
   const isHoveredRef = useRef<boolean>(false);
   isHoveredRef.current = isHovered;
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
+
+  const cancelDismissSteps = useCallback(() => {
+    for (const id of dismissStepsRef.current) window.clearTimeout(id);
+    dismissStepsRef.current = [];
+  }, []);
+
+  useEffect(
+    () => () => {
+      cancelDismissSteps();
+      if (timerRef.current) window.clearTimeout(timerRef.current);
+    },
+    [cancelDismissSteps],
+  );
+
   // Symmetrical reverse dismiss animation
   const startDismissAnimation = useCallback(() => {
+    if (dismissStepsRef.current.length > 0) return;
+    if (timerRef.current) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
     setContentVisible(false);
 
+    const steps = dismissStepsRef.current;
     // Step 2: Shrink pill back to bead
-    window.setTimeout(() => {
-      setPhase('drop');
-
-      // Step 3: Retract up into bezel
+    steps.push(
       window.setTimeout(() => {
-        setPhase('retract');
-        window.setTimeout(onDismiss, 340);
-      }, 340);
-    }, 120);
+        setPhase('drop');
+
+        // Step 3: Retract up into bezel
+        steps.push(
+          window.setTimeout(() => {
+            setPhase('retract');
+            steps.push(
+              window.setTimeout(() => {
+                dismissStepsRef.current = [];
+                onDismiss();
+              }, 340),
+            );
+          }, 340),
+        );
+      }, 120),
+    );
   }, [onDismiss]);
 
   // Trigger sequence whenever a message arrives
   useEffect(() => {
+    cancelDismissSteps();
+    // Drop any hover-resume timer left by the previous toast.
+    if (timerRef.current) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
     if (!message) {
       setPhase('idle');
       setContentVisible(false);
@@ -51,7 +89,6 @@ export const DropletNotification: React.FC<DropletNotificationProps> = ({
     }
     if (phaseRef.current === 'expand') {
       setContentVisible(true);
-      if (timerRef.current) window.clearTimeout(timerRef.current);
       const dismissTimer = window.setTimeout(() => {
         if (!isHoveredRef.current) {
           startDismissAnimation();
@@ -88,11 +125,12 @@ export const DropletNotification: React.FC<DropletNotificationProps> = ({
       if (revealTimer) window.clearTimeout(revealTimer);
       window.clearTimeout(dismissTimer);
     };
-  }, [message, durationMs, startDismissAnimation]);
+  }, [message, durationMs, startDismissAnimation, cancelDismissSteps]);
 
   // Measure text width to enable smooth gradient marquee if message is extra long
   useEffect(() => {
-    if (!contentVisible || !textRef.current || !containerRef.current) return;
+    // Re-measure for every message: a replacement toast keeps contentVisible === true.
+    if (!message || !contentVisible || !textRef.current || !containerRef.current) return;
     const textW = textRef.current.scrollWidth;
     const containerW = containerRef.current.clientWidth;
     if (textW > containerW) {
@@ -102,7 +140,7 @@ export const DropletNotification: React.FC<DropletNotificationProps> = ({
       setIsOverflowing(false);
       setOverflowOffset(0);
     }
-  }, [contentVisible]);
+  }, [contentVisible, message]);
 
   // Symmetrical reverse dismiss animation:
   // Step 1: Content and icon badge fade out
@@ -126,6 +164,7 @@ export const DropletNotification: React.FC<DropletNotificationProps> = ({
   const isBead = phase === 'drop' || phase === 'retract';
   return (
     <div
+      aria-live="polite"
       className="fixed top-0 left-1/2 -translate-x-1/2 z-50 pointer-events-auto select-none"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => {

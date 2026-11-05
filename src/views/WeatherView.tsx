@@ -89,9 +89,17 @@ export const WeatherView: React.FC<WeatherViewProps> = ({
   onRefreshWeather,
   locationMode = 'auto',
 }) => {
-  const uvValue = typeof weather.uvIndex === 'number' ? weather.uvIndex : 3;
+  const uvValue = typeof weather.uvIndex === 'number' ? weather.uvIndex : null;
   const uvRiskLabel =
-    uvValue <= 2 ? 'Low' : uvValue <= 5 ? 'Moderate' : uvValue <= 7 ? 'High' : 'Very High';
+    uvValue === null
+      ? 'Unknown'
+      : uvValue <= 2
+        ? 'Low'
+        : uvValue <= 5
+          ? 'Moderate'
+          : uvValue <= 7
+            ? 'High'
+            : 'Very High';
 
   if (!weather.isLive) {
     return (
@@ -115,8 +123,9 @@ export const WeatherView: React.FC<WeatherViewProps> = ({
         <button
           type="button"
           onClick={onRefreshWeather}
-          className="mt-4 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all pointer-events-auto cursor-pointer"
-          style={{ background: 'var(--theme-accent)', color: '#11111b' }}
+          disabled={weatherLoading}
+          className="mt-4 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all pointer-events-auto cursor-pointer disabled:opacity-60 disabled:cursor-default"
+          style={{ background: 'var(--theme-accent)', color: 'var(--theme-on-accent, #11111b)' }}
         >
           {weatherLoading ? 'Refreshing…' : 'Retry weather'}
         </button>
@@ -258,7 +267,11 @@ export const WeatherView: React.FC<WeatherViewProps> = ({
                   className="text-[9px] font-mono"
                   style={{ color: 'var(--theme-text-secondary)' }}
                 >
-                  {Math.abs(weather.feelsLike - weather.temp) <= 2 ? 'Similar' : 'Wind chill'}
+                  {Math.abs(weather.feelsLike - weather.temp) <= 2
+                    ? 'Similar'
+                    : weather.feelsLike < weather.temp
+                      ? 'Wind chill'
+                      : 'Heat index'}
                 </span>
               </div>
             </div>
@@ -321,7 +334,7 @@ export const WeatherView: React.FC<WeatherViewProps> = ({
                   className="text-base font-bold tabular-nums"
                   style={{ color: 'var(--theme-text-primary)' }}
                 >
-                  {uvValue}
+                  {uvValue ?? '—'}
                 </span>
                 <span
                   className="px-1.5 py-0.5 rounded text-[9px] font-mono"
@@ -361,6 +374,11 @@ export const WeatherView: React.FC<WeatherViewProps> = ({
           >
             Hourly Forecast
           </span>
+          {weather.hourly.length === 0 && (
+            <span className="text-[11px]" style={{ color: 'var(--theme-text-secondary)' }}>
+              No hourly forecast available
+            </span>
+          )}
           <div className="grid grid-cols-6 gap-2">
             {weather.hourly.slice(0, 6).map((item, idx) => (
               <div
@@ -394,6 +412,17 @@ export const WeatherView: React.FC<WeatherViewProps> = ({
           </span>
           {(() => {
             const fiveDays = weather.daily.slice(0, 5);
+            if (fiveDays.length === 0) {
+              // Math.min() of nothing is Infinity: every bar width would render as NaN%.
+              return (
+                <span
+                  className="my-auto text-[11px] text-center"
+                  style={{ color: 'var(--theme-text-secondary)' }}
+                >
+                  No extended forecast available
+                </span>
+              );
+            }
             const overallMin = Math.min(...fiveDays.map((d) => d.tempMin));
             const overallMax = Math.max(...fiveDays.map((d) => d.tempMax));
             const overallSpan = Math.max(1, overallMax - overallMin);

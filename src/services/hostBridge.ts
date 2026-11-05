@@ -407,98 +407,89 @@ function buildFallbackSystemStats(): SystemStats {
   };
 }
 
+function finiteOr(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function stringOr(value: unknown, fallback: string): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
+// Missing fields fall back to neutral values, never to demo data: in standalone preview the
+// bridge fallback already returns a complete demo snapshot, so demo values only ever reach the
+// shell there. Substituting them for a sparse host payload showed fabricated processes/cores.
 export async function getSystemStats(): Promise<SystemStats> {
-  const fallback = buildFallbackSystemStats();
   const raw = await invokeBridge<Partial<SystemStats>>(
     'get_system_stats',
     undefined,
-    () => fallback,
+    buildFallbackSystemStats,
   );
+  const gpuUsage =
+    typeof raw.gpu_usage === 'number' && Number.isFinite(raw.gpu_usage) ? raw.gpu_usage : null;
 
   return {
-    cpu_usage: typeof raw.cpu_usage === 'number' ? raw.cpu_usage : fallback.cpu_usage,
-    cpu_temp_c:
-      typeof raw.cpu_temp_c === 'number' && raw.cpu_temp_c > 0
-        ? raw.cpu_temp_c
-        : raw.cpu_temp_c === null
-          ? null
-          : fallback.cpu_temp_c,
+    cpu_usage: finiteOr(raw.cpu_usage, 0),
+    cpu_temp_c: typeof raw.cpu_temp_c === 'number' && raw.cpu_temp_c > 0 ? raw.cpu_temp_c : null,
     cpu_name: raw.cpu_name ?? 'CPU',
-    gpu_usage:
-      typeof raw.gpu_usage === 'number' && Number.isFinite(raw.gpu_usage) ? raw.gpu_usage : null,
+    gpu_usage: gpuUsage,
     gpu_temp_c:
       typeof raw.gpu_temp_c === 'number' && Number.isFinite(raw.gpu_temp_c) ? raw.gpu_temp_c : null,
-    gpu_name: raw.gpu_name ?? (raw.gpu_usage !== null ? 'GPU' : null),
-    core_usages:
-      Array.isArray(raw.core_usages) && raw.core_usages.length > 0
-        ? raw.core_usages
-        : fallback.core_usages,
-    top_processes:
-      Array.isArray(raw.top_processes) && raw.top_processes.length > 0
-        ? raw.top_processes
-        : fallback.top_processes,
-    net_down_kbps:
-      typeof raw.net_down_kbps === 'number' && Number.isFinite(raw.net_down_kbps)
-        ? raw.net_down_kbps
-        : fallback.net_down_kbps,
-    net_up_kbps:
-      typeof raw.net_up_kbps === 'number' && Number.isFinite(raw.net_up_kbps)
-        ? raw.net_up_kbps
-        : fallback.net_up_kbps,
-    ram_usage: typeof raw.ram_usage === 'number' ? raw.ram_usage : fallback.ram_usage,
-    ram_used_gb: typeof raw.ram_used_gb === 'number' ? raw.ram_used_gb : fallback.ram_used_gb,
-    ram_total_gb: typeof raw.ram_total_gb === 'number' ? raw.ram_total_gb : fallback.ram_total_gb,
-    disk_usage: typeof raw.disk_usage === 'number' ? raw.disk_usage : fallback.disk_usage,
-    disk_used_gb: typeof raw.disk_used_gb === 'number' ? raw.disk_used_gb : fallback.disk_used_gb,
-    disk_total_gb:
-      typeof raw.disk_total_gb === 'number' ? raw.disk_total_gb : fallback.disk_total_gb,
-    uptime_formatted: raw.uptime_formatted || fallback.uptime_formatted,
-    hostname: raw.hostname || fallback.hostname,
-    os_name: raw.os_name || fallback.os_name,
-    username: raw.username || fallback.username,
+    gpu_name: raw.gpu_name ?? (gpuUsage !== null ? 'GPU' : null),
+    core_usages: Array.isArray(raw.core_usages) ? raw.core_usages : [],
+    top_processes: Array.isArray(raw.top_processes) ? raw.top_processes : [],
+    net_down_kbps: finiteOr(raw.net_down_kbps, 0),
+    net_up_kbps: finiteOr(raw.net_up_kbps, 0),
+    ram_usage: finiteOr(raw.ram_usage, 0),
+    ram_used_gb: finiteOr(raw.ram_used_gb, 0),
+    ram_total_gb: finiteOr(raw.ram_total_gb, 0),
+    disk_usage: finiteOr(raw.disk_usage, 0),
+    disk_used_gb: finiteOr(raw.disk_used_gb, 0),
+    disk_total_gb: finiteOr(raw.disk_total_gb, 0),
+    uptime_formatted: stringOr(raw.uptime_formatted, ''),
+    hostname: stringOr(raw.hostname, ''),
+    os_name: stringOr(raw.os_name, ''),
+    username: stringOr(raw.username, ''),
   };
 }
 
-export async function getMediaInfo(): Promise<MediaInfo> {
-  const fallbackSessions = buildFallbackSessions();
-  const activeFallbackTrack = FALLBACK_TRACKS[fallbackTrackIndex % FALLBACK_TRACKS.length];
-  const fallbackDuration = activeFallbackTrack.duration_secs || 240;
-  const fallbackElapsed = fallbackIsPlaying
-    ? Math.floor((Date.now() - fallbackTrackStartMs) / 1000) % fallbackDuration
-    : fallbackPausedElapsedSecs % fallbackDuration;
-
-  const info = await invokeBridge<Partial<MediaInfo>>('get_media_info', undefined, () => ({
-    title: activeFallbackTrack.title,
-    artist: activeFallbackTrack.artist,
-    album: activeFallbackTrack.album,
-    position_secs: fallbackElapsed,
-    duration_secs: fallbackDuration,
+function buildFallbackMediaInfo(): MediaInfo {
+  const track = FALLBACK_TRACKS[fallbackTrackIndex % FALLBACK_TRACKS.length];
+  const duration = track.duration_secs || 240;
+  const elapsed = fallbackIsPlaying
+    ? Math.floor((Date.now() - fallbackTrackStartMs) / 1000) % duration
+    : fallbackPausedElapsedSecs % duration;
+  return {
+    title: track.title,
+    artist: track.artist,
+    album: track.album,
+    position_secs: elapsed,
+    duration_secs: duration,
     is_playing: fallbackIsPlaying,
-    artwork_url: activeFallbackTrack.artwork_url,
-    source_app: activeFallbackTrack.source_app,
-    sessions: fallbackSessions,
-  }));
+    artwork_url: track.artwork_url,
+    source_app: track.source_app,
+    sessions: buildFallbackSessions(),
+  };
+}
 
-  const isHost = isWebViewHost();
-  const sessionsToUse = isHost
-    ? (info.sessions ?? [])
-    : Array.isArray(info.sessions) && info.sessions.length > 0
-      ? info.sessions
-      : fallbackSessions;
+// Same rule as getSystemStats: a host snapshot without artwork (null) or with an empty title must
+// not inherit the demo track's cover/title — that hid the real track and blocked the iTunes lookup.
+export async function getMediaInfo(): Promise<MediaInfo> {
+  const info = await invokeBridge<Partial<MediaInfo>>(
+    'get_media_info',
+    undefined,
+    buildFallbackMediaInfo,
+  );
 
   return {
-    title: info.title || activeFallbackTrack.title,
-    artist: info.artist || activeFallbackTrack.artist,
-    album: info.album ?? activeFallbackTrack.album,
-    is_playing: typeof info.is_playing === 'boolean' ? info.is_playing : fallbackIsPlaying,
-    position_secs: typeof info.position_secs === 'number' ? info.position_secs : fallbackElapsed,
-    duration_secs:
-      typeof info.duration_secs === 'number' && info.duration_secs > 0
-        ? info.duration_secs
-        : fallbackDuration,
-    artwork_url: info.artwork_url ?? activeFallbackTrack.artwork_url,
-    source_app: info.source_app || activeFallbackTrack.source_app,
-    sessions: sessionsToUse,
+    title: stringOr(info.title, ''),
+    artist: stringOr(info.artist, ''),
+    album: stringOr(info.album, ''),
+    is_playing: info.is_playing === true,
+    position_secs: Math.max(0, finiteOr(info.position_secs, 0)),
+    duration_secs: Math.max(0, finiteOr(info.duration_secs, 0)),
+    artwork_url: typeof info.artwork_url === 'string' && info.artwork_url ? info.artwork_url : null,
+    source_app: stringOr(info.source_app, ''),
+    sessions: Array.isArray(info.sessions) ? info.sessions : [],
     is_shuffle: typeof info.is_shuffle === 'boolean' ? info.is_shuffle : false,
     auto_repeat: typeof info.auto_repeat === 'number' ? info.auto_repeat : 0,
   };
@@ -884,8 +875,9 @@ export async function setDesktopWallpaper(path: string): Promise<boolean> {
     ...w,
     active: w.path === path,
   }));
-  await invokeBridge<unknown>('set_desktop_wallpaper', { path }, () => undefined);
-  return true;
+  // The host returns false when Windows rejects the wallpaper: surface it, never assume success.
+  const applied = await invokeBridge<boolean>('set_desktop_wallpaper', { path }, () => true);
+  return applied === true;
 }
 
 export async function pickWallpaperFolder(currentDir?: string): Promise<string | null> {
@@ -955,15 +947,6 @@ export async function setWallpaperDirectory(path: string): Promise<WallpaperEntr
     fallbackWallpapers.map((item) => ({ ...item })),
   );
   return hydrateWallpaperEntries(list);
-}
-
-export async function applyWallpaper(path: string): Promise<boolean> {
-  fallbackWallpapers = fallbackWallpapers.map((w) => ({
-    ...w,
-    active: w.path === path,
-  }));
-  await invokeBridge<unknown>('set_desktop_wallpaper', { path }, () => undefined);
-  return invokeBridge<boolean>('apply_wallpaper', { path }, () => true);
 }
 
 export async function setTopHoverTrigger(enabled: boolean): Promise<void> {

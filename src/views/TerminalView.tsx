@@ -66,6 +66,15 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ stats }) => {
       terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [terminalHistory]);
+
+  // The input is disabled while a command runs, which drops focus; hand it back when done so the
+  // user can keep typing without clicking.
+  useEffect(() => {
+    if (!terminalLoading) {
+      inputRef.current?.focus();
+    }
+  }, [terminalLoading]);
+
   useEffect(() => {
     let active = true;
     runTerminalCommand('fastfetch')
@@ -90,7 +99,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ stats }) => {
 
   const executeCommand = async (rawCmd: string) => {
     const trimmed = rawCmd.trim();
-    if (!trimmed) return;
+    if (!trimmed || terminalLoading) return;
 
     if (trimmed.toLowerCase() === 'clear' || trimmed.toLowerCase() === 'cls') {
       setTerminalHistory([]);
@@ -206,8 +215,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ stats }) => {
             <button
               key={preset.label}
               type="button"
-              onClick={() => executeCommand(preset.cmd)}
-              className="px-2 py-0.5 rounded-md text-[10px] transition-all pointer-events-auto cursor-pointer"
+              onClick={() => void executeCommand(preset.cmd)}
+              disabled={terminalLoading}
+              className="px-2 py-0.5 rounded-md text-[10px] transition-all pointer-events-auto cursor-pointer disabled:opacity-40 disabled:cursor-default"
               style={{
                 background: 'var(--theme-track)',
                 border: '1px solid var(--theme-border)',
@@ -279,7 +289,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ stats }) => {
           className="px-2.5 py-1 rounded-lg flex items-center gap-1.5 text-[11px] font-sans font-medium transition-all disabled:opacity-40 pointer-events-auto cursor-pointer"
           style={{
             background: 'var(--theme-accent)',
-            color: 'var(--theme-base, #11111b)',
+            color: 'var(--theme-on-accent, #11111b)',
           }}
         >
           <Send className="w-3 h-3" />

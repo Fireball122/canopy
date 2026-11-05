@@ -30,7 +30,6 @@ import { useAlbumArt } from './hooks/useAlbumArt';
 import { usePanelOpen } from './hooks/usePanelOpen';
 import { usePlaybackClock } from './hooks/usePlaybackClock';
 import {
-  applyWallpaper,
   type BatteryStatus,
   executePowerAction,
   getAudioSpectrum,
@@ -178,70 +177,41 @@ const CanopyShellContent: React.FC = () => {
   // Clock state
   const [now, setNow] = useState<Date>(() => new Date());
 
-  // System stats state (polled every 1500ms)
+  // System stats state (polled every 1500ms). Starts neutral: the first poll fires on mount, and
+  // placeholder figures would be shown as if they were this machine's.
   const [stats, setStats] = useState<SystemStats>({
-    cpu_usage: 14,
+    cpu_usage: 0,
     cpu_temp_c: null,
     gpu_usage: null,
     gpu_temp_c: null,
-    core_usages: [18, 12, 24, 9, 15, 11, 21, 8, 14, 10, 16, 7],
-    top_processes: [
-      { name: 'Canopy.exe', pid: 30416, cpu_usage: 1.4, memory_mb: 58.2 },
-      { name: 'dwm.exe', pid: 1104, cpu_usage: 2.8, memory_mb: 184.0 },
-      { name: 'msedgewebview2.exe', pid: 9240, cpu_usage: 1.9, memory_mb: 126.4 },
-      { name: 'explorer.exe', pid: 4820, cpu_usage: 0.9, memory_mb: 112.5 },
-      { name: 'audiodg.exe', pid: 2688, cpu_usage: 0.5, memory_mb: 24.1 },
-    ],
-    net_down_kbps: 23.3,
-    net_up_kbps: 14.2,
-    ram_usage: 46,
-    ram_used_gb: 5.4,
-    ram_total_gb: 16.0,
-    disk_usage: 55,
-    disk_used_gb: 230,
-    disk_total_gb: 512,
-    uptime_formatted: 'up 3 hours, 18 minutes',
-    hostname: 'CANOPY-WIN11',
-    os_name: 'Windows 11',
-    username: 'user',
+    core_usages: [],
+    top_processes: [],
+    net_down_kbps: 0,
+    net_up_kbps: 0,
+    ram_usage: 0,
+    ram_used_gb: 0,
+    ram_total_gb: 0,
+    disk_usage: 0,
+    disk_used_gb: 0,
+    disk_total_gb: 0,
+    uptime_formatted: '',
+    hostname: '',
+    os_name: '',
+    username: '',
   });
 
-  // Media state (polled every 800ms)
+  // Media state (polled every 800ms). Starts as the host's idle snapshot so no placeholder track
+  // is displayed (or looked up on iTunes) before the first poll lands.
   const [media, setMedia] = useState<MediaInfo>({
-    title: 'Bad Apple!!',
-    artist: 'Nomico • Alstroemeria Records',
-    album: 'Lovelight',
+    title: 'No media',
+    artist: 'Idle',
+    album: '',
     is_playing: false,
-    position_secs: 42,
-    duration_secs: 219,
+    position_secs: 0,
+    duration_secs: 0,
     artwork_url: null,
-    source_app: 'Spotify',
-    sessions: [
-      {
-        id: 'Spotify.exe',
-        app_name: 'Spotify',
-        title: 'Bad Apple!!',
-        artist: 'Nomico',
-        is_playing: false,
-        is_current: true,
-      },
-      {
-        id: 'Feishin.exe',
-        app_name: 'Feishin',
-        title: 'Night of Nights',
-        artist: 'COOL&CREATE',
-        is_playing: false,
-        is_current: false,
-      },
-      {
-        id: 'chrome.exe',
-        app_name: 'Chrome',
-        title: 'Lofi Hip Hop Radio',
-        artist: 'Lofi Girl',
-        is_playing: false,
-        is_current: false,
-      },
-    ],
+    source_app: 'System Audio',
+    sessions: [],
   });
 
   // Master Volume & Display Brightness state
@@ -282,7 +252,7 @@ const CanopyShellContent: React.FC = () => {
 
   const spectrumInFlightRef = useRef<boolean>(false);
   useEffect(() => {
-    if (!panelOpen || activeTab !== 'dashboard') return;
+    if (!shellActive || activeTab !== 'dashboard') return;
     let active = true;
     const poll = async () => {
       if (spectrumInFlightRef.current) return;
@@ -290,7 +260,9 @@ const CanopyShellContent: React.FC = () => {
       try {
         const bands = await getAudioSpectrum();
         if (active && Array.isArray(bands) && bands.length > 0) {
-          setSpectrumBands(bands);
+          // Silence arrives as identical zero frames; keep the old array so the shell skips a
+          // 25 Hz re-render while nothing is playing.
+          setSpectrumBands((prev) => (samePayload(prev, bands) ? prev : bands));
         }
       } catch {
       } finally {
@@ -303,7 +275,7 @@ const CanopyShellContent: React.FC = () => {
       active = false;
       window.clearInterval(timer);
     };
-  }, [panelOpen, activeTab]);
+  }, [shellActive, activeTab]);
 
   const [paletteOpen, setPaletteOpen] = useState<boolean>(false);
   const [paletteQuery, setPaletteQuery] = useState<string>('');
@@ -321,6 +293,7 @@ const CanopyShellContent: React.FC = () => {
       .catch(() => undefined);
   }, []);
 
+  // Theme changes pushed by the host (`canopy:theme-changed`) are owned by SettingsProvider.
   useEffect(() => {
     const handleNavigateTab = (e: Event) => {
       const detail = (e as CustomEvent<unknown>).detail;
@@ -334,29 +307,8 @@ const CanopyShellContent: React.FC = () => {
       }
     };
     window.addEventListener('canopy:navigate_tab', handleNavigateTab);
-
-    const handleThemeChanged = (e: Event) => {
-      const detail = (e as CustomEvent<unknown>).detail;
-      if (
-        detail &&
-        typeof detail === 'object' &&
-        'theme' in detail &&
-        typeof detail.theme === 'string'
-      ) {
-        const raw = detail.theme.toLowerCase();
-        const valid = ['canopy', 'adaptive', 'dark', 'light', 'auto'].includes(raw)
-          ? (raw as 'canopy' | 'adaptive' | 'dark' | 'light' | 'auto')
-          : 'canopy';
-        updateSettings({ themeMode: valid });
-      }
-    };
-    window.addEventListener('canopy:theme-changed', handleThemeChanged);
-
-    return () => {
-      window.removeEventListener('canopy:navigate_tab', handleNavigateTab);
-      window.removeEventListener('canopy:theme-changed', handleThemeChanged);
-    };
-  }, [updateSettings]);
+    return () => window.removeEventListener('canopy:navigate_tab', handleNavigateTab);
+  }, []);
 
   const visibleTabs = useMemo<{ id: TabId; label: string; icon: React.ReactNode }[]>(
     () => [
@@ -457,9 +409,18 @@ const CanopyShellContent: React.FC = () => {
     }
   }, [visibleTabs, activeTab, appPickerMode]);
 
+  // Palette jumps ("View Synced Lyrics", "View Cores") only apply to that one visit; leaving the
+  // tab restores the default sub-view so later plain visits do not reopen lyrics/details.
+  useEffect(() => {
+    if (activeTab !== 'media') setMediaSubView('main');
+    if (activeTab !== 'performance') setPerformanceDetails(false);
+  }, [activeTab]);
+
   const toastTimerRef = useRef<number | null>(null);
   const lastToastTimeRef = useRef<number>(0);
   const lastToastMsgRef = useRef<string>('');
+  const escapeTimerRef = useRef<number | null>(null);
+  const wallpaperStatusTimerRef = useRef<number | null>(null);
 
   const handleToastNotification = useCallback((msg: string) => {
     const now = Date.now();
@@ -483,23 +444,36 @@ const CanopyShellContent: React.FC = () => {
     }, 4500);
   }, []);
 
-  // Per-monitor background color sampling: captures whatever is actively rendered on the current monitor
-  // (including Wallpaper Engine dynamic/video backgrounds or custom per-monitor wallpapers) with 0 idle drain.
+  // Per-monitor background color sampling for the Adaptive theme: captures whatever is actively
+  // rendered on the current monitor (Wallpaper Engine, per-monitor wallpapers) with 0 idle drain.
+  // Auto follows the Windows light/dark setting and must not be repainted from the desktop.
   useEffect(() => {
-    if (!panelOpen) return;
-    if (settings.themeMode === 'adaptive' || settings.themeMode === 'auto') {
-      void getDesktopMonitorThumbnail().then((thumb) => {
-        if (thumb?.data_url) {
-          void applyThemeFromImageSrc(thumb.data_url);
+    if (!panelOpen || settings.themeMode !== 'adaptive') return;
+    let active = true;
+    void getDesktopMonitorThumbnail()
+      .then((thumb) => {
+        // A mode switch while the capture was in flight must not be overwritten by it.
+        if (active && thumb?.data_url) {
+          void applyThemeFromImageSrc(
+            thumb.data_url,
+            'adaptive',
+            settings.customAccentColor,
+            settings.trueOledMode,
+          );
         }
-      });
-    }
-  }, [panelOpen, settings.themeMode]);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [panelOpen, settings.themeMode, settings.customAccentColor, settings.trueOledMode]);
   useEffect(() => {
     return () => {
-      if (toastTimerRef.current !== null) {
-        window.clearTimeout(toastTimerRef.current);
-        toastTimerRef.current = null;
+      for (const timerRef of [toastTimerRef, escapeTimerRef, wallpaperStatusTimerRef]) {
+        if (timerRef.current !== null) {
+          window.clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
       }
     };
   }, []);
@@ -581,6 +555,9 @@ const CanopyShellContent: React.FC = () => {
         return;
       }
       if (nextOpen) {
+        // Every summon starts fresh: a half-finished Quick Launch pick from the previous visit
+        // would otherwise leave the Apps tab stuck in picker mode.
+        setAppPickerMode(false);
         setActiveTab('dashboard');
       }
     };
@@ -592,7 +569,17 @@ const CanopyShellContent: React.FC = () => {
           setPaletteOpen(false);
           return;
         }
-        void setDropdownOpen(false);
+        // Drawers, confirmations and the hotkey recorder claim Escape with preventDefault(), and
+        // their window listeners can run after this one: decide once dispatch has finished.
+        if (escapeTimerRef.current !== null) {
+          window.clearTimeout(escapeTimerRef.current);
+        }
+        escapeTimerRef.current = window.setTimeout(() => {
+          escapeTimerRef.current = null;
+          if (!e.defaultPrevented) {
+            void setDropdownOpen(false);
+          }
+        }, 0);
       } else if (e.key === '`' && (e.ctrlKey || e.altKey || e.metaKey)) {
         e.preventDefault();
         void setDropdownOpen(!panelOpen);
@@ -623,7 +610,7 @@ const CanopyShellContent: React.FC = () => {
         );
         return;
       }
-      if (mode === 'dark' || (mode as string) === 'obsidian') {
+      if (mode === 'dark') {
         applyThemeModeFallback(
           'dark',
           settings.glassOpacity,
@@ -633,7 +620,7 @@ const CanopyShellContent: React.FC = () => {
         );
         return;
       }
-      if (mode === 'light' || (mode as string) === 'alabaster') {
+      if (mode === 'light') {
         applyThemeModeFallback(
           'light',
           settings.glassOpacity,
@@ -751,7 +738,11 @@ const CanopyShellContent: React.FC = () => {
 
   // One shared playhead for the whole panel: anchored on the host's reported position and advanced
   // locally between the 800 ms polls (see usePlaybackClock). The synced lyrics read the same clock.
-  const mediaClock = usePlaybackClock(media, { enabled: shellActive });
+  // Only Dashboard and Media draw the playhead; ticking on other tabs re-rendered the whole shell
+  // 10x per second during playback for nothing. Host snapshots still re-anchor it everywhere.
+  const mediaClock = usePlaybackClock(media, {
+    enabled: shellActive && (activeTab === 'dashboard' || activeTab === 'media'),
+  });
   const scrubPosition = mediaClock.position;
   // Wallpaper lists arrive as fresh arrays on every fetch; keep the old identity when the
   // contents are unchanged so the shell (and the theme sync) does not re-render for nothing.
@@ -1064,15 +1055,23 @@ const CanopyShellContent: React.FC = () => {
     }
   }, []);
 
-  // Typing a printable key while the panel is expanded summons the palette; collapsing the panel
-  // dismisses it. Escape / Ctrl-` handling stays in the host-event listener above.
+  // Typing a printable key while the panel is expanded summons the palette (` and Ctrl+P open it
+  // empty, as the header search button advertises); collapsing the panel dismisses it.
+  // Escape / Ctrl-` handling stays in the host-event listener above.
   useEffect(() => {
     if (!panelOpen) {
       setPaletteOpen(false);
       return;
     }
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey || e.key.length !== 1) return;
+      if (e.defaultPrevented) return;
+      if (e.ctrlKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        setPaletteQuery('');
+        setPaletteOpen(true);
+        return;
+      }
+      if (e.ctrlKey || e.altKey || e.metaKey || e.key.length !== 1) return;
       const target = e.target;
       if (
         target instanceof Element &&
@@ -1083,15 +1082,18 @@ const CanopyShellContent: React.FC = () => {
         return;
       }
       e.preventDefault();
-      setPaletteQuery(e.key);
+      setPaletteQuery(e.key === '`' ? '' : e.key);
       setPaletteOpen(true);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [panelOpen]);
 
-  // Weather fetch (reactive to settings.temperatureUnit and settings.weatherLocationMode)
+  // Weather fetch (reactive to settings.temperatureUnit and settings.weatherLocationMode).
+  // Requests are numbered so a slow reply for an outdated unit/location never overwrites a newer one.
+  const weatherRequestRef = useRef<number>(0);
   const refreshWeather = useCallback(async () => {
+    const requestId = ++weatherRequestRef.current;
     setWeatherLoading(true);
     try {
       const data = await fetchWeather({
@@ -1101,11 +1103,15 @@ const CanopyShellContent: React.FC = () => {
         manualLongitude: settings.manualLongitude,
         manualCityName: settings.manualCityName,
       });
-      setWeather(data);
+      if (requestId === weatherRequestRef.current) {
+        setWeather(data);
+      }
     } catch {
       // Keep fallback weather
     } finally {
-      setWeatherLoading(false);
+      if (requestId === weatherRequestRef.current) {
+        setWeatherLoading(false);
+      }
     }
   }, [
     settings.temperatureUnit,
@@ -1115,10 +1121,18 @@ const CanopyShellContent: React.FC = () => {
     settings.manualCityName,
   ]);
 
+  // The first load is immediate; later edits settle first — the manual city field updates
+  // settings on every keystroke and each one used to fire a geocoding + forecast request.
+  const weatherPrimedRef = useRef<boolean>(false);
   useEffect(() => {
-    refreshWeather();
-    const id = window.setInterval(refreshWeather, 30 * 60 * 1000);
-    return () => window.clearInterval(id);
+    const delayMs = weatherPrimedRef.current ? 800 : 0;
+    weatherPrimedRef.current = true;
+    const kickoff = window.setTimeout(() => void refreshWeather(), delayMs);
+    const id = window.setInterval(() => void refreshWeather(), 30 * 60 * 1000);
+    return () => {
+      window.clearTimeout(kickoff);
+      window.clearInterval(id);
+    };
   }, [refreshWeather]);
 
   // Media transport handlers
@@ -1218,18 +1232,31 @@ const CanopyShellContent: React.FC = () => {
       );
     }
 
+    let applied = false;
     try {
-      const ok = await setDesktopWallpaper(entry.path);
-      if (!ok) {
-        await applyWallpaper(entry.path);
-      }
-      setWallpaperStatus(`Applied "${entry.name}"`);
+      applied = await setDesktopWallpaper(entry.path);
+      setWallpaperStatus(
+        applied
+          ? `Applied "${entry.name}"`
+          : `Couldn't apply "${entry.name}": Windows rejected the wallpaper.`,
+      );
     } catch (error) {
       const reason =
         error instanceof Error ? error.message : 'The Windows wallpaper service returned an error.';
       setWallpaperStatus(`Couldn't apply "${entry.name}": ${reason}`);
     }
-    window.setTimeout(() => setWallpaperStatus(''), 2500);
+    if (!applied) {
+      // Drop the optimistic "active" badge: re-read which wallpaper Windows actually shows.
+      void refreshWallpapersList();
+    }
+    // One status timer at a time, so an earlier apply cannot blank a newer apply's message.
+    if (wallpaperStatusTimerRef.current !== null) {
+      window.clearTimeout(wallpaperStatusTimerRef.current);
+    }
+    wallpaperStatusTimerRef.current = window.setTimeout(() => {
+      wallpaperStatusTimerRef.current = null;
+      setWallpaperStatus('');
+    }, 2500);
   };
 
   const effectiveDuration = media.duration_secs > 2 ? media.duration_secs : 219;
@@ -1305,6 +1332,7 @@ const CanopyShellContent: React.FC = () => {
                   color: 'var(--theme-accent)',
                 }}
                 title="Quick Search / Command Palette (` or Ctrl+P)"
+                aria-label="Open command palette"
               >
                 <Search className="w-3.5 h-3.5" />
               </button>
@@ -1401,6 +1429,7 @@ const CanopyShellContent: React.FC = () => {
                   color: 'var(--theme-accent)',
                 }}
                 title="Quick Search / Command Palette (` or Ctrl+P)"
+                aria-label="Open command palette"
               >
                 <Search className="w-3.5 h-3.5" />
               </button>
@@ -1417,41 +1446,43 @@ const CanopyShellContent: React.FC = () => {
           {/* TAB 1: DASHBOARD (4-Zone Bento Grid — Zero Inline Toggles, Zero Slider Overlap)    */}
           {/* ================================================================================= */}
           {activeTab === 'dashboard' && (
-            <DashboardView
-              stats={stats}
-              weather={weather}
-              currentTime={now}
-              battery={battery}
-              caffeineActive={caffeineActive}
-              setCaffeineActive={setCaffeineActive}
-              dndActive={dndActive}
-              setDndActive={setDndActive}
-              volume={volume}
-              onVolumeChange={handleVolumeChange}
-              brightness={brightness}
-              onBrightnessChange={handleBrightnessChange}
-              micVolume={micVolume}
-              onMicLevelChange={handleMicLevelChange}
-              micMuted={micMuted}
-              onMicMuteToggle={handleMicMuteToggle}
-              media={media}
-              resolvedArtwork={resolvedArtwork}
-              isMusicPlaying={isMusicPlaying}
-              spectrumBands={spectrumBands}
-              effectivePosition={effectivePosition}
-              effectiveDuration={effectiveDuration}
-              onPlayPause={handlePlayPause}
-              onPrev={handlePrev}
-              onNext={handleNext}
-              onSeek={handleSeek}
-              onSelectSession={handleSelectSession}
-              onMediaControl={handleMediaControl}
-              onNavigateTab={(tab) => {
-                setActiveTab(tab as TabId);
-                void notifyTabSwitched();
-              }}
-              onToastNotification={handleToastNotification}
-            />
+            <ErrorBoundary fallbackTitle="Dashboard">
+              <DashboardView
+                stats={stats}
+                weather={weather}
+                currentTime={now}
+                battery={battery}
+                caffeineActive={caffeineActive}
+                setCaffeineActive={setCaffeineActive}
+                dndActive={dndActive}
+                setDndActive={setDndActive}
+                volume={volume}
+                onVolumeChange={handleVolumeChange}
+                brightness={brightness}
+                onBrightnessChange={handleBrightnessChange}
+                micVolume={micVolume}
+                onMicLevelChange={handleMicLevelChange}
+                micMuted={micMuted}
+                onMicMuteToggle={handleMicMuteToggle}
+                media={media}
+                resolvedArtwork={resolvedArtwork}
+                isMusicPlaying={isMusicPlaying}
+                spectrumBands={spectrumBands}
+                effectivePosition={effectivePosition}
+                effectiveDuration={effectiveDuration}
+                onPlayPause={handlePlayPause}
+                onPrev={handlePrev}
+                onNext={handleNext}
+                onSeek={handleSeek}
+                onSelectSession={handleSelectSession}
+                onMediaControl={handleMediaControl}
+                onNavigateTab={(tab) => {
+                  setActiveTab(tab as TabId);
+                  void notifyTabSwitched();
+                }}
+                onToastNotification={handleToastNotification}
+              />
+            </ErrorBoundary>
           )}
 
           {/* ================================================================================= */}
@@ -1489,7 +1520,9 @@ const CanopyShellContent: React.FC = () => {
           {/* TAB 3: PERFORMANCE (3 Concentric Gauges + Network Traffic + Expandable Drawer)    */}
           {/* ================================================================================= */}
           {activeTab === 'performance' && (
-            <PerformanceView stats={stats} initialDetailsOpen={performanceDetails} />
+            <ErrorBoundary fallbackTitle="Performance">
+              <PerformanceView stats={stats} initialDetailsOpen={performanceDetails} />
+            </ErrorBoundary>
           )}
 
           {/* ================================================================================= */}
@@ -1566,74 +1599,86 @@ const CanopyShellContent: React.FC = () => {
           {/* TAB 5: WALLPAPER (Featured Active Wallpaper Showcase + Horizontal Carousel)       */}
           {/* ================================================================================= */}
           {activeTab === 'wallpaper' && (
-            <WallpaperView
-              wallpapers={wallpapers}
-              onApplyWallpaper={handleApplyWallpaper}
-              onRefreshWallpapers={refreshWallpapersList}
-              onNavigateToSettings={() => setActiveTab('settings')}
-              onDirectoryChanged={(_newDir, entries) => {
-                if (entries && entries.length > 0) {
-                  setWallpapers(entries);
-                } else {
-                  refreshWallpapersList();
-                }
-              }}
-              statusText={wallpaperStatus}
-            />
+            <ErrorBoundary fallbackTitle="Wallpapers">
+              <WallpaperView
+                wallpapers={wallpapers}
+                onApplyWallpaper={handleApplyWallpaper}
+                onRefreshWallpapers={refreshWallpapersList}
+                onNavigateToSettings={() => setActiveTab('settings')}
+                onDirectoryChanged={(_newDir, entries) => {
+                  if (entries && entries.length > 0) {
+                    setWallpapers(entries);
+                  } else {
+                    refreshWallpapersList();
+                  }
+                }}
+                statusText={wallpaperStatus}
+              />
+            </ErrorBoundary>
           )}
 
           {/* ================================================================================= */}
           {/* TAB 6: WEATHER (Balanced Left Cohesive Card + Right Hourly & Extended Outlook)    */}
           {/* ================================================================================= */}
           {activeTab === 'weather' && (
-            <WeatherView
-              weather={weather}
-              tempUnit={tempUnit}
-              weatherLoading={weatherLoading}
-              onRefreshWeather={refreshWeather}
-              locationMode={settings.weatherLocationMode}
-            />
+            <ErrorBoundary fallbackTitle="Weather">
+              <WeatherView
+                weather={weather}
+                tempUnit={tempUnit}
+                weatherLoading={weatherLoading}
+                onRefreshWeather={refreshWeather}
+                locationMode={settings.weatherLocationMode}
+              />
+            </ErrorBoundary>
           )}
 
           {/* ================================================================================= */}
           {/* TAB 7: TERMINAL (Interactive Canopy PowerShell Console)                           */}
           {/* ================================================================================= */}
-          {activeTab === 'terminal' && <TerminalView stats={stats} />}
+          {activeTab === 'terminal' && (
+            <ErrorBoundary fallbackTitle="Developer Console">
+              <TerminalView stats={stats} />
+            </ErrorBoundary>
+          )}
 
           {/* ================================================================================= */}
           {/* TAB 8: POWER (Sleep, Restart, Shut Down, Lock, Sign Out, Hibernate)               */}
           {/* ================================================================================= */}
           {activeTab === 'power' && (
-            <PowerView
-              stats={stats}
-              onActionTriggered={(act) => {
-                if (act !== 'lock') {
-                  void setDropdownOpen(false);
-                }
-              }}
-            />
+            <ErrorBoundary fallbackTitle="Power">
+              <PowerView
+                stats={stats}
+                onActionTriggered={(act) => {
+                  if (act !== 'lock') {
+                    void setDropdownOpen(false);
+                  }
+                }}
+              />
+            </ErrorBoundary>
           )}
 
           {/* ================================================================================= */}
           {/* TAB 8: SETTINGS (Global Settings Engine & Bento Configuration Cards)              */}
           {/* ================================================================================= */}
           {activeTab === 'settings' && (
-            <SettingsView
-              onDirectoryChanged={(_newDir, entries) => {
-                if (entries && entries.length > 0) {
-                  setWallpapers(entries);
-                } else {
-                  refreshWallpapersList();
-                }
-              }}
-              onThemeChanged={() => {
-                syncThemeWithActiveWallpaper(wallpapers, settings.themeMode);
-              }}
-              onStartAddQuickLaunch={() => {
-                setAppPickerMode(true);
-                setActiveTab('apps');
-              }}
-            />
+            <ErrorBoundary fallbackTitle="Settings">
+              <SettingsView
+                onDirectoryChanged={(_newDir, entries) => {
+                  if (entries && entries.length > 0) {
+                    setWallpapers(entries);
+                  } else {
+                    refreshWallpapersList();
+                  }
+                }}
+                onThemeChanged={() => {
+                  syncThemeWithActiveWallpaper(wallpapers, settings.themeMode);
+                }}
+                onStartAddQuickLaunch={() => {
+                  setAppPickerMode(true);
+                  setActiveTab('apps');
+                }}
+              />
+            </ErrorBoundary>
           )}
         </main>
       </div>

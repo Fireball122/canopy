@@ -17,6 +17,12 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# Windows PowerShell 5.1: the progress bar slows Invoke-WebRequest down by an order of magnitude,
+# and older Windows 10 builds only offer TLS 1.0/1.1, which GitHub and go.microsoft.com reject.
+$ProgressPreference = "SilentlyContinue"
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+# Null when piped through `irm ... | iex` (no script file), so only probe for a local build when set.
+$ScriptPath = $MyInvocation.MyCommand.Path
 
 # Colors and styling
 function Write-Header {
@@ -45,7 +51,7 @@ function Assert-ReleaseAssetChecksum {
 
     $checksumPath = Join-Path $env:TEMP ("Canopy-checksums-" + [guid]::NewGuid().ToString() + ".txt")
     try {
-        Invoke-WebRequest -Uri $checksumAsset.browser_download_url -OutFile $checksumPath
+        Invoke-WebRequest -UseBasicParsing -Uri $checksumAsset.browser_download_url -OutFile $checksumPath
         $expected = $null
         foreach ($line in Get-Content -LiteralPath $checksumPath) {
             if ($line -match '^\s*([a-fA-F0-9]{64})\s+\*?(.+?)\s*$' -and $matches[2].Trim() -eq $Asset.name) {
@@ -95,14 +101,15 @@ function Install-WebView2Runtime {
             Write-Host ""
             Write-Host "[WARNING] Canopy cannot function without the Microsoft Edge WebView2 Runtime." -ForegroundColor Red
             Write-Host "Installation cancelled by user. Please install WebView2 before running Canopy." -ForegroundColor Red
-            exit 1
+            # throw, not exit: under `irm | iex` exit would close the user's PowerShell window.
+            throw "Canopy installation cancelled: the Microsoft Edge WebView2 Runtime is required."
         }
     }
 
     Write-Host "==> Installing the Microsoft Edge WebView2 Runtime..." -ForegroundColor Cyan
     $bootstrapperPath = Join-Path $env:TEMP "MicrosoftEdgeWebView2Setup.exe"
     try {
-        Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile $bootstrapperPath
+        Invoke-WebRequest -UseBasicParsing -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile $bootstrapperPath
         $signature = Get-AuthenticodeSignature -FilePath $bootstrapperPath
         if ($signature.Status -ne "Valid" -or $signature.SignerCertificate.Subject -notmatch "Microsoft") {
             throw "The downloaded WebView2 installer does not have a valid Microsoft signature."
@@ -127,8 +134,8 @@ if ($Uninstall -or $env:CANOPY_UNINSTALL -eq "1" -or $env:CANOPY_UNINSTALL -eq "
     $startMenu = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Canopy.lnk"
     if (Test-Path $startMenu) { Remove-Item $startMenu -Force }
 
-    # Remove Desktop shortcut
-    $desktop = "$env:USERPROFILE\Desktop\Canopy.lnk"
+    # Remove Desktop shortcut (same folder lookup as install, so OneDrive-redirected desktops match)
+    $desktop = Join-Path ([Environment]::GetFolderPath("Desktop")) "Canopy.lnk"
     if (Test-Path $desktop) { Remove-Item $desktop -Force }
 
     # Remove Startup key if registered
@@ -141,6 +148,8 @@ if ($Uninstall -or $env:CANOPY_UNINSTALL -eq "1" -or $env:CANOPY_UNINSTALL -eq "
         Remove-Item $InstallDir -Recurse -Force
     }
 
+    # The env var form persists in the session; clear it so a later install one-liner installs.
+    Remove-Item Env:CANOPY_UNINSTALL -ErrorAction SilentlyContinue
     Write-Host "==> Canopy has been successfully removed." -ForegroundColor Green
     return
 }
@@ -148,19 +157,14 @@ if ($Uninstall -or $env:CANOPY_UNINSTALL -eq "1" -or $env:CANOPY_UNINSTALL -eq "
 Write-Header
 Install-WebView2Runtime
 
-# 1. Terminate running instance if updating
-$running = Get-Process Canopy -ErrorAction SilentlyContinue
-if ($running) {
-    Write-Host "==> Closing active Canopy instance for update..." -ForegroundColor Yellow
-    $running | Stop-Process -Force
-    Start-Sleep -Milliseconds 800
+# 1. Check if running from local repo build or downloading from GitHub
+$resolvedLocalZip = $null
+if ($ScriptPath) {
+    $localZip = Join-Path (Split-Path -Parent $ScriptPath) "dist-installer\Canopy-*-portable.zip"
+    $resolvedLocalZip = Get-Item $localZip -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 }
 
-# 2. Check if running from local repo build or downloading from GitHub
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$localZip = Join-Path $ScriptDir "dist-installer\Canopy-*-portable.zip"
-$resolvedLocalZip = Get-Item $localZip -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-
+$downloadedPath = $null
 if ($resolvedLocalZip) {
     Write-Host "==> Using local portable package: $($resolvedLocalZip.FullName)" -ForegroundColor Green
     $zipPath = $resolvedLocalZip.FullName
@@ -169,8 +173,7 @@ if ($resolvedLocalZip) {
     $apiUrl = "https://api.github.com/repos/$Repo/releases/latest"
     
     try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        $release = Invoke-RestMethod -Uri $apiUrl -Headers @{ "User-Agent" = "Canopy-Installer" }
+        $release = Invoke-RestMethod -UseBasicParsing -Uri $apiUrl -Headers @{ "User-Agent" = "Canopy-Installer" }
         $asset = $release.assets | Where-Object { $_.name -like "*portable.zip" -or $_.name -like "*win-x64*.zip" } | Select-Object -First 1
         
         if (-not $asset) {
@@ -184,15 +187,25 @@ if ($resolvedLocalZip) {
         
         $downloadUrl = $asset.browser_download_url
         $zipPath = Join-Path $env:TEMP $asset.name
+        $downloadedPath = $zipPath
         Write-Host "==> Downloading $($asset.name)..." -ForegroundColor Cyan
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath
+        Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $zipPath
         Assert-ReleaseAssetChecksum -Release $release -Asset $asset -Path $zipPath
         Unblock-File -Path $zipPath -ErrorAction SilentlyContinue
     } catch {
-        Write-Host "[ERROR] Could not fetch release asset: $_" -ForegroundColor Red
+        if ($downloadedPath) { Remove-Item -LiteralPath $downloadedPath -Force -ErrorAction SilentlyContinue }
         Write-Host "Please download the installer directly from https://github.com/$Repo/releases" -ForegroundColor Yellow
-        return
+        throw "Could not fetch release asset: $_"
     }
+}
+
+# 2. Terminate the running instance only now that the package is verified, so a failed download
+# does not leave the user without Canopy.
+$running = Get-Process Canopy -ErrorAction SilentlyContinue
+if ($running) {
+    Write-Host "==> Closing active Canopy instance for update..." -ForegroundColor Yellow
+    $running | Stop-Process -Force
+    Start-Sleep -Milliseconds 800
 }
 
 # 3. Install to target directory
@@ -212,6 +225,9 @@ if ($zipPath -like "*.msi") {
 } else {
     Expand-Archive -Path $zipPath -DestinationPath $InstallDir -Force
     Get-ChildItem -Path $InstallDir -Recurse | Unblock-File -ErrorAction SilentlyContinue
+}
+if ($downloadedPath) {
+    Remove-Item -LiteralPath $downloadedPath -Force -ErrorAction SilentlyContinue
 }
 
 # 4. Create Shortcuts (Start Menu & Desktop)

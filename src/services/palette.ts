@@ -113,6 +113,44 @@ export function hexToRgba(hex: string, alpha: number): string {
   return `rgba(56, 189, 248, ${alpha})`;
 }
 
+/** Parses `#rgb` / `#rrggbb` (hash optional); null for anything else. */
+function parseHexColor(hex: string): RGBTuple | null {
+  const match = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
+  if (!match) return null;
+  const digits = match[1].length === 3 ? match[1].replace(/./g, (d) => d + d) : match[1];
+  return [
+    parseInt(digits.slice(0, 2), 16),
+    parseInt(digits.slice(2, 4), 16),
+    parseInt(digits.slice(4, 6), 16),
+  ];
+}
+
+/** WCAG 2.1 minimum for UI components and large text; accents are drawn as text and icons. */
+const MIN_ACCENT_CONTRAST = 3;
+const LIGHT_THEME_SURFACE: RGBTuple = [255, 255, 255];
+const DARK_THEME_SURFACE: RGBTuple = [18, 18, 22];
+
+/**
+ * Darkens (light theme) or lightens (dark themes) an accent until it reaches 3:1 against the card
+ * surface, keeping hue and saturation. A pale custom accent or a yellow/lime wallpaper accent was
+ * otherwise nearly invisible as text on the white light-theme cards.
+ */
+function ensureAccentContrast(rgb: RGBTuple, isLight: boolean): RGBTuple {
+  const surface = isLight ? LIGHT_THEME_SURFACE : DARK_THEME_SURFACE;
+  if (getContrastRatio(rgb, surface) >= MIN_ACCENT_CONTRAST) return rgb;
+  const [h, s, l] = rgbToHsl(rgb[0], rgb[1], rgb[2]);
+  const step = isLight ? -0.04 : 0.04;
+  let lightness = l;
+  let adjusted = rgb;
+  // 25 steps of 0.04 always reach black/white, both of which clear 3:1 on these surfaces.
+  for (let i = 0; i < 25; i++) {
+    lightness = Math.min(1, Math.max(0, lightness + step));
+    adjusted = hslToRgb(h, s, lightness);
+    if (getContrastRatio(adjusted, surface) >= MIN_ACCENT_CONTRAST) break;
+  }
+  return adjusted;
+}
+
 // ---------------------------------------------------------------------------
 // Signature Preset Definitions
 // ---------------------------------------------------------------------------
@@ -176,11 +214,13 @@ function applyThemeVariables(
   const root = document.documentElement;
   root.dataset.theme = vars.isLight ? 'light' : 'dark';
   const activeVars = { ...vars };
-  if (customAccent && /^#[0-9a-f]{3,8}$/i.test(customAccent)) {
-    activeVars.accent = customAccent;
-    activeVars.accentSoft = hexToRgba(customAccent, activeVars.isLight ? 0.1 : 0.18);
+  const customRgb = customAccent ? parseHexColor(customAccent) : null;
+  if (customRgb) {
+    const accentHex = rgbToHex(ensureAccentContrast(customRgb, activeVars.isLight));
+    activeVars.accent = accentHex;
+    activeVars.accentSoft = hexToRgba(accentHex, activeVars.isLight ? 0.1 : 0.18);
     if (!activeVars.isLight) {
-      activeVars.border = hexToRgba(customAccent, 0.22);
+      activeVars.border = hexToRgba(accentHex, 0.22);
     }
   }
   if (trueOled && !activeVars.isLight) {
@@ -289,7 +329,7 @@ export function applyThemePalette(
     canvas.height = 64;
 
     if (!ctx) {
-      applyThemeModeFallback('canopy');
+      applyThemeModeFallback('canopy', undefined, undefined, customAccent, trueOled);
       return;
     }
 
@@ -337,7 +377,7 @@ export function applyThemePalette(
     }
 
     if (totalPixels === 0) {
-      applyThemeModeFallback('canopy');
+      applyThemeModeFallback('canopy', undefined, undefined, customAccent, trueOled);
       return;
     }
 
@@ -363,31 +403,39 @@ export function applyThemePalette(
     const isGrayscale = chromaticPixels < totalPixels * 0.05 || maxWeight < 1.0;
     if (isGrayscale) {
       if (isLight) {
-        applyThemeVariables({
-          bg: 'rgba(248, 250, 252, 0.94)',
-          card: 'rgba(255, 255, 255, 0.85)',
-          border: 'rgba(15, 23, 42, 0.12)',
-          accent: '#475569',
-          accentSoft: 'rgba(71, 85, 105, 0.14)',
-          accentWarm: '#64748b',
-          textPrimary: '#0f172a',
-          textSecondary: '#475569',
-          track: 'rgba(15, 23, 42, 0.08)',
-          isLight: true,
-        });
+        applyThemeVariables(
+          {
+            bg: 'rgba(248, 250, 252, 0.94)',
+            card: 'rgba(255, 255, 255, 0.85)',
+            border: 'rgba(15, 23, 42, 0.12)',
+            accent: '#475569',
+            accentSoft: 'rgba(71, 85, 105, 0.14)',
+            accentWarm: '#64748b',
+            textPrimary: '#0f172a',
+            textSecondary: '#475569',
+            track: 'rgba(15, 23, 42, 0.08)',
+            isLight: true,
+          },
+          customAccent,
+          false,
+        );
       } else {
-        applyThemeVariables({
-          bg: 'rgba(18, 18, 24, 0.94)',
-          card: 'rgba(255, 255, 255, 0.05)',
-          border: 'rgba(255, 255, 255, 0.10)',
-          accent: '#94a3b8',
-          accentSoft: 'rgba(148, 163, 184, 0.18)',
-          accentWarm: '#cbd5e1',
-          textPrimary: '#f8fafc',
-          textSecondary: '#94a3b8',
-          track: 'rgba(255, 255, 255, 0.08)',
-          isLight: false,
-        });
+        applyThemeVariables(
+          {
+            bg: 'rgba(18, 18, 24, 0.94)',
+            card: 'rgba(255, 255, 255, 0.05)',
+            border: 'rgba(255, 255, 255, 0.10)',
+            accent: '#94a3b8',
+            accentSoft: 'rgba(148, 163, 184, 0.18)',
+            accentWarm: '#cbd5e1',
+            textPrimary: '#f8fafc',
+            textSecondary: '#94a3b8',
+            track: 'rgba(255, 255, 255, 0.08)',
+            isLight: false,
+          },
+          customAccent,
+          trueOled,
+        );
       }
       return;
     }
@@ -416,7 +464,7 @@ export function applyThemePalette(
       targetL = isLight ? 0.38 : 0.62;
     }
 
-    const accentRgb = hslToRgb(accentH, accentS, targetL);
+    const accentRgb = ensureAccentContrast(hslToRgb(accentH, accentS, targetL), isLight);
     const accentHex = rgbToHex(accentRgb);
 
     // Secondary warm complementary accent: for red, stay in warm amber/orange (24°)
@@ -429,18 +477,22 @@ export function applyThemePalette(
         Math.min(252, Math.max(242, Math.round(250 - (255 - avgG) * 0.08))),
         Math.min(252, Math.max(242, Math.round(250 - (255 - avgB) * 0.08))),
       ];
-      applyThemeVariables({
-        bg: `rgba(${bgRgb[0]}, ${bgRgb[1]}, ${bgRgb[2]}, 0.94)`,
-        card: 'rgba(255, 255, 255, 0.85)',
-        border: 'rgba(15, 23, 42, 0.12)',
-        accent: accentHex,
-        accentSoft: `rgba(${accentRgb[0]}, ${accentRgb[1]}, ${accentRgb[2]}, 0.14)`,
-        accentWarm: warmHex,
-        textPrimary: '#0f172a',
-        textSecondary: '#475569',
-        track: 'rgba(15, 23, 42, 0.08)',
-        isLight: true,
-      });
+      applyThemeVariables(
+        {
+          bg: `rgba(${bgRgb[0]}, ${bgRgb[1]}, ${bgRgb[2]}, 0.94)`,
+          card: 'rgba(255, 255, 255, 0.85)',
+          border: 'rgba(15, 23, 42, 0.12)',
+          accent: accentHex,
+          accentSoft: `rgba(${accentRgb[0]}, ${accentRgb[1]}, ${accentRgb[2]}, 0.14)`,
+          accentWarm: warmHex,
+          textPrimary: '#0f172a',
+          textSecondary: '#475569',
+          track: 'rgba(15, 23, 42, 0.08)',
+          isLight: true,
+        },
+        customAccent,
+        false,
+      );
     } else {
       // Dark glass with subtle chromatic undertone of the wallpaper
       const bgRgb: RGBTuple = [
@@ -448,21 +500,25 @@ export function applyThemePalette(
         Math.max(12, Math.min(32, Math.round(avgG * 0.12 + 10))),
         Math.max(14, Math.min(36, Math.round(avgB * 0.12 + 12))),
       ];
-      applyThemeVariables({
-        bg: `rgba(${bgRgb[0]}, ${bgRgb[1]}, ${bgRgb[2]}, 0.92)`,
-        card: `rgba(255, 255, 255, 0.05)`,
-        border: `rgba(${accentRgb[0]}, ${accentRgb[1]}, ${accentRgb[2]}, 0.32)`,
-        accent: accentHex,
-        accentSoft: `rgba(${accentRgb[0]}, ${accentRgb[1]}, ${accentRgb[2]}, 0.18)`,
-        accentWarm: warmHex,
-        textPrimary: '#f5efe6',
-        textSecondary: '#9eb09a',
-        track: `rgba(${accentRgb[0]}, ${accentRgb[1]}, ${accentRgb[2]}, 0.12)`,
-        isLight: false,
-      });
+      applyThemeVariables(
+        {
+          bg: `rgba(${bgRgb[0]}, ${bgRgb[1]}, ${bgRgb[2]}, 0.92)`,
+          card: `rgba(255, 255, 255, 0.05)`,
+          border: `rgba(${accentRgb[0]}, ${accentRgb[1]}, ${accentRgb[2]}, 0.32)`,
+          accent: accentHex,
+          accentSoft: `rgba(${accentRgb[0]}, ${accentRgb[1]}, ${accentRgb[2]}, 0.18)`,
+          accentWarm: warmHex,
+          textPrimary: '#f5efe6',
+          textSecondary: '#9eb09a',
+          track: `rgba(${accentRgb[0]}, ${accentRgb[1]}, ${accentRgb[2]}, 0.12)`,
+          isLight: false,
+        },
+        customAccent,
+        trueOled,
+      );
     }
   } catch {
-    applyThemeModeFallback('canopy');
+    applyThemeModeFallback('canopy', undefined, undefined, customAccent, trueOled);
   }
 }
 

@@ -54,6 +54,8 @@ public partial class MainWindow : Window
     private Win32.RECT _expandedMonitor;
     private Win32.RECT _lastProbedMonitor;
     private bool _webViewReady;
+    // Completed on the first successful WebView navigation; lets startup commands wait for the bundle.
+    private readonly TaskCompletionSource _uiReadyTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly bool _startExpanded;
     private volatile bool _isSuspending;
     private CancellationTokenSource? _suspendCts;
@@ -494,9 +496,11 @@ public partial class MainWindow : Window
                 });
             };
 
-            core.NavigationCompleted += (_, _) =>
+            core.NavigationCompleted += (_, navArgs) =>
             {
                 ApplyAdaptiveZoom(GetPanelMonitor());
+                if (navArgs.IsSuccess)
+                    _uiReadyTcs.TrySetResult();
             };
 
             string indexHtmlPath = Path.Combine(distDir, "index.html");
@@ -524,6 +528,24 @@ public partial class MainWindow : Window
                 "Canopy - UI Engine Initialization Error",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
+        }
+    }
+
+    /// <summary>
+    /// Waits until the React bundle has loaded (or <paramref name="timeout"/> elapses) so events
+    /// posted by startup commands reach mounted listeners instead of being dropped.
+    /// </summary>
+    public async Task WaitForUiReadyAsync(TimeSpan timeout)
+    {
+        Task completed = await Task.WhenAny(_uiReadyTcs.Task, Task.Delay(timeout));
+        if (completed == _uiReadyTcs.Task)
+        {
+            // Navigation completes before React effects subscribe to host events.
+            await Task.Delay(300);
+        }
+        else
+        {
+            _log.Write("WaitForUiReadyAsync: UI did not finish loading before the timeout");
         }
     }
 
@@ -3925,7 +3947,7 @@ public partial class MainWindow : Window
                 return true;
             }
 
-            var wallpapers = _wallpaperService.GetWallpaperFiles();
+            var wallpapers = await _wallpaperService.GetWallpaperFilesAsync();
             if (wallpapers.Count == 0)
                 return false;
 

@@ -8,127 +8,136 @@ This document explains every way you can package, distribute, and install Canopy
 
 | Format | Target File | Best For | Prerequisites |
 |---|---|---|---|
-| **One-Line PowerShell Install** | `install.ps1` | GitHub README, fast terminal setup | None (runs in Windows PowerShell) |
-| **Windows MSI Installer** | `dist-installer/Canopy-v1.0.0-x64.msi` | Standard users, enterprise, GPO | Built with WiX v4 (included script) |
-| **Portable Release ZIP** | `dist-installer/Canopy-v1.0.0-win-x64-portable.zip` | Power users, no-install, thumb drives | None (fully self-contained) |
+| **Setup Wizard** | `dist-installer/Canopy-v<version>-Setup.exe` | Most users (README recommendation) | Built with Inno Setup 6 |
+| **Windows MSI Installer** | `dist-installer/Canopy-v<version>-x64.msi` | Silent/managed deployment, winget | Built with WiX v4 |
+| **Portable Release ZIP** | `dist-installer/Canopy-v<version>-win-x64-portable.zip` | Power users, no-install, thumb drives | None (fully self-contained) |
+| **One-Line PowerShell Install** | `install.ps1` | Fast terminal setup | None (Windows PowerShell 5.1+) |
 | **Windows Package Manager** | `winget install CanopyShell.Canopy` | Terminal users (`winget`) | PR to `microsoft/winget-pkgs` |
+
+All installers are per-user (`%LOCALAPPDATA%\Programs\Canopy`) and need no administrator rights.
+Every build is self-contained (.NET 8 runtime bundled); only the Microsoft Edge WebView2 Runtime is
+required, and the Setup wizard and `install.ps1` install it when missing.
 
 ---
 
-## 2. One-Line Install Command (Recommended for GitHub README)
+## 2. Versioning
+
+`<Version>` in `Canopy.csproj` is the single source of truth. The build scripts default to it, the
+release workflow refuses to publish a tag that differs from it, and `verify.ps1` fails when
+`package.json` / `package-lock.json` disagree. To cut a release, bump all three together:
+
+1. `Canopy.csproj` -> `<Version>X.Y.Z</Version>`
+2. `package.json` -> `"version": "X.Y.Z"`
+3. `package-lock.json` -> top-level `"version"` and `packages[""].version` (or run `npm install --package-lock-only`)
+
+Then run `powershell -ExecutionPolicy Bypass -File .\verify.ps1`.
+
+---
+
+## 3. One-Line Install Command
 
 Users can install or update Canopy directly from PowerShell without manual downloading:
 
 ```powershell
-irm https://raw.githubusercontent.com/<YOUR-USERNAME>/canopy/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Fireball122/canopy/main/install.ps1 | iex
 ```
 
 ### What this command does:
-1. Automatically queries the GitHub Releases API for the latest version.
-2. Downloads the package and installs it to `%LOCALAPPDATA%\Programs\Canopy` (**Per-user: no administrator / UAC prompt required**).
-3. Adds shortcuts to the **Start Menu** and **Desktop**.
-4. Automatically launches Canopy.
+1. Installs the Microsoft Edge WebView2 Runtime if it is missing (signature-checked Microsoft bootstrapper).
+2. Queries the GitHub Releases API for the latest version and downloads the portable ZIP.
+3. Verifies the download against the release's `checksums-sha256.txt` and refuses to install on mismatch.
+4. Installs to `%LOCALAPPDATA%\Programs\Canopy` (**per-user: no administrator / UAC prompt required**),
+   adds **Start Menu** and **Desktop** shortcuts, and launches Canopy.
 
 ### To uninstall cleanly:
 ```powershell
 # Recommended one-liner
-$env:CANOPY_UNINSTALL=1; irm https://raw.githubusercontent.com/<YOUR-USERNAME>/canopy/main/install.ps1 | iex
+$env:CANOPY_UNINSTALL=1; irm https://raw.githubusercontent.com/Fireball122/canopy/main/install.ps1 | iex
 
 # Or via scriptblock invocation
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/<YOUR-USERNAME>/canopy/main/install.ps1))) -Uninstall
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Fireball122/canopy/main/install.ps1))) -Uninstall
 ```
 
 ---
 
-## 3. Building Installers Locally
+## 4. Building Installers Locally
 
-All build scripts are included in the repository.
+All build scripts are included in the repository. Omit `-Version` to use the version from `Canopy.csproj`.
 
-### Option A: Build Native MSI Installer (`.msi`)
+### Option A: Setup Wizard (`.exe`)
 ```powershell
-.\installer\build-msi.ps1 -Version "1.0.0"
+.\installer\build-setup-exe.ps1
 ```
-* **Output:** `dist-installer\Canopy-v1.0.0-x64.msi` (~8 MB)
-* Built using **WiX Toolset v4**.
-* Double-clicking installs per-user, registers in Windows Settings $\to$ Installed Apps, and creates start menu shortcuts.
+* **Output:** `dist-installer\Canopy-v<version>-Setup.exe`
+* Requires **Inno Setup 6** (`winget install JRSoftware.InnoSetup`).
+* Offers desktop shortcut and start-with-Windows options, installs WebView2 when missing, closes a
+  running Canopy before upgrading, and on uninstall optionally removes `%LOCALAPPDATA%\Canopy` data.
 
-### Option B: Build Portable Self-Contained ZIP (`.zip`)
+### Option B: Native MSI Installer (`.msi`)
 ```powershell
-.\build-portable.ps1 -Version "1.0.0"
+.\installer\build-msi.ps1
 ```
-* **Output:** `dist-installer\Canopy-v1.0.0-win-x64-portable.zip`
-* Bundles `Canopy.exe` and `dist/` with .NET 8 self-contained runtime.
-* Unzip and run anywhere — zero runtime dependencies.
+* **Output:** `dist-installer\Canopy-v<version>-x64.msi`
+* Requires **WiX Toolset v4** (`dotnet tool install --global wix --version 4.0.5`).
+* Per-user install registered in Settings -> Installed Apps, with Start Menu and Desktop shortcuts.
+  The stable `UpgradeCode` plus `MajorUpgrade` replaces older versions in place.
+* Prints the MSI SHA256 at the end (needed for winget).
 
-### Primary Installer Standardization
-Canopy standardizes on the native **WiX v4 Windows Installer (`.msi`)** as its primary installer rather than legacy wizard `.exe` generators. This guarantees clean integration into Windows 11 `Settings -> Apps -> Installed Apps`, atomic rollbacks, zero UAC elevation prompts (per-user scope), and eliminates orphaned Windows Registry uninstaller entries.
+### Option C: Portable Self-Contained ZIP (`.zip`)
+```powershell
+.\build-portable.ps1
+```
+* **Output:** `dist-installer\Canopy-v<version>-win-x64-portable.zip`
+* Single-file `Canopy.exe` (.NET 8 runtime bundled) plus the `dist/` UI bundle and `Start Canopy.bat`.
+* Unzip and run anywhere — zero runtime dependencies besides WebView2.
+
 ---
 
-## 4. Automated GitHub Releases (Zero Effort CI/CD)
+## 5. Automated GitHub Releases
 
-The repository includes `.github/workflows/release.yml`.
-
-Whenever you are ready to publish a new release to GitHub:
+The repository includes `.github/workflows/release.yml`. After bumping the version (section 2):
 
 1. Commit your changes and tag the commit:
    ```bash
-   git tag v1.0.0
-   git push origin v1.0.0
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
    ```
 2. GitHub Actions will automatically:
-   - Check out the code on a clean Windows runner.
-   - Compile the React frontend with Vite & TypeScript (`npm ci && npm run build`).
-   - Compile the .NET 8 WPF application for `win-x64`.
-   - Build the native `.msi` installer via WiX.
-   - Package the `.zip` portable bundle.
-   - Calculate SHA256 checksums (`checksums-sha256.txt`).
-   - Create a GitHub Release and attach the MSI, ZIP, and checksums.
+   - Fail fast if the tag does not match `<Version>` in `Canopy.csproj`.
+   - Install dependencies (`npm ci`) and run Biome.
+   - Build the `.msi` (WiX; this step type-checks and bundles the React frontend), the portable
+     `.zip`, and the `Setup.exe` (Inno Setup); each publishes the self-contained .NET 8 host for `win-x64`.
+   - Calculate SHA256 checksums (`checksums-sha256.txt`, consumed by `install.ps1`).
+   - Create the GitHub Release `vX.Y.Z` and attach the Setup EXE, MSI, ZIP, and checksums.
+
+A manual run (Actions -> Release Canopy -> Run workflow) uses the csproj version and creates the tag.
+
+Pull requests and pushes to `main` run `.github/workflows/validate.yml`, which executes `verify.ps1`
+under Windows PowerShell 5.1.
 
 ---
 
-## 5. Publishing to Windows Package Manager (`winget`)
+## 6. Publishing to Windows Package Manager (`winget`)
 
-Once your GitHub Release has `Canopy-v1.0.0-x64.msi` uploaded:
+The manifests live in `winget/` (multi-file format: version, installer, and en-US locale).
+`Canopy.wxs` generates a new MSI `ProductCode` on every build, so both the hash and the product code
+must be refreshed from the **published** MSI for each release.
 
-1. Calculate the SHA256 hash of the MSI installer:
+Easiest: let `wingetcreate` compute both and open the PR:
+```powershell
+winget install Microsoft.WingetCreate
+wingetcreate update CanopyShell.Canopy --version X.Y.Z `
+  --urls https://github.com/Fireball122/canopy/releases/download/vX.Y.Z/Canopy-vX.Y.Z-x64.msi --submit
+```
+
+Manual alternative:
+1. Get the SHA256 from `checksums-sha256.txt` (or `Get-FileHash dist-installer\Canopy-vX.Y.Z-x64.msi`).
+2. Read the `ProductCode` of that MSI (e.g. Orca, or `wingetcreate` output).
+3. Update `PackageVersion` in all three files and `InstallerUrl`, `InstallerSha256`, and `ProductCode`
+   in `winget/CanopyShell.Canopy.installer.yaml`.
+4. Validate and submit:
    ```powershell
-   (Get-FileHash dist-installer\Canopy-v1.0.0-x64.msi -Algorithm SHA256).Hash.ToLower()
-   ```
-2. Replace `InstallerSha256` and `InstallerUrl` in `winget/canopy.yaml`.
-3. Submit via Microsoft's `wingetcreate` tool:
-   ```powershell
-   winget install wingetcreate
-   wingetcreate submit winget/canopy.yaml
+   winget validate --manifest winget
+   wingetcreate submit winget
    ```
    Or open a pull request directly on [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs).
-
----
-
-## 6. How to Distribute on GitHub (Step-by-Step for You)
-
-1. **Create your repository on GitHub:**
-   - Go to `https://github.com/new`, name it `canopy`, and set it to Public.
-2. **Push the codebase:**
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial release of Canopy"
-   git remote add origin https://github.com/<YOUR-USERNAME>/canopy.git
-   git branch -M main
-   git push -u origin main
-   ```
-3. **Trigger your first Release:**
-   ```bash
-   git tag v1.0.0
-   git push origin v1.0.0
-   ```
-4. **Update the README:**
-   - Add the one-line install command pointing to your repository:
-     ```markdown
-     ## Quick Install (Windows 10 / 11)
-     Open PowerShell and run:
-     ```powershell
-     irm https://raw.githubusercontent.com/<YOUR-USERNAME>/canopy/main/install.ps1 | iex
-     ```
-     Or grab `Canopy-v1.0.0-x64.msi` from [Releases](https://github.com/<YOUR-USERNAME>/canopy/releases).
-     ```

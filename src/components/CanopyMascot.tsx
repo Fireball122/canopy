@@ -1,6 +1,7 @@
 import type React from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { useSettings } from '../context/SettingsContext';
+import { usePanelOpen } from '../hooks/usePanelOpen';
 
 export interface CanopyMascotProps {
   isPlaying: boolean;
@@ -48,6 +49,9 @@ export const CanopyMascot: React.FC<CanopyMascotProps> = ({
   const [isWiggling, setIsWiggling] = useState<boolean>(false);
   const wiggleTimerRef = useRef<number | null>(null);
   const lastSampledGifRef = useRef<string>('');
+  const panelOpen = usePanelOpen();
+  // Only animate while visible: a collapsed panel re-rendered this 7x/s for nothing.
+  const dancing = isPlaying && panelOpen;
 
   const activeGifUrl = (customGifUrl ?? settings.customMascotGifUrl ?? '').trim();
   const useCustomGif = activeGifUrl.length > 0 && !customGifError;
@@ -91,11 +95,16 @@ export const CanopyMascot: React.FC<CanopyMascotProps> = ({
       setCustomGifError(true);
     };
     img.src = activeGifUrl;
+    // A superseded URL's late onload must not overwrite the frozen frame of the current one.
+    return () => {
+      img.onload = null;
+      img.onerror = null;
+    };
   }, [activeGifUrl, frozenGifDataUrl]);
 
   // Crisp 6-Beat Dance Animation loop strictly when music is playing (140ms tempo)
   useEffect(() => {
-    if (!isPlaying) {
+    if (!dancing) {
       setFrameIndex(0); // Reset to Frame 1 (Preparation / Idle)
       return;
     }
@@ -105,7 +114,7 @@ export const CanopyMascot: React.FC<CanopyMascotProps> = ({
     }, 140);
 
     return () => window.clearInterval(timer);
-  }, [isPlaying]);
+  }, [dancing]);
 
   const triggerWiggle = () => {
     if (wiggleTimerRef.current !== null) {

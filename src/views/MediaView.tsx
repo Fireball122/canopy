@@ -411,7 +411,11 @@ export const MediaView: React.FC<MediaViewProps> = ({
       try {
         const bands = await getAudioSpectrum();
         if (active && Array.isArray(bands) && bands.length > 0) {
-          setSpectrumBands(bands);
+          // Silence (every band under the 0.005 draw threshold) repeats every 40 ms: keep the old
+          // array so this whole view does not re-render.
+          setSpectrumBands((prev) =>
+            prev.every((b) => b <= 0.005) && bands.every((b) => b <= 0.005) ? prev : bands,
+          );
         }
       } catch {
         // Ignore transient spectrum read errors
@@ -427,14 +431,16 @@ export const MediaView: React.FC<MediaViewProps> = ({
     };
   }, [panelOpen]);
 
-  // Harmonic wave ticker for the synthetic fallback shapes: ticks while the panel is visible
+  // Harmonic wave ticker for the synthetic 'wave' visualizer: only ticks while that wave is on
+  // screen, otherwise it would re-render this entire view ~22 times per second for nothing.
+  const waveVisible = settings.visualizerStyle === 'wave' && !showLyrics && !showMixer;
   useEffect(() => {
-    if (!panelOpen) return;
+    if (!panelOpen || !waveVisible) return;
     const timer = window.setInterval(() => {
       setVisualizerTick((prev) => (prev + 1) % 360);
     }, 45);
     return () => window.clearInterval(timer);
-  }, [panelOpen]);
+  }, [panelOpen, waveVisible]);
 
   // Per-app mixer: poll host sessions only while the mixer panel is visible and the panel is
   // open. Skips a tick while the previous request is still in flight (no queueing).
@@ -612,12 +618,18 @@ export const MediaView: React.FC<MediaViewProps> = ({
     playbackClock.seek(clamped);
     onSeek?.(clamped);
   };
+  // Read inside the lyrics fetch without re-running it (and aborting it) whenever the length
+  // settles or LRCLIB infers one.
+  const effectiveDurationRef = useRef<number>(effectiveDuration);
+  effectiveDurationRef.current = effectiveDuration;
+
   // Automatically populate built-in time-synced lyrics and fetch live lyrics from LRCLIB
   useEffect(() => {
     const rawTitle = media.title?.trim() || '';
     const rawArtist = media.artist?.trim() || '';
 
     if (!rawTitle || rawTitle === 'No Media Playing') {
+      setInferredDuration(0);
       setLyricsLines([]);
       setLyricsSourceLabel('No Lyrics');
       return;
@@ -625,6 +637,8 @@ export const MediaView: React.FC<MediaViewProps> = ({
 
     const cacheKey = `${rawTitle.toLowerCase()}__${rawArtist.toLowerCase()}`;
     const cached = lyricsCacheRef.current[cacheKey];
+    // A new track must not inherit the previous track's LRCLIB-inferred length.
+    setInferredDuration(cached?.duration ?? 0);
     if (cached) {
       setLyricsLines(cached.lines);
       setLyricsSourceLabel(cached.label);
@@ -653,7 +667,11 @@ export const MediaView: React.FC<MediaViewProps> = ({
       item: LrclibTrackResponse | null | undefined,
     ): { lines: LyricLine[]; label: string; duration?: number } | null => {
       if (!item) return null;
-      const parsed = parseLrcLyrics(item.syncedLyrics, item.plainLyrics, effectiveDuration);
+      const parsed = parseLrcLyrics(
+        item.syncedLyrics,
+        item.plainLyrics,
+        effectiveDurationRef.current,
+      );
       if (parsed.length > 0) {
         const dur =
           typeof item.duration === 'number' && item.duration > 10
@@ -775,7 +793,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
     void fetchFromLrclib();
 
     return () => controller.abort();
-  }, [media.title, media.artist, effectiveDuration]);
+  }, [media.title, media.artist]);
 
   // Lyric highlight is a pure function of (clock position, user offset): a positive offset makes a
   // line light up later, compensating for whatever lag the source's timestamps carry.
@@ -838,7 +856,16 @@ export const MediaView: React.FC<MediaViewProps> = ({
 
           {/* Circular Rotating Album Thumbnail / Stylized Vinyl Disc at Center */}
           <div
+            role="button"
+            tabIndex={0}
+            aria-label={isPlaying ? 'Pause' : 'Play'}
             onClick={onPlayPause}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onPlayPause();
+              }
+            }}
             className={`relative w-[114px] h-[114px] rounded-full overflow-hidden flex items-center justify-center border-2 shadow-[0_8px_28px_rgba(0,0,0,0.45)] pointer-events-auto cursor-pointer ${
               isPlaying ? 'animate-vinyl-spin' : ''
             }`}
@@ -875,7 +902,11 @@ export const MediaView: React.FC<MediaViewProps> = ({
                       'linear-gradient(135deg, var(--theme-accent) 0%, var(--theme-accent-warm, var(--theme-accent)) 100%)',
                   }}
                 >
-                  <Disc className="w-5 h-5 text-[#11111b]" strokeWidth={2.2} />
+                  <Disc
+                    className="w-5 h-5"
+                    style={{ color: 'var(--theme-on-accent, #11111b)' }}
+                    strokeWidth={2.2}
+                  />
                 </div>
               </>
             )}
@@ -1063,7 +1094,10 @@ export const MediaView: React.FC<MediaViewProps> = ({
                 {repeatMode === 1 && (
                   <span
                     className="absolute text-[8px] font-bold font-mono -top-1 -right-1 px-1 rounded-full"
-                    style={{ background: 'var(--theme-accent)', color: '#11111b' }}
+                    style={{
+                      background: 'var(--theme-accent)',
+                      color: 'var(--theme-on-accent, #11111b)',
+                    }}
                   >
                     1
                   </span>
@@ -1082,6 +1116,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
 
               <input
                 type="range"
+                aria-label="Seek"
                 min={0}
                 max={effectiveDuration}
                 value={activePosition}
@@ -1092,8 +1127,19 @@ export const MediaView: React.FC<MediaViewProps> = ({
                   setSliderScrubSecs(null);
                   handleUserSeek(target);
                 }}
+                onPointerCancel={() => {
+                  setIsDraggingScrubber(false);
+                  setSliderScrubSecs(null);
+                }}
                 onChange={(e) => {
-                  setSliderScrubSecs(Number(e.target.value));
+                  const next = Number(e.target.value);
+                  if (isDraggingScrubber) {
+                    setSliderScrubSecs(next);
+                  } else {
+                    // Keyboard changes (arrows/Home/End) have no pointerup to commit them;
+                    // previously they froze the playhead at the preview value forever.
+                    handleUserSeek(next);
+                  }
                 }}
                 className="caelestia-slider flex-1 h-1.5 rounded-full pointer-events-auto cursor-pointer"
                 style={{
@@ -1173,7 +1219,11 @@ export const MediaView: React.FC<MediaViewProps> = ({
                   {currentSession?.app_name || 'System Audio'}
                 </span>
                 {sessionMenuOpen ? (
-                  <ChevronUp style={{ color: 'var(--theme-accent, #cba6f7)' }} strokeWidth={2} />
+                  <ChevronUp
+                    className="w-3.5 h-3.5"
+                    style={{ color: 'var(--theme-accent, #cba6f7)' }}
+                    strokeWidth={2}
+                  />
                 ) : (
                   <ChevronDown
                     className="w-3.5 h-3.5"
@@ -1188,7 +1238,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
                 <div
                   className="absolute bottom-full mb-2 w-[240px] rounded-2xl p-1.5 border shadow-2xl z-40 backdrop-blur-xl pointer-events-auto"
                   style={{
-                    background: 'var(--theme-surface, rgba(20, 20, 28, 0.96))',
+                    background: 'var(--theme-bg, rgba(20, 20, 28, 0.96))',
                     borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.12))',
                   }}
                 >
@@ -1261,13 +1311,13 @@ export const MediaView: React.FC<MediaViewProps> = ({
 
           {/* STAGE B: Scrollable Time-Synced Lyrics View */}
           <div
-            className={`w-full h-full rounded-xl border px-3 py-2 flex flex-col justify-between transition-all duration-300 ease-out bg-[#18171c]/95 backdrop-blur-xl z-20 ${
+            className={`w-full h-full rounded-xl border px-3 py-2 flex flex-col justify-between transition-all duration-300 ease-out backdrop-blur-xl z-20 ${
               showLyrics
                 ? 'opacity-100 translate-y-0 pointer-events-auto relative'
                 : 'opacity-0 translate-y-2 pointer-events-none hidden'
             }`}
             style={{
-              background: 'rgba(24, 23, 28, 0.95)',
+              background: 'var(--theme-bg, rgba(24, 23, 28, 0.95))',
               borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.12))',
             }}
           >
@@ -1366,9 +1416,9 @@ export const MediaView: React.FC<MediaViewProps> = ({
           {/* STAGE C: Per-app volume mixer overlay, polled only while visible */}
           {showMixer && (
             <div
-              className="absolute inset-0 z-30 rounded-xl border px-3 py-2.5 flex flex-col pointer-events-auto bg-[#18171c]/95 backdrop-blur-xl shadow-2xl"
+              className="absolute inset-0 z-30 rounded-xl border px-3 py-2.5 flex flex-col pointer-events-auto backdrop-blur-xl shadow-2xl"
               style={{
-                background: 'rgba(24, 23, 28, 0.95)',
+                background: 'var(--theme-bg, rgba(24, 23, 28, 0.95))',
                 borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.12))',
               }}
             >
@@ -1404,7 +1454,7 @@ export const MediaView: React.FC<MediaViewProps> = ({
                         <div
                           className="absolute right-0 top-full mt-1 w-52 p-1 rounded-lg border shadow-xl z-50 backdrop-blur-xl"
                           style={{
-                            background: 'var(--theme-card, #1e1e2e)',
+                            background: 'var(--theme-bg, #1e1e2e)',
                             borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.12))',
                           }}
                         >
@@ -1417,10 +1467,13 @@ export const MediaView: React.FC<MediaViewProps> = ({
                                 key={dev.id}
                                 type="button"
                                 onClick={async () => {
-                                  await setDefaultAudioDevice(dev.id);
                                   setDeviceDropdownOpen(false);
-                                  const refreshed = await listAudioDevices();
-                                  setAudioDevices(refreshed);
+                                  try {
+                                    await setDefaultAudioDevice(dev.id);
+                                    setAudioDevices(await listAudioDevices());
+                                  } catch {
+                                    // Host failure is surfaced by the bridge-error toast.
+                                  }
                                 }}
                                 className="w-full text-left px-2 py-1 rounded text-[11px] flex items-center justify-between hover:bg-[var(--theme-track)] transition-colors cursor-pointer pointer-events-auto"
                                 style={{
@@ -1470,7 +1523,9 @@ export const MediaView: React.FC<MediaViewProps> = ({
                             ? 'var(--theme-accent, #cba6f7)'
                             : 'transparent',
                           borderColor: 'var(--theme-border, rgba(255, 255, 255, 0.12))',
-                          color: session.muted ? '#11111b' : 'var(--theme-text-primary, #cdd6f4)',
+                          color: session.muted
+                            ? 'var(--theme-on-accent, #11111b)'
+                            : 'var(--theme-text-primary, #cdd6f4)',
                         }}
                         title={session.muted ? `Unmute ${session.name}` : `Mute ${session.name}`}
                       >

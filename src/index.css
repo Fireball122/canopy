@@ -73,9 +73,10 @@ input[type="range"].caelestia-slider {
   outline-offset: 2px;
 }
 
+/* Covers the overlays rendered outside the shell too (command palette, droplet toast). */
 @media (prefers-reduced-motion: reduce) {
-  .canopy-shell,
-  .canopy-shell * {
+  #root,
+  #root * {
     scroll-behavior: auto !important;
     transition: none !important;
     animation: none !important;
@@ -269,11 +270,11 @@ html[data-theme="light"] .text-white\/50 {
   color: var(--theme-text-secondary) !important;
 }
 
-/* Tertiary/disabled: light muted */
+/* Tertiary/disabled: slate-500 keeps 4.7:1 on white (the old 28% black was ~2:1) */
 html[data-theme="light"] .text-white\/40,
 html[data-theme="light"] .text-white\/30,
 html[data-theme="light"] .text-white\/20 {
-  color: rgba(0, 0, 0, 0.28) !important;
+  color: #64748b !important;
 }
 
 html[data-theme="light"] .text-zinc-100,
@@ -294,6 +295,40 @@ html[data-theme="light"] .hover\:text-white:hover {
 
 html[data-theme="light"] .hover\:text-white\/70:hover {
   color: var(--theme-text-secondary) !important;
+}
+
+/* Status colours: the -300/-400/-500 tints are tuned for dark glass and drop to 1.5–2.8:1 on
+   white cards (errors, "Disconnect", success checks). Use the -600/-700 shades in light mode. */
+html[data-theme="light"] .text-red-400,
+html[data-theme="light"] .hover\:text-red-300:hover,
+html[data-theme="light"] .hover\:text-red-400:hover {
+  color: #dc2626 !important;
+}
+
+html[data-theme="light"] .text-rose-400,
+html[data-theme="light"] .hover\:text-rose-400:hover {
+  color: #e11d48 !important;
+}
+
+html[data-theme="light"] .text-emerald-400,
+html[data-theme="light"] .text-emerald-500 {
+  color: #047857 !important;
+}
+
+html[data-theme="light"] .text-green-400 {
+  color: #15803d !important;
+}
+
+html[data-theme="light"] .text-amber-400 {
+  color: #b45309 !important;
+}
+
+html[data-theme="light"] .text-sky-400 {
+  color: #0369a1 !important;
+}
+
+html[data-theme="light"] .text-yellow-400 {
+  color: #a16207 !important;
 }
 
 /* ---------- Accent surfaces — keep white text on accent fills ---------- */
@@ -324,7 +359,7 @@ html[data-theme="light"] input[class*="bg-white"] {
 }
 
 html[data-theme="light"] input::placeholder {
-  color: rgba(0, 0, 0, 0.3) !important;
+  color: rgba(15, 23, 42, 0.45) !important;
 }
 
 /* ---------- Scrollbar ---------- */

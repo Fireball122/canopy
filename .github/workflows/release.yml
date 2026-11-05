@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag (e.g. 1.0.0)'
-        required: true
-        default: '1.0.0'
+        description: 'Version to release (e.g. 1.0.8). Leave empty to use <Version> from Canopy.csproj.'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -42,22 +42,33 @@ jobs:
         run: |
           dotnet tool install --global wix --version 4.0.5
           wix extension add -g WixToolset.Util.wixext/4.0.5
+
+      # Canopy.csproj <Version> is the source of truth: the in-app version, installer names and
+      # the release tag must agree, otherwise "v1.0.9" could ship binaries that report 1.0.8.
       - name: Determine Version
         id: get_version
         shell: pwsh
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
-          $ver = "${{ github.event.inputs.version }}"
-          if (-not $ver) {
+          [xml]$csproj = Get-Content -LiteralPath Canopy.csproj -Raw
+          $projectVersion = @($csproj.Project.PropertyGroup | ForEach-Object { $_.Version } | Where-Object { $_ })[0].Trim()
+          $ver = $env:INPUT_VERSION
+          if (-not $ver -and "${{ github.ref_type }}" -eq 'tag') {
             $ver = "${{ github.ref_name }}".TrimStart('v')
           }
-          if (-not $ver) { $ver = "1.0.0" }
+          if (-not $ver) { $ver = $projectVersion }
+          if ($ver -ne $projectVersion) {
+            Write-Error "Release version '$ver' does not match <Version>$projectVersion</Version> in Canopy.csproj. Bump the csproj (and package.json) before tagging."
+            exit 1
+          }
           Write-Output "VERSION=$ver" >> $env:GITHUB_OUTPUT
           Write-Host "Releasing version: $ver"
 
-      - name: Install Frontend Dependencies & Build
+      - name: Install Frontend Dependencies & Lint
         run: |
           npm ci
-          npm run build
+          npm run lint
 
       - name: Build MSI Installer
         shell: pwsh
@@ -68,6 +79,7 @@ jobs:
         shell: pwsh
         run: |
           ./build-portable.ps1 -Version "${{ steps.get_version.outputs.VERSION }}" -Configuration Release
+
       - name: Build Inno Setup Wizard EXE
         shell: pwsh
         run: |
@@ -78,7 +90,8 @@ jobs:
         shell: pwsh
         run: |
           cd dist-installer
-          $files = Get-ChildItem -File | Where-Object { $_.Name -like "Canopy-*" }
+          # Only the uploaded artifacts; WiX also drops a Canopy-*.wixpdb here.
+          $files = Get-ChildItem -File | Where-Object { $_.Name -like "Canopy-*" -and $_.Extension -in '.msi', '.exe', '.zip' }
           $lines = @()
           foreach ($f in $files) {
             $hash = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
@@ -90,6 +103,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          # Explicit tag so manual (workflow_dispatch) runs on a branch still publish under vX.Y.Z.
+          tag_name: v${{ steps.get_version.outputs.VERSION }}
           files: |
             dist-installer/Canopy-*.exe
             dist-installer/Canopy-*.msi

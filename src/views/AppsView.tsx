@@ -143,6 +143,8 @@ export const AppsView: React.FC<AppsViewProps> = ({
     try {
       const items = await getInstalledApps(force);
       setApps(items);
+    } catch {
+      // Host failure is surfaced by the bridge-error toast; keep the last good list.
     } finally {
       setLoading(false);
     }
@@ -156,6 +158,9 @@ export const AppsView: React.FC<AppsViewProps> = ({
         if (!cancelled) {
           setApps(items);
         }
+      })
+      .catch(() => {
+        // Host failure is surfaced by the bridge-error toast; the empty state stays visible.
       })
       .finally(() => {
         if (!cancelled) {
@@ -192,18 +197,12 @@ export const AppsView: React.FC<AppsViewProps> = ({
     const filtered = apps.filter((app) => {
       const combinedKey =
         `${app.id} ${app.name} ${app.path} ${app.category} ${app.description || ''}`.toLowerCase();
+      // Whole-word match on the name/executable: a substring test let "arc"/"zen" pull in apps
+      // such as "Search" or anything installed under an "...arc..." folder.
+      const exeName = app.path.split(/[\\/]/).pop() ?? '';
       const isBrowser =
         app.category.toLowerCase() === 'browser' ||
-        combinedKey.includes('brave') ||
-        combinedKey.includes('brave.exe') ||
-        combinedKey.includes('bravehtml') ||
-        combinedKey.includes('zen') ||
-        combinedKey.includes('arc') ||
-        combinedKey.includes('vivaldi') ||
-        combinedKey.includes('opera') ||
-        combinedKey.includes('chrome') ||
-        combinedKey.includes('firefox') ||
-        combinedKey.includes('msedge');
+        /\b(brave|arc|zen|vivaldi|opera|chrome|firefox|msedge)\b/i.test(`${app.name} ${exeName}`);
 
       const isFav = favoriteApps.includes(app.id);
       if (activeCategory.toLowerCase() === 'favorites') {
@@ -446,7 +445,15 @@ export const AppsView: React.FC<AppsViewProps> = ({
           WebkitMaskImage: 'linear-gradient(to bottom, black calc(100% - 24px), transparent 100%)',
         }}
       >
-        {filteredApps.length === 0 ? (
+        {filteredApps.length === 0 && loading ? (
+          <div
+            className="h-full flex items-center justify-center gap-2 text-xs font-mono"
+            style={{ color: 'var(--theme-text-secondary)' }}
+          >
+            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+            <span>Scanning installed Windows apps…</span>
+          </div>
+        ) : filteredApps.length === 0 ? (
           <div
             className="h-full bento-card p-6 flex flex-col items-center justify-center text-center gap-2"
             style={{
@@ -489,15 +496,24 @@ export const AppsView: React.FC<AppsViewProps> = ({
               const isLaunched = launchedId === app.id;
               const isFavorite = favoriteApps.includes(app.id);
               return (
-                <button
+                // A div (not a button) so the nested favourite button is valid, focusable markup.
+                <div
                   key={app.id}
-                  type="button"
+                  role="button"
+                  tabIndex={0}
                   onClick={() => {
                     if (isPickerMode && onPickApp) {
                       onPickApp(app);
                       return;
                     }
-                    handleLaunch(app);
+                    void handleLaunch(app);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      e.currentTarget.click();
+                    }
                   }}
                   className={`bento-card bento-card-interactive p-2.5 text-left flex flex-col justify-between gap-2 group transition-all hover:-translate-y-0.5 active:scale-[0.98] pointer-events-auto cursor-pointer ${
                     isPickerMode ? 'ring-1 ring-[var(--theme-accent)] shadow-md' : ''
@@ -626,7 +642,7 @@ export const AppsView: React.FC<AppsViewProps> = ({
                       {app.description || app.category || app.path}
                     </div>
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
